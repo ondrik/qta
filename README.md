@@ -3,7 +3,7 @@
 A lightweight top-down open-city crime sandbox that runs in the browser. You steal cars, take jobs from
 ringing payphones and shake off the cops. The twist is that some of the rules come from quantum mechanics.
 
-No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 190 KB).
+No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 210 KB).
 
 Play it at **https://ondrik.github.io/qta/**.
 
@@ -47,8 +47,12 @@ Spray shops ($500) clear your wanted level.
 - **Four districts**, each with a three-job **story arc**. The first payphone you answer in a district
   starts its arc, and after each job the same contact calls back from a booth nearby. Finishing an arc
   pays a $10,000 bonus.
-- **Landmarks**: the Copper River (six bridges), the Ring Expressway around the city (faster traffic),
-  Gridlock International Airport (planes take off on a schedule), and Quantum Stadium.
+- **Layout**: not a grid. The Copper River winds through the middle with roads along both banks.
+  Planck Boulevard cuts diagonally across town over a slanted bridge into Superposition Circus, a
+  six-way roundabout on Grand Avenue. Old Street and Church Lane wind through the Old Quarter. Streets jog
+  and end in T-junctions, and blocks come in all shapes. The Ring Expressway runs around the edge with
+  rounded corners (faster traffic). The HUD shows the street you're on.
+- **Landmarks**: Gridlock International Airport (planes take off on a schedule) and Quantum Stadium.
 - **Places**: Mercy General Hospital (helipad, ambulances), Police Headquarters (parked cruisers you can
   steal), Fire Station No. 7, St. Planck's Church and its churchyard, Schrödinger Elementary (basketball
   court), the Museum of Uncertain History, City Hall with its dome, Heisenberg Tower, the Superposition
@@ -56,7 +60,8 @@ Spray shops ($500) clear your wanted level.
 - **Architecture by district**: brick blocks and warehouses in Harbor Row, glass towers in Midtown,
   houses with pitched roofs and chimneys in the Old Quarter, neon signs in Neon Heights.
 - **Traffic and people**: crossings have traffic lights that drivers obey (cops on a chase don't).
-  Drivers head for destinations, stop for pedestrians and steer around wrecks. Buses stop at bus
+  Drivers follow lanes along curves and through the roundabout, route to destinations across the road
+  network, stop for pedestrians and steer around wrecks. Buses stop at bus
   stops to pick up passengers. Pedestrians walk to places, wait for the lights at crosswalks, go into
   buildings, and stop to chat.
 - **Vehicles**: hatchbacks, sedans, sports coupes, taxis, box trucks, motorbikes (you can get thrown off),
