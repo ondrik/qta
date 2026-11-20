@@ -3,7 +3,7 @@
 A lightweight top-down open-city crime sandbox that runs in the browser. You steal cars, take jobs from
 ringing payphones and shake off the cops. The twist is that some of the rules come from quantum mechanics.
 
-No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 140 KB).
+No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 190 KB).
 
 Play it at **https://ondrik.github.io/qta/**.
 
@@ -49,12 +49,23 @@ Spray shops ($500) clear your wanted level.
   pays a $10,000 bonus.
 - **Landmarks**: the Copper River (six bridges), the Ring Expressway around the city (faster traffic),
   Gridlock International Airport (planes take off on a schedule), and Quantum Stadium.
+- **Places**: Mercy General Hospital (helipad, ambulances), Police Headquarters (parked cruisers you can
+  steal), Fire Station No. 7, St. Planck's Church and its churchyard, Schrödinger Elementary (basketball
+  court), the Museum of Uncertain History, City Hall with its dome, Heisenberg Tower, the Superposition
+  Mall, Qubit Gas and Dirac Park. The HUD shows the name of the place you're in.
+- **Architecture by district**: brick blocks and warehouses in Harbor Row, glass towers in Midtown,
+  houses with pitched roofs and chimneys in the Old Quarter, neon signs in Neon Heights.
+- **Traffic and people**: crossings have traffic lights that drivers obey (cops on a chase don't).
+  Drivers head for destinations, stop for pedestrians and steer around wrecks. Buses stop at bus
+  stops to pick up passengers. Pedestrians walk to places, wait for the lights at crosswalks, go into
+  buildings, and stop to chat.
 - **Vehicles**: hatchbacks, sedans, sports coupes, taxis, box trucks, motorbikes (you can get thrown off),
   city buses, police cruisers, and at five stars a **tank** that you can also steal. Ambulances revive
   people who've been knocked down and heal you if you get in. Fire trucks put out fires, tow wrecks, and
   spray water when you drive one.
-- **Day and night**: a full day lasts 8 minutes. At night there are street lamps, headlight cones and
-  glowing police lights.
+- **Day and night**: a full day lasts 8 minutes. Shadows follow the sun, and evenings turn golden. At
+  night windows light up, and there are neon signs, street lamps, headlight cones and glowing police
+  lights.
 - **Jobs**: delivery, car theft, hits, checkpoint races, wrecking sprees, escorts, getaways that you only
   finish once the police have lost sight of you, plus the quantum jobs below.
 
