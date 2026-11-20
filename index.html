@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Gridlock: Quantum City</title>
+<meta name="description" content="A lightweight top-down open-city crime sandbox with quantum mechanics: superposed cars, tunnelling and uncertain cops.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #111; overflow: hidden;
+    touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
+  #touch { position: fixed; inset: 0; pointer-events: none; display: none; }
+  #touch.on { display: block; }
+  .tb { position: absolute; pointer-events: auto; width: 64px; height: 64px; border-radius: 50%;
+    background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.35); color: #fff;
+    font: bold 22px sans-serif; display: flex; align-items: center; justify-content: center; }
+  .tb.down { background: rgba(255,255,255,.35); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="touch">
+  <div class="tb" data-k="left"  style="left:16px;bottom:36px">◀</div>
+  <div class="tb" data-k="right" style="left:96px;bottom:36px">▶</div>
+  <div class="tb" data-p="KeyQ"  style="left:56px;bottom:116px;width:48px;height:48px;font-size:16px">Q</div>
+  <div class="tb" data-k="up"    style="right:96px;bottom:104px">▲</div>
+  <div class="tb" data-k="down"  style="right:96px;bottom:28px">▼</div>
+  <div class="tb" data-k="fire"  style="right:16px;bottom:66px">●</div>
+  <div class="tb" data-p="Enter" style="right:16px;bottom:146px;width:56px;height:56px">⇄</div>
+  <div class="tb" data-p="KeyX"  style="right:176px;bottom:28px;width:52px;height:52px;color:#c9b3ff">ψ</div>
+  <div class="tb" data-p="KeyT"  style="right:176px;bottom:96px;width:52px;height:52px;color:#4dd0e1">T</div>
+  <div class="tb" data-p="KeyR"  style="right:20px;top:150px;width:44px;height:44px;font-size:14px">♪</div>
+  <div class="tb" data-p="KeyP"  style="right:72px;top:150px;width:44px;height:44px;font-size:14px">II</div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
