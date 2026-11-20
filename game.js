@@ -1,4 +1,4 @@
-// Gridlock: Quantum City — a lightweight top-down open-city crime sandbox
+// Quant Theft Auto — a lightweight top-down open-city crime sandbox
 // with quantum-flavoured mechanics. Plain canvas + WebAudio, no dependencies.
 'use strict';
 (() => {
@@ -2338,12 +2338,12 @@ function drawTitle() {
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, 'rgba(8,8,12,.55)'); g.addColorStop(1, 'rgba(8,8,12,.88)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  const big = Math.min(96, W / 7);
+  const big = Math.min(88, W / 10);
   // a "superposed" title: faint offset copies
-  for (const [dx, col] of [[-4, 'rgba(179,136,255,.5)'], [4, 'rgba(77,208,225,.5)']]) txt('GRIDLOCK', W / 2 + dx * Math.sin(time * 2), H * 0.28, big, col, 'center', true);
-  txt('GRIDLOCK', W / 2, H * 0.28, big, '#ffd54a', 'center', true);
-  txt('QUANTUM CITY', W / 2, H * 0.28 + big * 0.8, big * 0.45, '#b388ff', 'center', true);
-  txt('a top-down crime sandbox where the cops can\'t pin you down', W / 2, H * 0.28 + big * 1.3, Math.min(16, W / 32), '#ddd', 'center');
+  for (const [dx, col] of [[-4, 'rgba(179,136,255,.5)'], [4, 'rgba(77,208,225,.5)']]) txt('QUANT THEFT', W / 2 + dx * Math.sin(time * 2), H * 0.28, big, col, 'center', true);
+  txt('QUANT THEFT', W / 2, H * 0.28, big, '#ffd54a', 'center', true);
+  txt('AUTO', W / 2, H * 0.28 + big * 0.9, big * 0.6, '#b388ff', 'center', true);
+  txt('a top-down crime sandbox where the cops can\'t pin you down', W / 2, H * 0.28 + big * 1.3, Math.min(16, W / 40), '#ddd', 'center');
   if (Math.sin(time * 4) > -0.3) txt(touchOn() ? 'TAP LEFT: PLAY · TAP RIGHT: PHYSICS LAB' : 'ENTER: PLAY  ·  L: PHYSICS LAB', W / 2, H * 0.6, Math.min(22, W / 24), '#fff', 'center', true);
   if (W > 560) HELP.slice(0, 6).forEach(([k, d], i) => txt(`${k}  —  ${d}`, W / 2, H * 0.68 + i * 21, 13, '#bbb', 'center'));
   if (best > 0) txt(`Best: ${fmt(best)}`, W / 2, H - 24, 14, '#ffd54a', 'center');

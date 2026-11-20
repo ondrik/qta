@@ -1,11 +1,11 @@
-# Gridlock: Quantum City
+# Quant Theft Auto
 
 A lightweight top-down open-city crime sandbox that runs in the browser. You steal cars, take jobs from
 ringing payphones and shake off the cops. The twist is that some of the rules come from quantum mechanics.
 
 No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 140 KB).
 
-Play it at **https://ondrik.github.io/gta/**.
+Play it at **https://ondrik.github.io/qta/**.
 
 ## Play locally
 
