@@ -3,7 +3,9 @@
 A lightweight top-down open-city crime sandbox that runs in the browser. You steal cars, take jobs from
 ringing payphones and shake off the cops. The twist is that some of the rules come from quantum mechanics.
 
-No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 100 KB).
+No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 140 KB).
+
+Play it at **https://ondrik.github.io/gta/**.
 
 ## Play locally
 
@@ -28,13 +30,33 @@ branch and `/ (root)`. The game will be at `https://<user>.github.io/<repo>/`.
 | Q / Tab | switch weapon |
 | **X** | **superposition**: split your car into 3 branches (press again to collapse) |
 | **T** | **quantum tunnelling** through the wall you're facing |
+| V | slow motion + amplitude arrows (phasors) while superposed |
+| Space in a tank / fire truck | fire the cannon / spray water |
 | R · M | radio station · minimap |
 | P / Esc · H | pause · help (press H again for the quantum notes) · N dismisses a note |
+| L (title screen) | **Physics Lab**: 7 guided lessons (L again from the pause screen to leave) |
 
-On phones and tablets, touch buttons appear automatically.
+On phones and tablets, touch buttons appear automatically. On the title screen, tap the left half to play
+and the right half for the Physics Lab.
 
 Goal: reach **$100,000**. Ringing payphones give jobs, and each finished job raises your cash multiplier.
 Spray shops ($500) clear your wanted level.
+
+## The city
+
+- **Four districts**, each with a three-job **story arc**. The first payphone you answer in a district
+  starts its arc, and after each job the same contact calls back from a booth nearby. Finishing an arc
+  pays a $10,000 bonus.
+- **Landmarks**: the Copper River (six bridges), the Ring Expressway around the city (faster traffic),
+  Gridlock International Airport (planes take off on a schedule), and Quantum Stadium.
+- **Vehicles**: hatchbacks, sedans, sports coupes, taxis, box trucks, motorbikes (you can get thrown off),
+  city buses, police cruisers, and at five stars a **tank** that you can also steal. Ambulances revive
+  people who've been knocked down and heal you if you get in. Fire trucks put out fires, tow wrecks, and
+  spray water when you drive one.
+- **Day and night**: a full day lasts 8 minutes. At night there are street lamps, headlight cones and
+  glowing police lights.
+- **Jobs**: delivery, car theft, hits, checkpoint races, wrecking sprees, escorts, getaways that you only
+  finish once the police have lost sight of you, plus the quantum jobs below.
 
 ## The quantum mechanics
 
@@ -48,6 +70,15 @@ physics and also says where the game takes liberties.
 | Tunnelling (T pickups, `T`) | You can go through a wall with probability `e^(−d/70px)`, so thin walls are easy and thick blocks are nearly impossible. | Tunnelling probability falls off exponentially with barrier width |
 | Entangled cars (job) | Wreck one cyan twin and its partner across town goes up too. | Entanglement (the note explains that the no-signalling theorem forbids this in reality) |
 | Schrödinger's briefcase (job) | The case is "cash" or "bomb" until you deliver it, and rough driving raises the bomb odds. | Schrödinger's cat thought experiment |
+| Quantum key run (job) | Carry 32 qubits while Eve tails you. If she gets close she measures them, and the **BB84 report** at the end shows every qubit's bases, the sifted key and the error rate. Over 11% errors means the key is thrown away. | BB84 quantum key distribution: an eavesdropper leaves about 25% errors; real-world QKD |
+
+### Physics Lab
+
+The Physics Lab (press `L` on the title screen) walks through the mechanics one at a time: superposition,
+measurement, uncertainty, tunnelling, entanglement, Schrödinger's briefcase and BB84. Each lesson has a
+goal and opens the matching Quantum Note. During superposition it shows each branch's amplitude as a
+rotating arrow (a phasor), with the probability equal to the arrow's length squared. You can't lose lives
+in the lab, so it works for teaching or a first look at the quantum ideas.
 
 Everything is original: the code, the procedural city, the art drawn on the canvas, and the synthesized
 sound and radio music.
