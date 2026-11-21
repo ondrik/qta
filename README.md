@@ -3,7 +3,7 @@
 A lightweight top-down open-city crime sandbox that runs in the browser. You steal cars, take jobs from
 ringing payphones and shake off the cops. The twist is that some of the rules come from quantum mechanics.
 
-No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 210 KB).
+No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 240 KB).
 
 Play it at **https://ondrik.github.io/qta/**.
 
@@ -83,6 +83,10 @@ Spray shops ($500) clear your wanted level.
   city buses, police cruisers, and at five stars a **tank** that you can also steal. Ambulances revive
   people who've been knocked down and heal you if you get in. Fire trucks put out fires, tow wrecks, and
   spray water when you drive one.
+- **Textures**: cracked and patched asphalt with tyre wear and oil stains, paving slabs, brick pavers, grass, water and
+  quay stones on the ground; brick, stone, concrete, render, weatherboard and corrugated-metal walls; clay-tile, slate,
+  gravel, bitumen and metal roofs; glass towers that reflect the sky as you move; leafy trees and glossy cars. All of
+  them are generated from seamless noise when the game loads, so there are no image files.
 - **Day and night**: a full day lasts 8 minutes. Shadows follow the sun, and evenings turn golden. At
   night windows light up, and there are neon signs, street lamps, headlight cones and glowing police
   lights.
@@ -111,5 +115,5 @@ goal and opens the matching Quantum Note. During superposition it shows each bra
 rotating arrow (a phasor), with the probability equal to the arrow's length squared. You can't lose lives
 in the lab, so it works for teaching or a first look at the quantum ideas.
 
-Everything is original: the code, the procedural city, the art drawn on the canvas, and the synthesized
-sound and radio music.
+Everything is original: the code, the procedural city, the procedurally generated textures, the art drawn on the
+canvas, and the synthesized sound and radio music.

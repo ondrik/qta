@@ -301,6 +301,7 @@ function pathPt(L, nx, s) {
 // ============================================================ world generation
 const free = new Uint8Array(MW * MH); // unclaimed lot tiles
 const dR = new Float32Array(MW * MH), eR = new Int16Array(MW * MH), XW = new Int16Array(MW * MH), XE = new Int16Array(MW * MH);
+const lotT = new Uint8Array(MW * MH); // car-park tiles: paved with asphalt rather than slabs
 const pedSpot = new Uint8Array(MW * MH);
 function genMap() {
   // sea and river
@@ -502,6 +503,7 @@ function genMap() {
     const [x, y] = at;
     fill(x, y, 8, 8, PLAZA);
     mkB(x, y, 8, 4, { kind: 'mall', win: 'ribbon', wall: '#3a3550', roof: '#4a4560', ht: 0.17, neon: '#ff3df0', sign: 'MALL', det: [[0.08, 0.2, 0.1, 0.18], [0.8, 0.25, 0.1, 0.18], [0.45, 0.65, 0.07, 0.12]], mmc: '#b04ac0' });
+    for (let j = y + 4; j < y + 8; j++) for (let i = x; i < x + 8; i++) lotT[j * MW + i] = 1;
     for (const ry of [5.05, 6.95]) {
       prop('stalls', x, y + ry, { n: 8, sp: 1 });
       for (let i = 0; i < 8; i++) parkSpots.push({ x: (x + i + 0.5) * T, y: (y + ry) * T, a: ry < 6 ? Math.PI / 2 : -Math.PI / 2 });
@@ -533,7 +535,7 @@ function genMap() {
     if (reg.length >= 18 && r < 0.17) { // a car park
       const inReg = new Set(reg.map(([x, y]) => y * MW + x));
       for (const [x, y] of reg) {
-        free[y * MW + x] = 0; map[y * MW + x] = PLAZA;
+        free[y * MW + x] = 0; map[y * MW + x] = PLAZA; lotT[y * MW + x] = 1;
         const up = !inReg.has((y - 1) * MW + x), down = !inReg.has((y + 1) * MW + x);
         if (up !== down) { const yy = up ? y + 0.62 : y + 0.38; parkSpots.push({ x: (x + 0.5) * T, y: yy * T, a: up ? Math.PI / 2 : -Math.PI / 2 }); prop('stalls', x, yy, { n: 1, sp: 1 }); }
       }
@@ -2552,38 +2554,231 @@ function updateAudio() {
 }
 
 // ============================================================ drawing
-// ---- ground textures: small tiles generated once and used as repeating patterns (anchored to world space)
-function mkPat(n, base, fn) {
-  const c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d');
-  g.fillStyle = base; g.fillRect(0, 0, n, n); fn(g, n); return ctx.createPattern(c, 'repeat');
-}
-const speck = (g, n, k, cols, s = 2) => { for (let i = 0; i < k; i++) { g.fillStyle = pick(cols); g.fillRect(Math.random() * n | 0, Math.random() * n | 0, 1 + (Math.random() * s | 0), 1 + (Math.random() * s | 0)); } };
-const PAT = {
-  [ROAD]: mkPat(64, '#3b3b40', (g, n) => speck(g, n, 520, ['rgba(255,255,255,.05)', 'rgba(0,0,0,.14)', 'rgba(255,255,255,.03)'])),
-  hw: mkPat(64, '#2f2f34', (g, n) => speck(g, n, 520, ['rgba(255,255,255,.05)', 'rgba(0,0,0,.16)'])),
-  br: mkPat(32, '#4a4a50', (g, n) => { speck(g, n, 120, ['rgba(255,255,255,.05)', 'rgba(0,0,0,.12)']); g.fillStyle = 'rgba(0,0,0,.12)'; g.fillRect(0, 0, n, 1); }),
-  [WALK]: mkPat(32, '#8f8b84', (g, n) => {
-    speck(g, n, 90, ['rgba(255,255,255,.06)', 'rgba(0,0,0,.07)']);
-    g.fillStyle = 'rgba(0,0,0,.14)'; g.fillRect(0, 0, n, 1); g.fillRect(0, 0, 1, n); g.fillRect(0, 16, n, 1); g.fillRect(16, 0, 1, n);
-    g.fillStyle = 'rgba(255,255,255,.07)'; g.fillRect(1, 1, n - 1, 1); g.fillRect(1, 17, n - 1, 1);
-  }),
-  [GRASS]: mkPat(64, '#3d7a38', (g, n) => {
-    for (let i = 0; i < 26; i++) { g.fillStyle = pick(['rgba(70,140,62,.5)', 'rgba(48,100,44,.5)']); g.beginPath(); g.arc(Math.random() * n, Math.random() * n, 3 + Math.random() * 7, 0, TAU); g.fill(); }
-    speck(g, n, 260, ['#468a40', '#356d31', '#4f9446', '#2f6a2b'], 1);
-  }),
-  [PLAZA]: mkPat(32, '#5d5a56', (g, n) => {
-    for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) {
-      const v = 82 + (Math.random() * 18 | 0);
-      g.fillStyle = `rgb(${v + 6},${v + 3},${v})`; g.fillRect(c * 8 - (r % 2) * 4 + 1, r * 8 + 1, 6, 6);
-    }
-  }),
-  [WATER]: mkPat(64, '#1c4e78', (g, n) => {
-    g.strokeStyle = 'rgba(70,140,200,.25)'; g.lineWidth = 1.5;
-    for (let i = 0; i < 9; i++) { const x = Math.random() * n, y = Math.random() * n; g.beginPath(); g.arc(x, y, 6 + Math.random() * 6, 3.6, 5.8); g.stroke(); }
-  }),
-  [BUILD]: '#26262a',
-  quay: mkPat(32, '#8d877c', (g, n) => { speck(g, n, 80, ['rgba(255,255,255,.06)', 'rgba(0,0,0,.1)']); g.fillStyle = 'rgba(0,0,0,.16)'; g.fillRect(0, 0, n, 1); g.fillRect(0, 16, n, 1); g.fillRect(0, 0, 1, 16); g.fillRect(16, 16, 1, 16); }),
+// ---- procedural textures: seamless noise rendered once into small canvases and used as repeating patterns.
+// Everything is generated from fixed seeds, so the city looks the same on every visit.
+const hash3 = (x, y, s) => {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(s | 0, 1442695041);
+  h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 };
+function prng(s) { return () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+// fractal value noise over a w x h tile that wraps seamlessly; cx, cy = lattice cells across the tile at the coarsest
+// octave. Each field is computed once as a whole array (much faster than per-pixel hashing) and looked up per texel.
+function noiseMap(w, h, cx, cy, oct, s) {
+  const out = new Float32Array(w * h);
+  let tot = 0;
+  for (let o = 0, a = 1; o < oct; o++, a *= 0.5) {
+    const px = cx << o, py = cy << o, L = new Float32Array(px * py);
+    for (let j = 0; j < py; j++) for (let i = 0; i < px; i++) L[j * px + i] = hash3(i, j, s + o * 7919);
+    for (let y = 0; y < h; y++) {
+      const fy = y * py / h, yi = fy | 0, v = fy - yi, sv = v * v * (3 - 2 * v), r0 = yi * px, r1 = ((yi + 1) % py) * px;
+      for (let x = 0; x < w; x++) {
+        const fx = x * px / w, xi = fx | 0, u = fx - xi, su = u * u * (3 - 2 * u), x1 = (xi + 1) % px;
+        const A = L[r0 + xi], B = L[r0 + x1], C = L[r1 + xi], D = L[r1 + x1];
+        out[y * w + x] += a * (A + (B - A) * su + (C - A) * sv + (A - B - C + D) * su * sv);
+      }
+    }
+    tot += a;
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= tot;
+  return out;
+}
+const NM = new Map(); // noise fields while the textures are built (every call site has its own seed)
+function fbm(x, y, w, h, cx, cy, oct, s) {
+  const k = s * 4096 + w;
+  let m = NM.get(k);
+  if (!m) { m = noiseMap(w, h, cx, cy, oct, s); NM.set(k, m); }
+  return m[y * w + x];
+}
+// a texture filled pixel by pixel (fn writes r, g, b, a into o), then optionally drawn on (post)
+function texCv(w, h, fn, post) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'), im = g.createImageData(w, h), d = im.data, o = [0, 0, 0, 255];
+  for (let y = 0, i = 0; y < h; y++) for (let x = 0; x < w; x++, i += 4) { o[3] = 255; fn(x, y, o); d[i] = o[0]; d[i + 1] = o[1]; d[i + 2] = o[2]; d[i + 3] = o[3]; }
+  g.putImageData(im, 0, 0);
+  if (post) post(g, w, h);
+  return c;
+}
+const patOf = c => ctx.createPattern(c, 'repeat');
+// strokes drawn at all nine wrap offsets keep a tile seamless
+function wrapDraw(g, w, h, fn) { for (const ox of [-w, 0, w]) for (const oy of [-h, 0, h]) { g.save(); g.translate(ox, oy); fn(g); g.restore(); } }
+// hairline cracks: jittery random walks, optionally wide and dark like tar-sealed joints
+function cracks(g, w, h, rnd, n, len, width, col) {
+  g.strokeStyle = col; g.lineWidth = width; g.lineJoin = 'round'; g.lineCap = 'round';
+  for (let i = 0; i < n; i++) {
+    let x = rnd() * w, y = rnd() * h, a = rnd() * TAU;
+    const pts = [[x, y]], L = len * (0.5 + rnd());
+    for (let s = 0; s < L; s += 3) { a += (rnd() - 0.5) * 0.9; x += Math.cos(a) * 3; y += Math.sin(a) * 3; pts.push([x, y]); }
+    wrapDraw(g, w, h, gg => { gg.beginPath(); gg.moveTo(pts[0][0], pts[0][1]); for (const p of pts) gg.lineTo(p[0], p[1]); gg.stroke(); });
+  }
+}
+// a signed overlay texel: s > 0 lightens, s < 0 darkens (A = strength); used for wall and roof detail over tinted colours
+const ovl = (o, s, A = 1) => { o[0] = o[1] = o[2] = s > 0 ? 255 : 0; o[3] = Math.min(255, Math.abs(s) * A * 255); };
+
+// ground: 1 texel per world pixel
+function asphaltTex(base, seed, wear) {
+  return texCv(256, 256, (x, y, o) => {
+    const lo = fbm(x, y, 256, 256, 4, 4, 4, seed), mid = fbm(x, y, 256, 256, 32, 32, 2, seed + 1), h = hash3(x, y, seed + 2);
+    let v = base + (lo - 0.5) * 22 * wear + (mid - 0.5) * 12 + (h - 0.5) * 12;
+    if (h > 0.986) v += 20 + 22 * hash3(y, x, seed + 3);       // pale aggregate showing through
+    else if (h < 0.02) v -= 13;                                 // pits
+    o[0] = v; o[1] = v; o[2] = v + 4;
+  }, (g, w, h) => {
+    const rnd = prng(seed);
+    cracks(g, w, h, rnd, Math.round(2 * wear), 70, 2.2, 'rgba(12,12,14,.3)');    // tar-sealed cracks
+    cracks(g, w, h, rnd, Math.round(4 * wear), 40, 0.8, 'rgba(10,10,12,.45)');   // open hairline cracks
+  });
+}
+const sidewalkTex = () => texCv(128, 128, (x, y, o) => {
+  const fx = x & 15, fy = y & 15, slab = (hash3(x >> 4, y >> 4, 40) - 0.5) * 16;
+  const st = fbm(x, y, 128, 128, 8, 8, 3, 41), h = hash3(x, y, 42);
+  let v = 144 + slab + (st - 0.5) * 18 + (h - 0.5) * 10;
+  if (fx === 0 || fy === 0) v -= 34; else if (fx === 1 || fy === 1) v += 9; else if (fx === 15 || fy === 15) v -= 7;
+  o[0] = v; o[1] = v - 4; o[2] = v - 11;
+}, (g, w, h) => {
+  const rnd = prng(43);
+  for (let i = 0; i < 26; i++) { g.fillStyle = `rgba(40,38,36,${0.15 + rnd() * 0.25})`; g.beginPath(); g.arc(rnd() * w, rnd() * h, 0.6 + rnd() * 1.1, 0, TAU); g.fill(); } // chewing gum
+  cracks(g, w, h, rnd, 3, 14, 0.7, 'rgba(30,28,26,.45)');
+});
+const grassTex = () => texCv(256, 256, (x, y, o) => {
+  const lo = fbm(x, y, 256, 256, 3, 3, 3, 50), mid = fbm(x, y, 256, 256, 16, 16, 3, 51), h = hash3(x, y, 52);
+  const dry = clamp((fbm(x, y, 256, 256, 5, 5, 2, 53) - 0.6) * 4, 0, 1);
+  const n = (lo - 0.5) * 30 + (mid - 0.5) * 30 + (h - 0.5) * 34;
+  o[0] = 58 + n * 0.8 + dry * 46; o[1] = 118 + n + dry * 14; o[2] = 50 + n * 0.45 + dry * 6;
+}, (g, w, h) => {
+  const rnd = prng(54);
+  g.lineWidth = 1; g.lineCap = 'round';
+  for (let i = 0; i < 2600; i++) { // blades of grass
+    const x = rnd() * w, y = rnd() * h, a = -Math.PI / 2 + (rnd() - 0.5) * 1.4, l = 2 + rnd() * 2.5;
+    g.strokeStyle = rnd() < 0.5 ? `rgba(120,180,90,${0.25 + rnd() * 0.3})` : `rgba(20,60,22,${0.25 + rnd() * 0.3})`;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+  }
+  for (let i = 0; i < 70; i++) { g.fillStyle = `rgba(92,70,44,${0.2 + rnd() * 0.3})`; g.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2); } // bare earth
+});
+// paving: 16x8 bricks laid in running bond
+const plazaTex = () => texCv(128, 128, (x, y, o) => {
+  const row = y >> 3, sh = (row & 1) * 8, col = ((x + sh) >> 4) & 7, fx = (x + sh) & 15, fy = y & 7;
+  const t = (hash3(col, row, 60) - 0.5) * 18, wv = fbm(x, y, 128, 128, 4, 4, 3, 61), h = hash3(x, y, 62);
+  let v = 116 + t + (wv - 0.5) * 18 + (h - 0.5) * 9;
+  if (fx === 0 || fy === 0) v -= 26; else if (fx === 1 || fy === 1) v += 7;
+  const warm = hash3(col, row, 63) < 0.25 ? 8 : 0;
+  o[0] = v + 6 + warm; o[1] = v + 2; o[2] = v - 3 - warm;
+});
+const waterTex = () => texCv(256, 256, (x, y, o) => {
+  const deep = fbm(x, y, 256, 256, 3, 3, 3, 70), rip = fbm(x, y, 256, 256, 8, 32, 3, 71);
+  const glint = Math.max(0, rip - 0.64) * 1.5;
+  o[0] = 20 + deep * 14 + glint * 50; o[1] = 60 + deep * 26 + glint * 64; o[2] = 96 + deep * 32 + glint * 60;
+});
+// stone: blocks of bw x bh with mortar lines, in running bond
+const stoneTex = (n, bw, bh, base, seed, joint = 32) => texCv(n, n, (x, y, o) => {
+  const row = Math.floor(y / bh), sh = (row & 1) * (bw >> 1), col = Math.floor((x + sh) / bw) % (n / bw), fx = (x + sh) % bw, fy = y % bh;
+  const t = (hash3(col, row, seed) - 0.5) * joint * 0.6, wv = fbm(x, y, n, n, 4, 4, 3, seed + 1), h = hash3(x, y, seed + 2);
+  let v = base + t + (wv - 0.5) * 16 + (h - 0.5) * 10;
+  if (fx === 0 || fy === 0) v -= joint; else if (fx === 1 || fy === 1) v += 6;
+  o[0] = v + 4; o[1] = v; o[2] = v - 7;
+});
+const deckTex = () => texCv(64, 64, (x, y, o) => {
+  const v = 76 + (fbm(x, y, 64, 64, 4, 4, 3, 80) - 0.5) * 16 + (hash3(x, y, 81) - 0.5) * 12 - (y === 0 ? 24 : y === 1 ? -8 : 0); // an expansion joint per tile
+  o[0] = v; o[1] = v; o[2] = v + 5;
+});
+// grime: broad dirt and sun-bleached patches laid over all the ground (one texel = 2 world px)
+const grimeTex = () => texCv(256, 256, (x, y, o) => {
+  const d = fbm(x, y, 256, 256, 5, 5, 4, 90), b = fbm(x, y, 256, 256, 3, 3, 3, 91);
+  const dark = clamp((d - 0.5) * 0.65, 0, 0.17), light = clamp((0.36 - b) * 0.4, 0, 0.06);
+  if (dark >= light) { o[0] = 24; o[1] = 20; o[2] = 14; o[3] = dark * 255; } else { o[0] = 255; o[1] = 250; o[2] = 236; o[3] = light * 255; }
+});
+const PAT = {
+  [ROAD]: patOf(asphaltTex(60, 10, 1)),
+  hw: patOf(asphaltTex(50, 20, 0.6)),
+  patch: patOf(asphaltTex(44, 30, 0.2)),
+  get lot() { return this[ROAD]; },
+  br: patOf(deckTex()),
+  [WALK]: patOf(sidewalkTex()),
+  [GRASS]: patOf(grassTex()),
+  [PLAZA]: patOf(plazaTex()),
+  [WATER]: patOf(waterTex()),
+  [BUILD]: '#26262a',
+  quay: patOf(stoneTex(64, 32, 16, 140, 100, 16)),
+  grime: patOf(grimeTex()),
+};
+PAT.grime.setTransform({ a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 });
+
+// walls and roofs: transparent detail drawn over the tinted base colour; 2 texels per world px
+const WTEX = {
+  brick: patOf(texCv(96, 96, (x, y, o) => {
+    const row = (y / 6) | 0, sh = (row & 1) * 8, col = ((x + sh) >> 4) % 6, fx = (x + sh) & 15, fy = y % 6;
+    if (fx === 0 || fy === 0) return ovl(o, 0.42);                           // pale mortar
+    const t = (hash3(col, row, 200) - 0.5) * 0.36, burnt = hash3(col, row, 201) < 0.1 ? -0.22 : 0;
+    ovl(o, t + burnt + (hash3(x, y, 202) - 0.5) * 0.12 + (fy === 5 ? -0.12 : 0));
+  })),
+  stone: patOf(texCv(96, 96, (x, y, o) => {
+    const row = (y / 12) | 0, sh = (row & 1) * 12, col = ((x + sh) / 24 | 0) % 4, fx = (x + sh) % 24, fy = y % 12;
+    if (fx === 0 || fy === 0) return ovl(o, -0.3);
+    if (fx === 1 || fy === 1) return ovl(o, 0.12);
+    const st = Math.max(0, fbm(x, y, 96, 96, 16, 2, 2, 205) - 0.55) * 0.9;     // rain streaks
+    ovl(o, (hash3(col, row, 203) - 0.5) * 0.2 + (hash3(x, y, 204) - 0.5) * 0.1 - st);
+  })),
+  panel: patOf(texCv(128, 128, (x, y, o) => {
+    if ((x & 31) === 0) return ovl(o, -0.3);                                  // panel joints
+    const st = Math.max(0, fbm(x, y, 128, 128, 24, 2, 3, 206) - 0.5) * 0.7, bl = (fbm(x, y, 128, 128, 4, 4, 3, 207) - 0.5) * 0.18;
+    ovl(o, bl - st + (hash3(x, y, 208) - 0.5) * 0.08);
+  })),
+  stucco: patOf(texCv(128, 128, (x, y, o) => {
+    ovl(o, (fbm(x, y, 128, 128, 6, 6, 4, 209) - 0.5) * 0.3 + (hash3(x, y, 210) - 0.5) * 0.14);
+  }, (g, w, h) => cracks(g, w, h, prng(211), 2, 20, 0.8, 'rgba(0,0,0,.35)'))),
+  siding: patOf(texCv(64, 64, (x, y, o) => {
+    const fy = y & 3;
+    ovl(o, fy === 3 ? -0.4 : fy === 0 ? 0.16 : (fbm(x, y, 64, 64, 2, 16, 2, 212) - 0.5) * 0.2);
+  })),
+  metal: patOf(texCv(96, 96, (x, y, o) => {
+    const rib = Math.sin(x / 6 * TAU), rust = Math.max(0, fbm(x, y, 96, 96, 12, 2, 3, 213) - 0.6) * 1.2;
+    if (rust > 0.05) { o[0] = 120; o[1] = 62; o[2] = 30; o[3] = Math.min(150, rust * 300); return; }
+    ovl(o, rib * 0.2 + (hash3(x, y, 214) - 0.5) * 0.06);
+  })),
+};
+const RTEX = {
+  gravel: patOf(texCv(128, 128, (x, y, o) => {
+    const h = hash3(x, y, 220), b = (fbm(x, y, 128, 128, 4, 4, 3, 221) - 0.5) * 0.3;
+    ovl(o, b + (h - 0.5) * 0.5 + (h > 0.97 ? 0.25 : 0));
+  })),
+  membrane: patOf(texCv(128, 128, (x, y, o) => {
+    if (y % 32 === 0) return ovl(o, -0.35);                                   // seams between the sheets
+    if (y % 32 === 1) return ovl(o, 0.16);
+    ovl(o, (fbm(x, y, 128, 128, 4, 4, 4, 222) - 0.5) * 0.36 + (hash3(x, y, 223) - 0.5) * 0.08);
+  }, (g, w, h) => { const rnd = prng(224); for (let i = 0; i < 4; i++) { g.fillStyle = `rgba(0,0,0,${0.1 + rnd() * 0.12})`; g.fillRect(rnd() * w, rnd() * h, 10 + rnd() * 20, 8 + rnd() * 14); } })),
+  corr: patOf(texCv(64, 64, (x, y, o) => { ovl(o, Math.sin(x / 8 * TAU) * 0.24 + (fbm(x, y, 64, 64, 2, 8, 2, 225) - 0.5) * 0.2); })),
+  // roof tiles: rows of barrel tiles (clay) or flat staggered slates; texel y grows toward the eave
+  clay: patOf(texCv(64, 64, (x, y, o) => {
+    const row = y >> 3, sh = (row & 1) * 4, fx = (x + sh) & 7, fy = y & 7;
+    const barrel = Math.cos((fx + 0.5) / 8 * TAU) * -0.22, edge = fy === 7 ? -0.5 : fy === 6 ? -0.2 : fy < 2 ? -0.12 : 0;
+    ovl(o, barrel + edge + (hash3(((x + sh) >> 3) & 7, row, 226) - 0.5) * 0.2);
+  })),
+  slate: patOf(texCv(64, 64, (x, y, o) => {
+    const row = y >> 3, sh = (row & 1) * 8, fx = (x + sh) & 15, fy = y & 7;
+    if (fy === 7) return ovl(o, -0.5);
+    if (fx === 0) return ovl(o, -0.32);
+    ovl(o, (hash3(((x + sh) >> 4) & 3, row, 227) - 0.5) * 0.24 + (hash3(x, y, 228) - 0.5) * 0.08);
+  })),
+};
+NM.clear();
+// a reusable matrix for pattern transforms (setTransform takes any {a..f} object)
+const PM = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+const setPM = (a, b, c, d, e, f) => { PM.a = a; PM.b = b; PM.c = c; PM.d = d; PM.e = e; PM.f = f; return PM; };
+// which wall material a building is made of
+function wallMat(b) {
+  if (b.mat !== undefined) return b.mat;
+  const r = (b.sd >>> 7) % 100, n = parseInt(b.wall.slice(1), 16), R = n >> 16, G = (n >> 8) & 255, B = n & 255;
+  let m;
+  if (b.style === 'glass') m = 'glass';
+  else if (b.style === 'canopy' || b.style === 'stadium') m = b.style === 'stadium' ? 'panel' : null;
+  else if (b.style === 'ware') m = r < 60 ? 'metal' : 'panel';
+  else if (b.style === 'house') m = r < 50 ? 'stucco' : r < 78 ? 'brick' : 'siding';
+  else if (b.kind === 'church' || b.kind === 'museum' || b.kind === 'hall') m = 'stone';
+  else if (b.kind === 'fire' || b.kind === 'school') m = 'brick';
+  else if (R > G + 25 && R > B + 30) m = 'brick';
+  else if (R > 150 && R > B + 15 && b.kind !== 'shop') m = 'stone';
+  else m = 'panel';
+  return (b.mat = m);
+}
 const inRiver = (tx, ty) => tx >= 1 && tx <= MW - 2 && ty >= 1 && ty <= MH - 2 && Math.abs(ty + 0.5 - riverY(tx + 0.5)) < RIVER_HW + 0.5;
 const RIVER_PX = RIVER.map(([x, y]) => [x * T, y * T]);
 // the static ground is rendered once into cached chunks; only the water animates per frame
@@ -2597,7 +2792,10 @@ function groundChunk(cx, cy) {
   const g = c.getContext('2d'), main = ctx;
   g.setTransform(chunkS, 0, 0, chunkS, -cx * CHK * chunkS, -cy * CHK * chunkS);
   ctx = g;
-  try { drawGroundStatic({ x0: cx * CHK - T, y0: cy * CHK - T, x1: (cx + 1) * CHK + T - 1, y1: (cy + 1) * CHK + T - 1 }); } finally { ctx = main; } // 1-tile margin so kerb details cross chunk seams
+  try {
+    drawGroundStatic({ x0: cx * CHK - T, y0: cy * CHK - T, x1: (cx + 1) * CHK + T - 1, y1: (cy + 1) * CHK + T - 1 }); // 1-tile margin so kerb details cross chunk seams
+    ctx.fillStyle = PAT.grime; ctx.fillRect(cx * CHK, cy * CHK, CHK, CHK); // dirt and bleaching, continuous across chunks
+  } finally { ctx = main; }
   chunkCache.set(key, c);
   if (chunkCache.size > 64) chunkCache.delete(chunkCache.keys().next().value);
   return c;
@@ -2639,7 +2837,7 @@ function drawGroundStatic(v) {
   const x0 = Math.max(0, Math.floor(v.x0 / T)), y0 = Math.max(0, Math.floor(v.y0 / T));
   const x1 = Math.min(MW - 1, Math.floor(v.x1 / T)), y1 = Math.min(MH - 1, Math.floor(v.y1 / T));
   // tiles under the roads show what the strokes do not cover: pavement, highway verge, or river under a bridge
-  const kind = (tx, ty) => { const k = ty * MW + tx, t = map[k]; return t === WATER ? (inRiver(tx, ty) ? 'quay' : WATER) : t !== ROAD ? t : bridge[k] ? 'quay' : hwT[k] ? GRASS : WALK; };
+  const kind = (tx, ty) => { const k = ty * MW + tx, t = map[k]; return t === WATER ? (inRiver(tx, ty) ? 'quay' : WATER) : t === PLAZA && lotT[k] ? 'lot' : t !== ROAD ? t : bridge[k] ? 'quay' : hwT[k] ? GRASS : WALK; };
   for (let ty = y0; ty <= y1; ty++) {
     let s = x0, k = kind(x0, ty);
     for (let tx = x0 + 1; tx <= x1 + 1; tx++) {
@@ -2649,6 +2847,7 @@ function drawGroundStatic(v) {
   }
   for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
     const k = ty * MW + tx, h = (tx * 73856093 ^ ty * 19349663) >>> 0;
+    if (lotT[k] && h % 3 === 0) { ctx.fillStyle = 'rgba(8,6,4,.18)'; ctx.beginPath(); ctx.ellipse(tx * T + 16, ty * T + 10 + h % 12, 5 + h % 4, 3.5, 0, 0, TAU); ctx.fill(); } // oil under parked cars
     if (map[k] === GRASS && h % 7 === 0) { ctx.fillStyle = ['#e8e070', '#f2f2f2', '#d77fb0'][h % 3]; ctx.fillRect(tx * T + h % 27, ty * T + (h >> 6) % 27, 2, 2); ctx.fillRect(tx * T + (h >> 3) % 27, ty * T + (h >> 9) % 27, 2, 2); }
   }
   const path = pts => { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); };
@@ -2672,6 +2871,20 @@ function drawGroundStatic(v) {
   for (const e of E) for (const r of e.water) { path(r); ctx.strokeStyle = PAT.br; ctx.lineWidth = 64; ctx.stroke(); }
   // highway edge lines
   for (const e of E) if (e.hw) { path(e.pts); ctx.strokeStyle = '#e8e8e8'; ctx.lineWidth = 58; ctx.stroke(); path(e.pts); ctx.strokeStyle = PAT.hw; ctx.lineWidth = 54; ctx.stroke(); }
+  // wear: a darker oily stripe down the middle of each lane and rubbed-in wheel tracks, plus drips where cars wait at lights
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const mid = new Path2D(), wheels = new Path2D(), drips = new Path2D();
+  for (const L of LANES) {
+    if (!L.bb) { let a = 1e9, b = 1e9, c = -1e9, d = -1e9; for (let i = 0; i < L.n; i++) { a = Math.min(a, L.x[i]); b = Math.min(b, L.y[i]); c = Math.max(c, L.x[i]); d = Math.max(d, L.y[i]); } L.bb = [a - 20, b - 20, c + 20, d + 20]; }
+    if (L.bb[0] > v.x1 || L.bb[2] < v.x0 || L.bb[1] > v.y1 || L.bb[3] < v.y0) continue;
+    for (const [P, o] of [[mid, 0], [wheels, -6.5], [wheels, 6.5]])
+      for (let i = 0; i < L.n; i++) { const x = L.x[i] - Math.sin(L.h[i]) * o, y = L.y[i] + Math.cos(L.h[i]) * o; i ? P.lineTo(x, y) : P.moveTo(x, y); }
+    if (L.light && L.n > 10) for (const back of [2, 8]) { const i = L.n - 1 - back; drips.moveTo(L.x[i] + 9 * Math.cos(L.h[i]), L.y[i] + 9 * Math.sin(L.h[i])); drips.ellipse(L.x[i], L.y[i], 9, 4.5, L.h[i], 0, TAU); }
+  }
+  ctx.strokeStyle = 'rgba(10,8,4,.08)'; ctx.lineWidth = 6; ctx.stroke(mid);
+  ctx.strokeStyle = 'rgba(0,0,0,.055)'; ctx.lineWidth = 3.5; ctx.stroke(wheels);
+  ctx.fillStyle = 'rgba(6,5,4,.13)'; ctx.fill(drips);
+  ctx.lineCap = 'butt';
   // centre lines, kept clear of junctions
   ctx.setLineDash([14, 12]); ctx.lineWidth = 2;
   for (const e of E) {
@@ -2704,6 +2917,11 @@ function drawGroundStatic(v) {
     if (map[k] !== ROAD || hwT[k] || bridge[k] || XW[k] || dR[k] > 20) continue;
     if (h % 47 === 0) { ctx.fillStyle = '#2a2a2e'; ctx.beginPath(); ctx.arc(tx * T + 16, ty * T + 16, 5, 0, TAU); ctx.fill(); ctx.fillStyle = '#46464c'; ctx.fillRect(tx * T + 13, ty * T + 15, 6, 1); ctx.fillRect(tx * T + 13, ty * T + 17, 6, 1); }
     else if (h % 53 === 0) { ctx.fillStyle = 'rgba(0,0,0,.16)'; ctx.beginPath(); ctx.ellipse(tx * T + 12 + h % 9, ty * T + 16, 7, 4, 0, 0, TAU); ctx.fill(); }
+    else if (h % 23 === 0 && dR[k] < 12) { // a repaired trench: fresher, darker asphalt with sealed edges
+      const pw = 12 + h % 17, ph = 8 + (h >> 5) % 11, px = tx * T + 16 - pw / 2, py = ty * T + 16 - ph / 2;
+      ctx.fillStyle = PAT.patch; ctx.fillRect(px, py, pw, ph);
+      ctx.strokeStyle = 'rgba(10,10,12,.4)'; ctx.lineWidth = 1; ctx.strokeRect(px, py, pw, ph);
+    }
   }
   const A = AIRPORT;
   if (A.x1 > v.x0 && A.x0 < v.x1 && A.y1 > v.y0 && A.y0 < v.y1) {
@@ -2906,6 +3124,14 @@ function drawBox(b, x0, y0, x1, y1, z0, z1, win, top) {
     ctx.beginPath(); ctx.moveTo(A0x, A0y); ctx.lineTo(B0x, B0y); ctx.lineTo(B1x, B1y); ctx.lineTo(A1x, A1y); ctx.closePath(); ctx.fill();
     // windows are quads in the wall's (u along, v up) coordinates
     const depth = Math.hypot(A1x - A0x, A1y - A0y), len = Math.hypot(bx - ax, by - ay);
+    // the wall's material, mapped with u along the wall and v up it (the chimney is the only box drawn without a top flag)
+    const mat = top === undefined ? 'brick' : wallMat(b), wt = WTEX[mat];
+    if (wt && depth > 2.5) {
+      const hz = (z1 - z0) * HC, ux = (B0x - A0x) / len, uy = (B0y - A0y) / len;
+      const vx = (A1x + B1x - A0x - B0x) / (2 * hz), vy = (A1y + B1y - A0y - B0y) / (2 * hz);
+      wt.setTransform(setPM(ux / 2, uy / 2, -vx / 2, -vy / 2, A0x, A0y));
+      ctx.fillStyle = wt; ctx.globalAlpha = TEXA; ctx.fill(); ctx.globalAlpha = 1;
+    }
     const P = (u, v) => { const ux0 = A0x + (B0x - A0x) * u, uy0 = A0y + (B0y - A0y) * u; return [ux0 + (A1x + (B1x - A1x) * u - ux0) * v, uy0 + (A1y + (B1y - A1y) * u - uy0) * v]; };
     const pd = new Path2D(), pl = new Path2D(), pe = new Path2D();
     const quad = (path, u0, u1, v0, v1) => { const a = P(u0, v0), b2 = P(u1, v0), c = P(u1, v1), d = P(u0, v1); path.moveTo(a[0], a[1]); path.lineTo(b2[0], b2[1]); path.lineTo(c[0], c[1]); path.lineTo(d[0], d[1]); path.closePath(); };
@@ -2950,8 +3176,17 @@ function drawBox(b, x0, y0, x1, y1, z0, z1, win, top) {
       ctx.fillStyle = b.kind === 'church' ? '#e8a25a' : LIT[b.sd & 3]; ctx.globalAlpha = Math.min(1, NIGHT * (b.kind === 'church' ? 0.8 : 1.4)); ctx.fill(pl); ctx.globalAlpha = 1;
     } else { ctx.fill(pl); }
     ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fill(pe);
+    // curtain walls reflect the sky: a bright band that slides across the glass as you move
+    if (mat === 'glass' && NIGHT < 0.95 && depth > 4) {
+      let ph = ((A0x + B0x) * 0.0007 + (A0y + B0y) * 0.0004 - cam.x * 0.0011 - cam.y * 0.0007 + i * 0.29) % 1; if (ph < 0) ph += 1;
+      const g0 = P(0, 0), g1 = P(1, 1), gr = ctx.createLinearGradient(g0[0], g0[1], g1[0], g1[1]), a = 0.24 * (1 - NIGHT);
+      gr.addColorStop(0, 'rgba(225,240,255,0)'); gr.addColorStop(clamp(ph - 0.14, 0, 1), 'rgba(225,240,255,0)');
+      gr.addColorStop(ph, `rgba(235,246,255,${a})`); gr.addColorStop(clamp(ph + 0.14, 0, 1), 'rgba(225,240,255,0)'); gr.addColorStop(1, 'rgba(225,240,255,0)');
+      ctx.fillStyle = gr; ctx.fill();
+    }
   }
 }
+let TEXA = 1; // how strongly wall and roof textures show (they fade into the dark at night)
 const proj = (x, y, z) => { const k = 1 + z; return [cam.x + (x - cam.x) * k, cam.y + (y - cam.y) * k]; };
 function polyFill(pts) { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); ctx.fill(); }
 // sloped roofs: gable (ridge plus two triangular end walls) or hip (four slopes; a square hip is a spire)
@@ -2988,13 +3223,17 @@ function drawCap(b, x0, y0, x1, y1, e) {
       if ((cam.x - wx) * nx + (cam.y - wy) * ny <= 0) continue; // back-facing end wall
     }
     ctx.fillStyle = tint(f.c, f.L); polyFill(f.q);
-    if (!f.wall && f.q.length === 4) { // a few tile courses parallel to the eave
-      ctx.strokeStyle = tint(f.c, f.L * 0.82); ctx.lineWidth = 1; ctx.beginPath();
-      for (const t of [0.33, 0.66]) {
-        const a = [lerp(f.q[0][0], f.q[3][0], t), lerp(f.q[0][1], f.q[3][1], t)], c = [lerp(f.q[1][0], f.q[2][0], t), lerp(f.q[1][1], f.q[2][1], t)];
-        ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]);
+    // tiles or slates on the slopes, the wall's material on gable ends: x along the eave, y down the slope
+    const tx = f.wall ? WTEX[wallMat(b)] : roofMat(b);
+    if (tx) {
+      const p = f.p, q = f.q, n = p.length, top = n === 4 ? [(p[2][0] + p[3][0]) / 2, (p[2][1] + p[3][1]) / 2, p[2][2]] : p[2];
+      const qt = n === 4 ? [(q[2][0] + q[3][0]) / 2, (q[2][1] + q[3][1]) / 2] : q[2];
+      const eLen = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]), sLen = Math.hypot(top[0] - (p[0][0] + p[1][0]) / 2, top[1] - (p[0][1] + p[1][1]) / 2, (top[2] - p[0][2]) * HC);
+      if (eLen > 1 && sLen > 1) {
+        const X = [(q[1][0] - q[0][0]) / eLen, (q[1][1] - q[0][1]) / eLen], Y = [(qt[0] - (q[0][0] + q[1][0]) / 2) / sLen, (qt[1] - (q[0][1] + q[1][1]) / 2) / sLen];
+        tx.setTransform(setPM(X[0] / 2, X[1] / 2, -Y[0] / 2, -Y[1] / 2, q[0][0], q[0][1]));
+        ctx.fillStyle = tx; ctx.globalAlpha = TEXA; ctx.fill(); ctx.globalAlpha = 1;
       }
-      ctx.stroke();
     }
   }
   if (b.cross) {
@@ -3002,6 +3241,11 @@ function drawCap(b, x0, y0, x1, y1, e) {
     ctx.strokeStyle = tint('#e0c060', 1.1); ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(t[0], t[1]); ctx.moveTo(m[0] - 4, m[1]); ctx.lineTo(m[0] + 4, m[1]); ctx.stroke();
   }
+}
+// red and brown roofs are clay tiles, grey ones slate
+function roofMat(b) {
+  if (b.rmat === undefined) { const n = parseInt(b.roof.slice(1), 16); b.rmat = (n >> 16) > (n & 255) + 30 ? RTEX.clay : RTEX.slate; }
+  return b.rmat;
 }
 function roofText(text, x, y, size, color) {
   ctx.font = `bold ${size}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -3018,12 +3262,15 @@ function flatRoof(b, x0, y0, x1, y1, z, top) {
     ctx.fillStyle = tint(b.roof, L * 1.15); ctx.fillRect(rx, ry, rw, rh);
     ctx.fillStyle = tint(b.roof, L); ctx.fillRect(rx + 3 * k, ry + 3 * k, rw - 6 * k, rh - 6 * k);
   }
+  if (b.kind !== 'stadium') { // roofing: corrugated sheet, gravel or bitumen membrane, fixed to the building as it sways with parallax
+    const ware = b.style === 'ware', rt = ware ? RTEX.corr : !b.kind && b.style === 'flat' && (b.sd & 3) === 0 ? RTEX.gravel : RTEX.membrane;
+    const ox = cam.x * (1 - k) + (b.sd % 61) * k, oy = cam.y * (1 - k) + (b.sd % 37) * k, i = b.style === 'glass' ? 2 * k : 3 * k;
+    rt.setTransform(ware && rw <= rh ? setPM(0, k / 2, k / 2, 0, ox, oy) : setPM(k / 2, 0, 0, k / 2, ox, oy));
+    ctx.fillStyle = rt; ctx.globalAlpha = TEXA * 0.9; ctx.fillRect(rx + i, ry + i, rw - 2 * i, rh - 2 * i); ctx.globalAlpha = 1;
+  }
   if (!top) return;
   const sx = -SUN.sx * 3, sy = -SUN.sy * 3;
   if (b.style === 'ware') {
-    ctx.fillStyle = tint(b.roof, L * 0.82);
-    if (rw > rh) for (let x = rx + 6 * k; x < rx + rw - 4; x += 7 * k) ctx.fillRect(x, ry + 3 * k, 1.5 * k, rh - 6 * k);
-    else for (let y = ry + 6 * k; y < ry + rh - 4; y += 7 * k) ctx.fillRect(rx + 3 * k, y, rw - 6 * k, 1.5 * k);
     ctx.fillStyle = tint('#a9c9da', L);
     for (let i = 1; i < 3; i++) rw > rh ? ctx.fillRect(rx + rw * i / 3 - 4 * k, ry + rh * 0.3, 8 * k, rh * 0.4) : ctx.fillRect(rx + rw * 0.3, ry + rh * i / 3 - 4 * k, rw * 0.4, 8 * k);
   }
@@ -3094,6 +3341,7 @@ function drawCanopy(b) {
 }
 function drawBuildings(v) {
   const cx = cam.x, cy = cam.y, list = [];
+  TEXA = 1 - 0.55 * NIGHT;
   for (const b of buildings) if (b.x < v.x1 + 260 && b.x + b.w > v.x0 - 260 && b.y < v.y1 + 260 && b.y + b.h > v.y0 - 260) list.push(b);
   list.sort((a, b) => d2(b.x + b.w / 2, b.y + b.h / 2, cx, cy) - d2(a.x + a.w / 2, a.y + a.h / 2, cx, cy));
   const glow = [];
@@ -3135,13 +3383,63 @@ function drawBuildings(v) {
     ctx.globalCompositeOperation = 'source-over';
   }
 }
+// ---- trees: leafy canopies drawn once into sprites, then relit when the sun moves or night falls
+const TREE_N = 8, TREE_R = 16, TREE_S = 2, TREE_PX = Math.ceil(TREE_R * 2.6 * TREE_S);
+const TREE_BASE = [], TREE_LIT = [];
+for (let v = 0; v < TREE_N; v++) {
+  const c = document.createElement('canvas'); c.width = c.height = TREE_PX;
+  const g = c.getContext('2d'), rnd = prng(500 + v * 17), R = TREE_R;
+  const pal = [['#21501d', '#357a2e', '#64a84a'], ['#245a20', '#3f8634', '#76b652'], ['#1f4c29', '#327240', '#5fa262'], ['#30551e', '#527c2c', '#89ad46']][v & 3];
+  g.translate(TREE_PX / 2, TREE_PX / 2); g.scale(TREE_S, TREE_S);
+  if (v >= 6) { // a conifer: stacked rings of needles
+    for (let l = 0; l < 5; l++) {
+      const r = R * (1 - l * 0.17), pts = 14, rot = rnd() * TAU;
+      g.fillStyle = l === 0 ? '#163a1c' : pal[l < 3 ? 1 : 2];
+      g.beginPath();
+      for (let k = 0; k <= pts * 2; k++) { const a = rot + k / (pts * 2) * TAU, rr = k & 1 ? r * 0.72 : r; k ? g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : g.moveTo(rr * Math.cos(a), rr * Math.sin(a)); }
+      g.fill();
+    }
+  } else { // a broadleaf: overlapping clumps of leaves, each shaded like a ball lit from above
+    const clumps = [[0, 0, R * 0.62]];
+    for (let i = 0; i < 9; i++) { const a = i / 9 * TAU + rnd() * 0.5, d = R * (0.45 + rnd() * 0.15); clumps.push([Math.cos(a) * d, Math.sin(a) * d, R * (0.36 + rnd() * 0.14)]); }
+    g.fillStyle = pal[0]; for (const [x, y, r] of clumps) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+    for (const [x, y, r] of clumps.slice(1).concat([clumps[0]])) {
+      const gr = g.createRadialGradient(x, y - r * 0.1, r * 0.05, x, y, r);
+      gr.addColorStop(0, pal[2]); gr.addColorStop(0.6, pal[1]); gr.addColorStop(1, 'rgba(30,70,30,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(x, y, r * 0.96, 0, TAU); g.fill();
+    }
+  }
+  g.globalCompositeOperation = 'source-atop'; // clusters of leaves, kept inside the canopy
+  for (let i = 0; i < 260; i++) { const a = rnd() * TAU, d = Math.sqrt(rnd()) * R; g.fillStyle = rnd() < 0.5 ? 'rgba(10,32,8,.22)' : 'rgba(190,230,140,.16)'; g.beginPath(); g.arc(Math.cos(a) * d, Math.sin(a) * d, 0.8 + rnd() * 1.1, 0, TAU); g.fill(); }
+  TREE_BASE.push(c);
+  const lc = document.createElement('canvas'); lc.width = lc.height = TREE_PX; TREE_LIT.push(lc);
+}
+let treeKey = '';
+function treeSprites() {
+  const nq = Math.round(NIGHT * 20), sl = Math.hypot(SUN.x, SUN.y);
+  const key = nq + '|' + (SUN.on ? Math.round(Math.atan2(SUN.y, SUN.x) * 8) + ',' + Math.round(sl * 6) : '-');
+  if (key === treeKey) return TREE_LIT;
+  treeKey = key;
+  const h = TREE_PX / 2, R = TREE_R * TREE_S, ux = sl > 0.01 ? SUN.x / sl : 0.5, uy = sl > 0.01 ? SUN.y / sl : 0.86, f = SUN.on ? 0.4 + Math.min(0.6, sl) : 0.4;
+  for (let i = 0; i < TREE_N; i++) {
+    const g = TREE_LIT[i].getContext('2d');
+    g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, TREE_PX, TREE_PX); g.drawImage(TREE_BASE[i], 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    const gr = g.createLinearGradient(h + ux * R, h + uy * R, h - ux * R, h - uy * R); // sunlit side to shaded side
+    gr.addColorStop(0, `rgba(255,245,200,${0.26 * f})`); gr.addColorStop(0.45, 'rgba(255,255,255,0)'); gr.addColorStop(1, `rgba(0,14,0,${0.45 * f})`);
+    g.fillStyle = gr; g.fillRect(0, 0, TREE_PX, TREE_PX);
+    if (nq) { g.fillStyle = `rgba(6,10,32,${nq / 20 * 0.78})`; g.fillRect(0, 0, TREE_PX, TREE_PX); } // the same night tint as tint()
+    g.globalCompositeOperation = 'source-over';
+  }
+  return TREE_LIT;
+}
 function drawTrees(v) {
+  const spr = treeSprites(), sz = TREE_PX / TREE_S / TREE_R;
   for (const t of trees) {
     if (t.x < v.x0 - 60 || t.x > v.x1 + 60 || t.y < v.y0 - 60 || t.y > v.y1 + 60) continue;
-    const x = cam.x + (t.x - cam.x) * 1.12, y = cam.y + (t.y - cam.y) * 1.12, ox = SUN.x * t.r * 0.3, oy = SUN.y * t.r * 0.3;
-    ctx.fillStyle = tint('#24521f', 1); ctx.beginPath(); ctx.arc(x, y, t.r, 0, TAU); ctx.fill();
-    ctx.fillStyle = tint('#2f6a29', 1); ctx.beginPath(); ctx.arc(x + ox * 0.5, y + oy * 0.5, t.r * 0.8, 0, TAU); ctx.fill();
-    ctx.fillStyle = tint('#3f8636', 1); ctx.beginPath(); ctx.arc(x + ox, y + oy, t.r * 0.5, 0, TAU); ctx.fill();
+    const x = cam.x + (t.x - cam.x) * 1.12, y = cam.y + (t.y - cam.y) * 1.12, s = t.r * sz;
+    if (t.v === undefined) t.v = (Math.imul(t.x | 0, 73856093) ^ Math.imul(t.y | 0, 19349663)) >>> 0;
+    ctx.drawImage(spr[t.v % TREE_N], x - s / 2, y - s / 2, s, s);
   }
 }
 function planeShape() {
@@ -3207,6 +3505,19 @@ function drawPed(p, isPlayer) {
   if (p.cop) { ctx.fillStyle = p.swat ? '#121418' : '#0d1b4a'; ctx.beginPath(); ctx.arc(0, 0, p.swat ? 3.6 : 3.2, 0, TAU); ctx.fill(); }
   ctx.restore();
 }
+// shading across a car's width: dark sills, a bright highlight along the roof; cached per body size in car space
+const glossCache = new Map();
+function carGloss(l, w) {
+  const key = l * 1000 + w;
+  let g = glossCache.get(key);
+  if (!g) {
+    g = ctx.createLinearGradient(0, -w / 2, 0, w / 2);
+    g.addColorStop(0, 'rgba(0,0,0,.32)'); g.addColorStop(0.16, 'rgba(0,0,0,.04)'); g.addColorStop(0.36, 'rgba(255,255,255,.2)');
+    g.addColorStop(0.5, 'rgba(255,255,255,.06)'); g.addColorStop(0.8, 'rgba(0,0,0,.06)'); g.addColorStop(1, 'rgba(0,0,0,.36)');
+    glossCache.set(key, g);
+  }
+  return g;
+}
 function drawCar(c) {
   const t = CT[c.type], l = t.l, w = t.w;
   ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.angle);
@@ -3267,6 +3578,7 @@ function drawCar(c) {
       if (lit) { ctx.fillStyle = on ? 'rgba(255,40,40,.18)' : 'rgba(40,90,255,.18)'; ctx.beginPath(); ctx.arc(0, 0, 26, 0, TAU); ctx.fill(); }
     }
   }
+  if (!c.ghost) { ctx.fillStyle = carGloss(l, w); rrect(-l / 2, -w / 2, l, w, 4); } // rounded, glossy bodywork
   ctx.fillStyle = '#fff6c8'; ctx.fillRect(l / 2 - 2, -w / 2 + 1.5, 2, 3); ctx.fillRect(l / 2 - 2, w / 2 - 4.5, 2, 3);
   ctx.fillStyle = c.speed < -5 || (c.driver === 'player' && keys.down) ? '#ff4040' : '#a31515';
   ctx.fillRect(-l / 2, -w / 2 + 1.5, 2, 3); ctx.fillRect(-l / 2, w / 2 - 4.5, 2, 3);
