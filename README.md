@@ -6,7 +6,7 @@ ringing payphones and shake off the cops. The twist is that some of the rules co
 There are two maps: a whole island (a city, farmland, a desert casino town, a forested mountain and a tropical coast)
 and **Brno**. You can play alone or **online with a friend**.
 
-No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 380 KB). Online
+No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 430 KB). Online
 co-op loads one small library, and only when you open the co-op menu.
 
 Play it at **https://ondrik.github.io/qta/**.
@@ -93,26 +93,30 @@ screen: Quantum City, Bell's Crossing, Las Ondas, Coral Bay or the top of Mount 
 
 ## Brno
 
-Switch to Brno with ↑ or ↓ on the title screen. It is a loose, compressed model of the city rather than a survey map,
-but the shape is there.
+Switch to Brno with ↑ or ↓ on the title screen. The map is built from [OpenStreetMap](https://www.openstreetmap.org)
+data (© OpenStreetMap contributors, available under the [ODbL](https://opendatacommons.org/licenses/odbl/)): the
+main roads with their real names, the Svratka and Svitava, the reservoir, the railways, the land use (housing,
+industry, parks, forests, fields and vineyards) and the names of the districts. It covers about 14 × 12.5 km, from
+Bystrc and the reservoir dam in the west to Líšeň and the airport in the east, at roughly 60 m a tile, so the
+cars and buildings are not to scale with the streets.
 
-- **The old town** inside its ring (Joštova, Koliště, Nádražní, Husova): Náměstí Svobody with the black astronomical
-  clock and the plague column, the Old Town Hall and its tower, the market on Zelný trh, the Mahen Theatre, and the
-  twin spires of the Cathedral of St Peter and Paul on Petrov. Špilberk castle stands on its hill to the west.
+- **The road network** is the city's motorways, the Velký městský okruh, and its primary and secondary roads, plus
+  tertiary roads where they are the main way through a suburb or village. Divided roads and small roundabouts are
+  merged into single roads, so the network is one connected graph.
+- **Landmarks** sit at their real positions (moved a little if a road is in the way): Náměstí Svobody with the
+  astronomical clock, the Old Town Hall, Zelný trh, the cathedral on Petrov, Moravské náměstí, the Mahen and Janáček
+  theatres, Špilberk, the main station, Vaňkovka, the AZ Tower, Výstaviště, Lužánky, Vila Tugendhat, the observatory,
+  Mendel's abbey, the trauma hospital, the university hospital and Masaryk University's campus in Bohunice, the city
+  stadium, the zoo, the harbour on the reservoir, the quarry on Hády and Brno-Tuřany airport.
 - **FIT BUT**, the Faculty of Information Technology of Brno University of Technology, is highlighted: the old
-  Carthusian monastery with its cloister and church, the new glass wing with the FIT sign, its own marker on the
-  map, a start location of its own, and the FIT Hackers story arc in Královo Pole.
-- **Landmarks**: the main railway station and its tracks, Vaňkovka, the AZ Tower, the exhibition grounds
-  (Výstaviště), Lužánky park, Vila Tugendhat, the observatory on Kraví hora, Mendel's abbey, the trauma hospital
-  and the university hospital in Bohunice, the city stadium, Olympia, the zoo, Brno-Tuřany airport and the old
-  quarry on Hády.
-- **Districts**, each built in its own style: burgher houses in the old town, tenements in Veveří, Zábrdovice,
-  Štýřice and Královo Pole, villas in Černá Pole and Žabovřesky, panel estates in Lesná, Bystrc, Bohunice and Líšeň,
-  warehouses in Komárov and Slatina, and the villages of Modřice, Řečkovice and Ostrovačice. The side streets carry
-  real street names from each district.
-- **Around the city**: the Svratka and the Svitava, the Velký městský okruh, the D1 and D2 motorways, the
-  reservoir (Brněnská přehrada) with its beach, boats and Veveří castle, the **Masaryk circuit** with its
-  grandstands, wooded hills to the north and west, and fields and vineyards to the south and east.
+  Carthusian monastery with its cloister and church, the glass wing with the FIT sign, its own marker on the map, a
+  start location of its own and the FIT Hackers story arc in Královo Pole.
+- **Districts** get their own buildings: burgher houses in the old town, tenements in the inner districts, villas
+  in Černá Pole, Stránice and Pisárky, panel estates in Lesná, Bystrc, Bohunice, Lískovec, Kohoutovice, Vinohrady
+  and Líšeň, warehouses on industrial land, and villages round the edge.
+
+The data was fetched once through the Overpass API and is embedded in `game.js`, so playing needs no network.
+`tools/brno/build.sh` rebuilds it (it needs Python 3 with numpy, scipy and Pillow).
 
 ## Online co-op
 

@@ -1,0 +1,5 @@
+[out:json][timeout:120];
+(
+  way["highway"~"^(motorway|trunk|primary|secondary|tertiary|motorway_link|trunk_link|primary_link)$"](49.140,16.500,49.252,16.698);
+);
+out tags geom;

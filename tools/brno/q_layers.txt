@@ -1,0 +1,15 @@
+[out:json][timeout:180];
+(
+  way["waterway"="river"](49.140,16.500,49.252,16.698);
+  way["natural"="water"](49.140,16.500,49.252,16.698);
+  relation["natural"="water"](49.140,16.500,49.252,16.698);
+  way["railway"="rail"][!"service"](49.140,16.500,49.252,16.698);
+  way["landuse"~"^(forest|farmland|vineyard|orchard|meadow|grass|residential|industrial|commercial|retail|allotments|cemetery|railway)$"](49.140,16.500,49.252,16.698);
+  relation["landuse"~"^(forest|farmland|vineyard|residential|industrial|commercial|retail)$"](49.140,16.500,49.252,16.698);
+  way["natural"="wood"](49.140,16.500,49.252,16.698);
+  relation["natural"="wood"](49.140,16.500,49.252,16.698);
+  way["leisure"~"^(park|garden)$"](49.140,16.500,49.252,16.698);
+  way["aeroway"~"^(runway|apron)$"](49.140,16.500,49.252,16.698);
+  node["place"~"^(suburb|quarter|neighbourhood|village)$"](49.140,16.500,49.252,16.698);
+);
+out tags geom;
