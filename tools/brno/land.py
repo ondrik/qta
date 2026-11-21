@@ -2,7 +2,7 @@ import json, math
 import numpy as np
 from PIL import Image, ImageDraw
 from scipy import ndimage
-LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.698, 49.140, 49.252, 240, 208
+LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.698, 49.140, 49.252, 480, 416  # about 30 m a tile
 P = lambda lat, lon: ((lon - LON0) / (LON1 - LON0) * MW, (LAT1 - lat) / (LAT1 - LAT0) * MH)
 OPEN, FOREST, FARM, VINE, URBAN, INDUS, GREEN, WATER, AIR = range(9)
 d = [e for e in json.load(open('layers.json'))['elements'] if e['type'] != 'relation'] + json.load(open('rels.json'))['elements']
@@ -49,7 +49,7 @@ for e in d:
     if t.get('waterway') == 'river' and e['type'] == 'way':
         pts = [P(g['lat'], g['lon']) for g in e['geometry']]
         rivers.append((t.get('name', ''), pts))
-        ImageDraw.Draw(layers[WATER]).line([(x*S, y*S) for x, y in pts], fill=255, width=int(1.6*S))
+        ImageDraw.Draw(layers[WATER]).line([(x*S, y*S) for x, y in pts], fill=255, width=int(2.0*S))
 grid = np.full((MH, MW), -1, dtype=int)
 for c in sorted(order, key=order.get):
     a = np.array(layers[c]).reshape(MH, S, MW, S).mean(axis=(1, 3)) > 110
@@ -58,17 +58,17 @@ for c in sorted(order, key=order.get):
 hint = Image.new('L', (MW*S, MH*S), 0)
 for e in res:
     if e['tags'].get('highway') in ('residential', 'living_street'):
-        ImageDraw.Draw(hint).line([(P(g['lat'], g['lon'])[0]*S, P(g['lat'], g['lon'])[1]*S) for g in e['geometry']], fill=255, width=int(3.0*S))
+        ImageDraw.Draw(hint).line([(P(g['lat'], g['lon'])[0]*S, P(g['lat'], g['lon'])[1]*S) for g in e['geometry']], fill=255, width=int(5.0*S))
 hint = np.array(hint).reshape(MH, S, MW, S).mean(axis=(1, 3)) > 90
 grid[((grid == -1) | (grid == OPEN)) & hint] = URBAN
 urb = (grid == URBAN) | (grid == INDUS)
-closed = ndimage.binary_fill_holes(ndimage.binary_closing(urb, iterations=2))
+closed = ndimage.binary_fill_holes(ndimage.binary_closing(urb, iterations=4))
 grid[(grid == -1) & closed] = URBAN
 grid[grid == -1] = OPEN
 np.save('landgrid.npy', grid)
 pal = {OPEN: (120, 160, 80), FOREST: (40, 90, 45), FARM: (200, 180, 90), VINE: (110, 140, 60), URBAN: (150, 140, 130), INDUS: (110, 110, 120), GREEN: (80, 170, 80), WATER: (40, 90, 160), AIR: (70, 70, 80)}
 img = np.zeros((MH, MW, 3), dtype=np.uint8)
 for c, col in pal.items(): img[grid == c] = col
-Image.fromarray(img).resize((MW*4, MH*4), Image.NEAREST).save('landgrid.png')
+Image.fromarray(img).resize((MW*2, MH*2), Image.NEAREST).save('landgrid.png')
 json.dump([[n, [[round(x, 2), round(y, 2)] for x, y in pts]] for n, pts in rivers], open('rivers.json', 'w'))
 from collections import Counter; print(Counter(grid.flatten().tolist())); print([n for n, _ in rivers])

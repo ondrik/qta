@@ -18,7 +18,7 @@ def majority(g):
 grid = majority(grid)
 urban = (grid == URBAN) | (grid == INDUS)
 # 2. main roads, plus the residential streets that open up big blocks
-main = build(4)
+main = []
 # tertiary roads only where the bigger roads are not already close by (suburbs and villages, not the dense core)
 hi = [w for w in main if w['r'] <= 3]
 hocc = np.zeros((MH*2, MW*2), bool)
@@ -73,24 +73,18 @@ def frac_urban(pts):
         tx, ty = int(x), int(y)
         if 0 <= tx < MW and 0 <= ty < MH and urban[ty, tx]: n += 1
     return n / len(smp)
-# 3. railways: main lines, parallel tracks merged
+# 3. railways: every running line painted, parallel tracks merged by closing, then thinned and traced like the roads
+import net
 lay = json.load(open('layers.json'))['elements']
-rw = [[P(g['lat'], g['lon']) for g in e['geometry']] for e in lay if e['type'] == 'way' and e.get('tags', {}).get('railway') == 'rail' and not e['tags'].get('service')]
-rw.sort(key=lambda p: -seglen(p))
-rocc = np.zeros((MH*2, MW*2), bool); rails = []
-for pts in rw:
-    smp = resample(pts, 0.5)
-    hits = [rocc[min(MH*2-1, max(0, int(y*2))), min(MW*2-1, max(0, int(x*2)))] for x, y in smp]
-    runs, cur = [], []
-    for p, h in zip(smp, hits):
-        if not h: cur.append(p)
-        elif cur: runs.append(cur); cur = []
-    if cur: runs.append(cur)
-    for run in runs:
-        if seglen(run) < 4: continue
-        rails.append(dp(run, 0.3))
-        for x, y in resample(run, 0.25):
-            i, j = int(x*2), int(y*2); rocc[max(0, j-3):j+4, max(0, i-3):i+4] = True
+rsel = [{'r': 0, 'name': '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']]} for e in lay
+        if e['type'] == 'way' and e.get('tags', {}).get('railway') == 'rail' and e['tags'].get('service') not in ('yard', 'siding', 'spur', 'crossover')]
+rc, re_, _ = net.trace_clean(rsel, spur=8 * net.R, minlen=3 * net.R, width=1.0, close_iter=2)
+rails = []
+for pts in net.graph_edges(rc, re_):
+    for _ in range(4):
+        if len(pts) > 4: pts = [pts[0], pts[1]] + [((pts[i-2][0] + pts[i-1][0] + pts[i][0] + pts[i+1][0] + pts[i+2][0]) / 5, (pts[i-2][1] + pts[i-1][1] + pts[i][1] + pts[i+1][1] + pts[i+2][1]) / 5) for i in range(2, len(pts) - 2)] + [pts[-2], pts[-1]]
+    pts = dp(pts, 0.3)
+    if seglen(pts) >= 2: rails.append(pts)
 print('rails', len(rails))
 # 4. districts and landmarks
 places = [(e['tags']['name'], *P(e['lat'], e['lon'])) for e in lay if e['type'] == 'node' and 'place' in e.get('tags', {})]

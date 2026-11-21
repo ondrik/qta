@@ -1,6 +1,6 @@
 import json, math, sys
 from PIL import Image, ImageDraw
-LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.698, 49.140, 49.252, 240, 208
+LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.698, 49.140, 49.252, 480, 416  # about 30 m a tile
 P = lambda lat, lon: ((lon - LON0) / (LON1 - LON0) * MW, (LAT1 - lat) / (LAT1 - LAT0) * MH)
 RANK = {'motorway': 0, 'trunk': 1, 'primary': 2, 'secondary': 3, 'tertiary': 4}
 def dp(pts, eps):

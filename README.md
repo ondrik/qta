@@ -6,7 +6,7 @@ ringing payphones and shake off the cops. The twist is that some of the rules co
 There are two maps: a whole island (a city, farmland, a desert casino town, a forested mountain and a tropical coast)
 and **Brno**. You can play alone or **online with a friend**.
 
-No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 430 KB). Online
+No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 500 KB). Online
 co-op loads one small library, and only when you open the co-op menu.
 
 Play it at **https://ondrik.github.io/qta/**.
@@ -42,7 +42,7 @@ To release, tag the commit (`git tag -a v7 -m "what changed"`) and push the tag 
 | V | slow motion + amplitude arrows (phasors) while superposed |
 | Space in a tank / fire truck | fire the cannon / spray water |
 | R · M | radio station · minimap (M again shows the whole map, then hides it) |
-| P / Esc · H | pause · help (press H again for the quantum notes) · N dismisses a note |
+| P / Esc · H | pause (Q on the pause screen quits to the title screen) · help (press H again for the quantum notes) · N dismisses a note |
 | ← → · ↑ ↓ (title screen) | choose where to start · switch between the island and Brno |
 | L (title screen) | **Physics Lab**: 7 guided lessons (L again from the pause screen to leave) |
 | O (title screen) | **online co-op** with a friend |
@@ -52,7 +52,9 @@ and the right half for the Physics Lab.
 
 Goal: reach **$100,000**. Ringing payphones give jobs, and each finished job raises your cash multiplier.
 Spray shops ($500) clear your wanted level. If you are wasted or busted you come back at the nearest hospital or
-police station.
+police station, facing the street. Ramming a police car gets you at least one star, and that cruiser gives chase.
+The car you drive has a health bar over it (and in the corner of the screen), and it holds out longer than the
+other cars on the road.
 
 ### Wanted levels
 
@@ -87,8 +89,8 @@ screen: Quantum City, Bell's Crossing, Las Ondas, Coral Bay or the top of Mount 
 - **Coral Bay** on the tropical **Palm Coast**: pastel hotels with rooftop pools, palms, a beach with umbrellas and
   lifeguard towers, turquoise shallows and a pier.
 - Country roads have no pavements or street lamps, highways (the Valley Interstate and the Coast Highway) link the
-  towns, and dirt tracks lead to the farms. Traffic thins out away from the towns. Sand, fields and grass slow cars
-  down (not tractors or the tank).
+  towns, and dirt tracks lead to the farms. Traffic thins out away from the towns. Off the road cars are much slower:
+  grass halves the top speed, and ploughed fields and sand cut it to about 40% (not for tractors or the tank).
 - Each town has its own story arc, payphones, a spray shop, a clinic and a police post.
 
 ## Brno
@@ -97,12 +99,16 @@ Switch to Brno with ↑ or ↓ on the title screen. The map is built from [OpenS
 data (© OpenStreetMap contributors, available under the [ODbL](https://opendatacommons.org/licenses/odbl/)): the
 main roads with their real names, the Svratka and Svitava, the reservoir, the railways, the land use (housing,
 industry, parks, forests, fields and vineyards) and the names of the districts. It covers about 14 × 12.5 km, from
-Bystrc and the reservoir dam in the west to Líšeň and the airport in the east, at roughly 60 m a tile, so the
-cars and buildings are not to scale with the streets.
+Bystrc and the reservoir dam in the west to Líšeň and the airport in the east. The map is 480 × 416 tiles, at
+roughly 30 m a tile, so the cars and buildings are still a little small for the streets.
 
 - **The road network** is the city's motorways, the Velký městský okruh, and its primary and secondary roads, plus
-  tertiary roads where they are the main way through a suburb or village. Divided roads and small roundabouts are
-  merged into single roads, so the network is one connected graph.
+  tertiary roads where they are the main way through a suburb or village. The roads are painted onto a fine grid,
+  thinned to their centre lines and traced, so divided roads and small roundabouts merge into single roads; a dead
+  end is joined to the network along the residential streets that link it in reality, so the network is one
+  connected graph. The railways are traced the same way.
+- **City blocks** are built around their edges, with courtyards inside (yards on the industrial estates), and the
+  old town is a maze of narrow lanes and little squares between the burgher houses.
 - **Landmarks** sit at their real positions (moved a little if a road is in the way): Náměstí Svobody with the
   astronomical clock, the Old Town Hall, Zelný trh, the cathedral on Petrov, Moravské náměstí, the Mahen and Janáček
   theatres, Špilberk, the main station, Vaňkovka, the AZ Tower, Výstaviště, Lužánky, Vila Tugendhat, the observatory,
@@ -160,6 +166,9 @@ service and then talk directly (WebRTC). The PeerJS library is only fetched when
   quay stones on the ground; brick, stone, concrete, render, weatherboard and corrugated-metal walls; clay-tile, slate,
   gravel, bitumen and metal roofs; glass towers that reflect the sky as you move; leafy trees and glossy cars. All of
   them are generated from seamless noise when the game loads, so there are no image files.
+- **Roof detail**: flat roofs carry stair huts, air conditioners with turning fans, mushroom vents, drains, rain
+  stains and skylights (lit from below at night), more of them the bigger the roof, and their parapets cast a shadow
+  onto the roof.
 - **Day and night**: a full day lasts 8 minutes. Shadows follow the sun, and evenings turn golden. At
   night windows light up, and there are neon signs, street lamps, headlight cones and glowing police
   lights.
