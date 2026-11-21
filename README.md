@@ -7,6 +7,9 @@ No build step and no dependencies: just `index.html` and `game.js` (plain canvas
 
 Play it at **https://ondrik.github.io/qta/**.
 
+Every released version stays playable: pick one from the version menu on the title screen, or browse
+**https://ondrik.github.io/qta/v/**.
+
 ## Play locally
 
 Open `index.html` in a browser, or serve the folder:
@@ -17,8 +20,10 @@ python3 -m http.server 8000   # then open http://localhost:8000
 
 ## Publish on GitHub Pages
 
-Push to GitHub, then go to **Settings → Pages → Build and deployment → Deploy from a branch** and pick the
-branch and `/ (root)`. The game will be at `https://<user>.github.io/<repo>/`.
+Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. Every push to `master`
+runs `.github/workflows/pages.yml`, which calls `tools/release.mjs` to put the latest game at the root and
+rebuild every release tag (`v1`, `v2`, …) from its own source under `/v/<tag>/`, plus an index at `/v/`.
+To release, tag the commit (`git tag -a v7 -m "what changed"`) and push the tag along with `master`.
 
 ## Controls
 
@@ -29,7 +34,7 @@ branch and `/ (root)`. The game will be at `https://<user>.github.io/<repo>/`.
 | Enter / F / E | get in or out of cars (occupied ones too) |
 | Q / Tab | switch weapon |
 | **X** | **superposition**: split your car into 3 branches (press again to collapse) |
-| **T** | **quantum tunnelling** through the wall you're facing |
+| **T** | **entangle** with a car nearby · T again: measure the pair and **swap places** with it |
 | V | slow motion + amplitude arrows (phasors) while superposed |
 | Space in a tank / fire truck | fire the cannon / spray water |
 | R · M | radio station · minimap |
@@ -41,6 +46,16 @@ and the right half for the Physics Lab.
 
 Goal: reach **$100,000**. Ringing payphones give jobs, and each finished job raises your cash multiplier.
 Spray shops ($500) clear your wanted level.
+
+### Wanted levels
+
+| Stars | The police response |
+| --- | --- |
+| ★ | Only officers who see you, or are close by, come after you. Cruisers tail you rather than ram you, and pull up to arrest you when you stop. They give up if they lose you for long enough. |
+| ★★ | The radio calls in patrol cars nearby, and they ram. Officers on foot still try to arrest you. |
+| ★★★ | Roadblocks: two cruisers parked across the road just ahead of you, with officers holding position. Officers now shoot. |
+| ★★★★ | SWAT vans pull up and deploy armed teams. A police helicopter circles your last known position, and anything under its searchlight is seen. You can shoot it down. |
+| ★★★★★ | A tank joins in, and the helicopter's gunner opens fire. |
 
 ## The city
 
@@ -83,7 +98,7 @@ physics and also says where the game takes liberties.
 | --- | --- | --- |
 | Superposition (ψ pickups, `X`) | Your car splits into 3 ghost branches that take different routes. When a cop sees any branch, or after 10 s, the game picks one branch at random with probability \|amplitude\|² and you end up there. A branch that touches anything loses amplitude. | Superposition, the Born rule, measurement, decoherence |
 | Police uncertainty cloud | Once cops lose sight of you, they only know your last momentum. Their guess drifts along it and spreads out, and each cruiser searches a point sampled from that cloud. Turning while out of sight sends them the wrong way. | Uncertainty principle (a loose analogy, as the note says) |
-| Tunnelling (T pickups, `T`) | You can go through a wall with probability `e^(−d/70px)`, so thin walls are easy and thick blocks are nearly impossible. | Tunnelling probability falls off exponentially with barrier width |
+| Entanglement swap (ε pickups, `T`) | Press T next to a car to entangle with it, then let it drive off. Press T again to measure the pair: you swap places instantly, however far apart you are. If the police spot your twin while they've lost you, the pair collapses on its own and they chase the twin instead. | Entanglement and long-distance correlations; quantum teleportation moves a *state* and still needs an ordinary signal, so nothing travels faster than light |
 | Entangled cars (job) | Wreck one cyan twin and its partner across town goes up too. | Entanglement (the note explains that the no-signalling theorem forbids this in reality) |
 | Schrödinger's briefcase (job) | The case is "cash" or "bomb" until you deliver it, and rough driving raises the bomb odds. | Schrödinger's cat thought experiment |
 | Quantum key run (job) | Carry 32 qubits while Eve tails you. If she gets close she measures them, and the **BB84 report** at the end shows every qubit's bases, the sifted key and the error rate. Over 11% errors means the key is thrown away. | BB84 quantum key distribution: an eavesdropper leaves about 25% errors; real-world QKD |
@@ -91,7 +106,7 @@ physics and also says where the game takes liberties.
 ### Physics Lab
 
 The Physics Lab (press `L` on the title screen) walks through the mechanics one at a time: superposition,
-measurement, uncertainty, tunnelling, entanglement, Schrödinger's briefcase and BB84. Each lesson has a
+measurement, uncertainty, entanglement, long-distance collapse, Schrödinger's briefcase and BB84. Each lesson has a
 goal and opens the matching Quantum Note. During superposition it shows each branch's amplitude as a
 rotating arrow (a phasor), with the probability equal to the arrow's length squared. You can't lose lives
 in the lab, so it works for teaching or a first look at the quantum ideas.

@@ -745,7 +745,7 @@ const sfx = {
   spray: () => noise(1.0, 5000, 'highpass', 0.25),
   quantum: () => { tone(220, 0.6, 'sine', 0.15, 1760); tone(330, 0.6, 'sine', 0.1, 2640, now() + 0.05); },
   collapse: () => { tone(1800, 0.35, 'sine', 0.15, 120); noise(0.2, 3000, 'bandpass', 0.2, 2); },
-  tunnel: () => { tone(80, 0.5, 'sine', 0.2, 900); tone(1200, 0.4, 'triangle', 0.08, 300, now() + 0.1); },
+  swap: () => { tone(80, 0.5, 'sine', 0.2, 900); tone(1200, 0.4, 'triangle', 0.08, 300, now() + 0.1); },
 };
 
 // ---- car radio: tiny procedural stations
@@ -821,6 +821,7 @@ const CT = {
   bus:     { label: 'City Bus',       w: 22, l: 60, max: 200, acc: 95, turn: 1.6, hp: 560, mass: 3.2, colors: ['#e67e22', '#2471a3', '#c0392b'] },
   tank:    { label: 'Tank',           w: 26, l: 44, max: 180, acc: 130, turn: 1.7, hp: 1300, mass: 7.0, colors: ['#556b2f'] },
   ambulance: { label: 'Ambulance',    w: 18, l: 38, max: 310, acc: 195, turn: 2.6, hp: 300, mass: 1.4, colors: ['#f4f6f7'] },
+  swat:    { label: 'SWAT Van',       w: 20, l: 42, max: 300, acc: 170, turn: 2.2, hp: 650, mass: 2.6, colors: ['#1c2330'] },
   firetruck: { label: 'Fire Truck',   w: 20, l: 50, max: 260, acc: 150, turn: 2.0, hp: 480, mass: 2.6, colors: ['#c0392b'] },
 };
 const CIV = ['compact', 'compact', 'sedan', 'sedan', 'sedan', 'sports', 'truck', 'taxi', 'bike', 'bike', 'bus'];
@@ -839,7 +840,7 @@ const player = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, hp: 100, car: null, weapons
   shirt: '#ff7a1a', skin: '#e0ac69', hair: '#1a1a1a', pants: '#1e2a3a' };
 let state = 'title', time = 0, heat = 0, lastCrime = -99, shake = 0, overlay = null, msgs = [];
 let showMap = true, helpPage = 0, won = false, mission = null, ringing = null, ringCd = 4, ringBeep = 0;
-let spawnT = 0, policeCd = 0, heatCd = 0, curDistrict = -1, sprayCd = 0, serviceCd = 0;
+let rbCd = 6, spawnT = 0, policeCd = 0, heatCd = 0, curDistrict = -1, sprayCd = 0, serviceCd = 0;
 let dayT = 17 / 24, tapAt = null, lab = null, labFlags = {}, labCars = [], labRect = null;
 const DAY_LEN = 480; // seconds per in-game day
 const flight = { t: 8, x: 0, v: 0, alt: 0, on: false };
@@ -848,7 +849,7 @@ const cam = { x: 0, y: 0, zoom: 1 };
 const GOAL = 100000;
 
 // ---- quantum state
-const Q = { psi: 1, tun: 2, branches: null, supT: 0, grace: 0, obsT: 0, tinfo: null, notes: new Set(), note: null };
+const Q = { psi: 1, ent: 2, link: null, linkT: 0, decoy: null, decoyT: 0, branches: null, supT: 0, grace: 0, obsT: 0, notes: new Set(), note: null };
 // what the police believe about your position: a spreading cloud
 const belief = { x: 0, y: 0, vx: 0, vy: 0, sig: 0, seen: false, seeT: 0 };
 
@@ -868,6 +869,7 @@ function makePed(x, y, opt = {}) {
     speed: rand(26, 40), tx: Math.floor(x / T), ty: Math.floor(y / T), dir: randi(0, 3), ox: rand(-9, 9), oy: rand(-9, 9),
     anim: rand(10), moving: true, flee: 0, fx: 0, fy: 0, shootCd: rand(1, 2), target: !!opt.target,
     shirt: opt.cop ? '#1f3a93' : opt.target ? '#ff2bd6' : pick(SHIRTS), skin: pick(SKINS), hair: pick(['#222', '#4a2f1b', '#7a5230', '#ddd', '#111']) };
+  if (opt.swat) Object.assign(p, { swat: true, hp: 120, shirt: '#252a33', pants: '#1a1d23', speed: 40 });
   peds.push(p); return p;
 }
 
@@ -888,10 +890,10 @@ const NOTES = {
     body: 'Heisenberg: position and momentum can\'t both be known exactly; Δx·Δp ≥ ħ/2. Once the cops lose sight of you they know your last momentum, so their position guess keeps spreading. Change direction out of sight and their guess drifts the wrong way.',
     lib: 'Game liberty: the police cloud is just classical missing information, a loose analogy. Heisenberg\'s limit is built into nature and would hold even with perfect instruments.',
   },
-  tunnel: {
-    title: 'Quantum tunnelling',
-    body: 'A particle can cross a barrier it classically can\'t get over. The chance falls off exponentially with the barrier\'s width, roughly e^(−2κd). Tunnelling lets fusion run in the Sun, and flash memory and scanning tunnelling microscopes depend on it.',
-    lib: 'Game liberty: for anything as big as a car the chance is so small (around 10^(−10^30)) that it never happens in practice.',
+  swap: {
+    title: 'Entanglement and long-distance collapse',
+    body: 'Measure one particle of an entangled pair and the outcome for its partner is fixed at that same instant, however far apart they are. Quantum teleportation builds on this to move a quantum state from one place to another, and it has been done across more than 1,000 km, from the ground to a satellite.',
+    lib: 'Game liberty: teleportation moves a state, never matter, and it needs an ordinary message (no faster than light) to finish. Nothing can be sent faster than light (the no-signalling theorem), so swapping cars, or the police learning anything from your twin, is fiction.',
   },
   entangle: {
     title: 'Entanglement',
@@ -1006,9 +1008,11 @@ function ejectDriver(c, panic) {
   if (!cop || panic) { p.flee = 6; p.fx = c.x; p.fy = c.y; }
   return p;
 }
-function sideSpot(c) {
+function sideSpot(c, k = 0) {
   const t = CT[c.type], ca = Math.cos(c.angle), sa = Math.sin(c.angle);
-  for (const [lx, ly] of [[0, -(t.w / 2 + 9)], [0, t.w / 2 + 9], [-(t.l / 2 + 9), 0], [t.l / 2 + 9, 0]]) {
+  const sides = [[0, -(t.w / 2 + 9)], [0, t.w / 2 + 9], [-(t.l / 2 + 9), 0], [t.l / 2 + 9, 0]];
+  for (let i = 0; i < 4; i++) {
+    const [lx, ly] = sides[(i + k) % 4];
     const x = c.x + ca * lx - sa * ly, y = c.y + sa * lx + ca * ly;
     if (!circleSolid(x, y, 5)) return { x, y };
   }
@@ -1193,21 +1197,50 @@ function navTo(c, gx, gy, sp, dt) {
   const ok = flowAt(c.flow, bx, by) < 32767;
   driveToward(c, ok ? (bx + 0.5) * T : gx, ok ? (by + 0.5) * T : gy, sp, dt);
 }
+// Wanted levels: 1 star, only cops who see you come after you, and they tail you to make an arrest.
+// 2 stars, the radio calls in nearby cars and they ram. 3 stars, roadblocks and armed officers.
+// 4 stars, SWAT vans and the helicopter. 5 stars, the tank.
 function aiPolice(c, dt) {
-  if (heat < 1 || player.down || player.hidden) { c.chase = false; aiTraffic(c, dt); return; }
-  c.chase = true;
-  const P0 = pp(), d = Math.hypot(P0.x - c.x, P0.y - c.y), tank = c.type === 'tank';
-  const see = !Q.branches && d < (tank ? 320 : 160) && los(c.x, c.y, P0.x, P0.y);
+  const stars = Math.floor(heat);
+  if (c.block) { // part of a roadblock: stay put until the alert is over
+    if (heat < 1) c.block = false; else { c.chase = true; applyControls(c, 0, 0, true, dt); return; }
+  }
+  if (heat < 1 || player.down || player.hidden) { c.chase = false; c.lostT = 0; aiTraffic(c, dt); return; }
+  const P0 = pp(), d = Math.hypot(P0.x - c.x, P0.y - c.y), tank = c.type === 'tank', swat = c.type === 'swat';
+  const see = !Q.branches && d < (tank ? 320 : 240) && los(c.x, c.y, P0.x, P0.y);
+  if (!c.chase) { // patrols join in only when they see you or get the call on the radio
+    if (see || d < 200 || (stars >= 2 && d < 1000) || stars >= 3) c.chase = true;
+    else { aiTraffic(c, dt); return; }
+  }
+  c.lostT = see ? 0 : (c.lostT || 0) + dt;
+  if (stars < 2 && c.lostT > 14) { c.chase = false; c.lostT = 0; aiTraffic(c, dt); return; } // at one star they give up after a while
   c.copCd -= dt; c.shootCd -= dt;
-  if (see && !tank && !player.car && d < 110 && Math.abs(c.speed) < 70 && c.copCd <= 0) {
-    const s = sideSpot(c);
-    if (s) { makePed(s.x, s.y, { cop: true }); c.copCd = 7; }
+  const youStopped = !player.car || Math.abs(player.car.speed) < 30;
+  // an officer gets out to arrest you when you are on foot or have stopped
+  if (see && !tank && !swat && d < 120 && Math.abs(c.speed) < 60 && youStopped && c.copCd <= 0) {
+    const sp = sideSpot(c); if (sp) { makePed(sp.x, sp.y, { cop: true }); c.copCd = 6; }
+  }
+  if (swat) { // SWAT vans pull up close and deploy a team
+    if (c.parkT > 0) { c.parkT -= dt; applyControls(c, 0, 0, true, dt); return; }
+    if (see && d < 240 && !c.deployed) {
+      c.deployed = true; c.parkT = 5;
+      for (let k = 0; k < 4; k++) { const sp = sideSpot(c, k); if (sp) makePed(sp.x, sp.y, { cop: true, swat: true }); }
+      if (onScreen(c.x, c.y)) msg('SWAT team deployed!', 2);
+      applyControls(c, 0, 0, true, dt); return;
+    }
   }
   if (see) {
     if (tank) { c.turret = Math.atan2(P0.y - c.y, P0.x - c.x); if (c.shootCd <= 0) { c.shootCd = 3; fireShell(c, c.turret, 'cop'); } }
-    else if (heat >= 4 && d < 260 && c.shootCd <= 0) { c.shootCd = 1.3; enemyShot(c.x, c.y, P0.x, P0.y, 9, 0.12); }
+    else if (stars >= 4 && !swat && d < 260 && c.shootCd <= 0) { c.shootCd = 1.3; enemyShot(c.x, c.y, P0.x, P0.y, 9, 0.12); }
   }
-  if (see && d < 160) { driveToward(c, P0.x, P0.y, !player.car ? (d < 80 ? 0 : 140) : (tank ? 190 : 330), dt); return; }
+  if (see && d < 170) {
+    if (stars < 2 && player.car) { // one star: tail you rather than ram you, and pull up behind when you stop
+      const pc = player.car, ps = Math.hypot(pc.vx, pc.vy), ha = ps > 20 ? Math.atan2(pc.vy, pc.vx) : pc.angle;
+      const tx = pc.x - Math.cos(ha) * 70, ty = pc.y - Math.sin(ha) * 70, dd = Math.hypot(tx - c.x, ty - c.y);
+      driveToward(c, tx, ty, clamp(ps + dd * 1.2 - 15, 0, 260), dt); return;
+    }
+    driveToward(c, P0.x, P0.y, !player.car ? (d < 80 ? 0 : 140) : (tank ? 190 : 330), dt); return;
+  }
   // otherwise drive toward this car's own guess, sampled from the police belief cloud
   c.guessT = (c.guessT || 0) - dt;
   if (c.guessT <= 0 || c.gx === undefined || d2(c.x, c.y, c.gx, c.gy) < 50 * 50) {
@@ -1216,7 +1249,109 @@ function aiPolice(c, dt) {
     if (solidAt(gx, gy)) { gx = belief.x; gy = belief.y; }
     c.gx = gx; c.gy = gy; c.guessT = belief.sig < 40 ? 0.5 : 3;
   }
-  navTo(c, c.gx, c.gy, belief.sig > 150 ? 200 : 330, dt);
+  navTo(c, c.gx, c.gy, stars < 2 ? 230 : belief.sig > 150 ? 200 : 330, dt);
+}
+// roadblock: two cruisers parked across the road ahead of you, with officers holding position behind them
+function placeRoadblock() {
+  const P0 = pp(), sp = Math.hypot(P0.vx || 0, P0.vy || 0);
+  if (sp < 60) return false;
+  const dir = Math.atan2(P0.vy, P0.vx), v = viewRect(0);
+  const reach = Math.abs(Math.cos(dir)) * (v.x1 - v.x0) / 2 + Math.abs(Math.sin(dir)) * (v.y1 - v.y0) / 2; // just beyond the screen edge ahead
+  for (let i = 0; i < 14; i++) {
+    const a = dir + rand(-0.4, 0.4), dist = reach + rand(120, 420);
+    const p = nearestLanePt(P0.x + Math.cos(a) * dist, P0.y + Math.sin(a) * dist, null, 140);
+    if (!p || p.L.hw || onScreen(p.x, p.y, 60) || cars.some(c => c.block && d2(c.x, c.y, p.x, p.y) < 400 * 400)) continue;
+    const h = p.h, nx = -Math.sin(h), ny = Math.cos(h), cx = p.x - nx * 16, cy = p.y - ny * 16, blk = [];
+    for (const sd of [-1, 1]) {
+      const x = cx + nx * sd * 17, y = cy + ny * sd * 17, ang = h + Math.PI / 2 + sd * 0.25;
+      const c = makeCar('police', x, y, ang, 'police');
+      if (carHitsWall(c, x, y, ang)) { cars.splice(cars.indexOf(c), 1); continue; }
+      c.block = true; c.chase = true; blk.push(c);
+    }
+    if (!blk.length) continue;
+    const bx = cx + Math.cos(dir) * 36, by = cy + Math.sin(dir) * 36;
+    for (const sd of [-1, 1]) { const x = bx + nx * sd * 30, y = by + ny * sd * 30; if (!circleSolid(x, y, 5)) makePed(x, y, { cop: true }).post = true; }
+    return true;
+  }
+  return false;
+}
+// ---- the police helicopter (4 stars and up): circles your last known position and lights you up
+let heli = null;
+const HELI_Z = 0.45;
+function updateHeli(dt) {
+  const stars = Math.floor(heat), P0 = pp();
+  if (!heli) {
+    if (stars >= 4 && !player.down && !player.hidden) {
+      const a = rand(TAU);
+      heli = { x: P0.x + Math.cos(a) * 1300, y: P0.y + Math.sin(a) * 1300, vx: 0, vy: 0, angle: a + Math.PI, rot: 0, hp: 260, shootCd: 2, burst: 0, leaveT: 0, orbit: rand(TAU), lx: P0.x, ly: P0.y, snd: 0, dead: false, fall: 0 };
+      msg('Police helicopter overhead!', 2.5);
+    }
+    return;
+  }
+  const h = heli; h.rot += dt * 38;
+  if (AC && onScreen(h.x, h.y, 200) && (h.snd -= dt) <= 0) { h.snd = 0.1; noise(0.07, 150, 'lowpass', h.dead ? 0.1 : 0.2); }
+  if (h.dead) { // spinning down
+    h.fall += dt; h.angle += dt * 7; h.x += h.vx * dt; h.y += h.vy * dt;
+    addPart(h.x, h.y, rand(-20, 20), rand(-20, 20), 0.8, 4, '#444', 10, true);
+    if (h.fall > 1.6) { explode(h.x, h.y, 90, 'player'); heli = null; }
+    return;
+  }
+  const leaving = stars < 4 || player.down || player.hidden;
+  let tx, ty;
+  if (leaving) {
+    h.leaveT += dt;
+    const a = Math.atan2(h.y - P0.y, h.x - P0.x); tx = h.x + Math.cos(a) * 500; ty = h.y + Math.sin(a) * 500;
+    if (h.leaveT > 4 && !onScreen(h.x, h.y, 300)) { heli = null; return; }
+  } else {
+    h.leaveT = 0;
+    const lock = belief.seen;
+    const cx = lock ? P0.x : belief.x, cy = lock ? P0.y : belief.y, r = lock ? 70 : Math.min(belief.sig, 400) * 0.6 + 70;
+    h.orbit += dt * 0.55; tx = cx + Math.cos(h.orbit) * r; ty = cy + Math.sin(h.orbit) * r;
+    // the searchlight swings toward you if you are close to it, otherwise it sweeps the search area
+    const near = d2(h.x, h.y, P0.x, P0.y) < 260 * 260, gx = near ? P0.x : cx + Math.cos(time * 0.9) * r * 0.6, gy = near ? P0.y : cy + Math.sin(time * 1.3) * r * 0.6;
+    const ldx = gx - h.lx, ldy = gy - h.ly, ld = Math.hypot(ldx, ldy) || 1, step = Math.min(ld, 210 * dt);
+    h.lx += ldx / ld * step; h.ly += ldy / ld * step;
+  }
+  const dx = tx - h.x, dy = ty - h.y, dd = Math.hypot(dx, dy) || 1, sp = Math.min(270, dd * 1.4);
+  h.vx += (dx / dd * sp - h.vx) * Math.min(1, dt * 1.2); h.vy += (dy / dd * sp - h.vy) * Math.min(1, dt * 1.2);
+  h.x += h.vx * dt; h.y += h.vy * dt;
+  const face = Math.hypot(h.vx, h.vy) > 40 ? Math.atan2(h.vy, h.vx) : Math.atan2(P0.y - h.y, P0.x - h.x);
+  h.angle += wrapA(face - h.angle) * Math.min(1, dt * 2);
+  // at five stars a gunner fires bursts at you from the open door
+  h.shootCd -= dt;
+  if (!leaving && stars >= 5 && h.shootCd <= 0 && d2(h.lx, h.ly, P0.x, P0.y) < 60 * 60) {
+    h.burst++; h.shootCd = h.burst % 5 ? 0.11 : 1.8;
+    const a = Math.atan2(P0.y - h.y, P0.x - h.x);
+    enemyShot(P0.x - Math.cos(a) * 40, P0.y - Math.sin(a) * 40, P0.x, P0.y, 5, 0.12);
+  }
+}
+function drawHeli() {
+  const h = heli; if (!h) return;
+  const z = h.dead ? HELI_Z * Math.max(0, 1 - h.fall / 1.6) : HELI_Z, k = 1 + z;
+  const x = cam.x + (h.x - cam.x) * k, y = cam.y + (h.y - cam.y) * k;
+  if (!onScreen(x, y, 120)) return;
+  if (!h.dead && !h.leaveT && NIGHT > 0.1) { // the searchlight beam
+    const a = Math.atan2(h.ly - y, h.lx - x), r = 90;
+    ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(200,225,255,${0.13 * NIGHT})`;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(h.lx + Math.cos(a + Math.PI / 2) * r, h.ly + Math.sin(a + Math.PI / 2) * r);
+    ctx.lineTo(h.lx + Math.cos(a - Math.PI / 2) * r, h.ly + Math.sin(a - Math.PI / 2) * r); ctx.closePath(); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  const nb = 1 + NIGHT * 1.6; // lit by the city below, so it stays readable at night
+  ctx.save(); ctx.translate(x, y); ctx.rotate(h.angle); ctx.scale(k * 0.85, k * 0.85);
+  ctx.fillStyle = tint('#1d2b4a', nb); ctx.fillRect(-36, -2, 26, 4); ctx.fillRect(-39, -7, 5, 14);
+  ctx.fillStyle = tint('#e9edf2', nb); ctx.beginPath(); ctx.ellipse(0, 0, 16, 9, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = tint('#1d2b4a', nb); ctx.fillRect(-12, -9, 6, 18);
+  ctx.fillStyle = tint('#7fb3d5', 1.1 * nb); ctx.beginPath(); ctx.ellipse(8, 0, 6, 6.5, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(25,25,25,.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-10, -11); ctx.lineTo(10, -11); ctx.moveTo(-10, 11); ctx.lineTo(10, 11); ctx.stroke();
+  ctx.fillStyle = 'rgba(20,20,20,.12)'; ctx.beginPath(); ctx.arc(0, 0, 29, 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(25,25,25,.65)'; ctx.lineWidth = 3;
+  for (let i = 0; i < 2; i++) { const a = h.rot + i * Math.PI / 2; ctx.beginPath(); ctx.moveTo(Math.cos(a) * 29, Math.sin(a) * 29); ctx.lineTo(-Math.cos(a) * 29, -Math.sin(a) * 29); ctx.stroke(); }
+  ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(-37, 0, 5, 0, TAU); ctx.stroke();
+  const on = Math.sin(time * 9) > 0;
+  ctx.fillStyle = on ? '#ff3030' : '#3060ff'; ctx.beginPath(); ctx.arc(-4, on ? -7 : 7, 2, 0, TAU); ctx.fill();
+  if (NIGHT > 0.1) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = NIGHT * 0.5; ctx.beginPath(); ctx.arc(-4, on ? -7 : 7, 9, 0, TAU); ctx.fill(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+  ctx.restore();
 }
 function fireShell(c, a, owner) {
   const l = CT[c.type].l / 2 + 8;
@@ -1271,14 +1406,17 @@ function updatePed(p, dt) {
   p.moving = true;
   const P0 = pp(), pd = Math.hypot(P0.x - p.x, P0.y - p.y);
   if (p.cop && heat >= 1 && !player.down && !player.hidden && pd < 520 && (belief.sig < 80 || (pd < 250 && los(p.x, p.y, P0.x, P0.y)))) {
-    const a = Math.atan2(P0.y - p.y, P0.x - p.x);
-    p.angle = a;
-    const sp = pd < 12 ? 0 : 88;
+    const a = Math.atan2(P0.y - p.y, P0.x - p.x), sees = los(p.x, p.y, P0.x, P0.y);
+    p.angle = a; p.path = null; p.idle = 0;
+    const hold = (p.post && pd > 300) || (p.swat && pd < 170 && sees);
+    const sp = hold || pd < 12 ? 0 : p.swat ? 95 : 88;
+    p.moving = sp > 0;
     moveFree(p, Math.cos(a) * sp, Math.sin(a) * sp, dt, 4);
-    p.anim += dt * 14;
+    if (sp) p.anim += dt * 14;
     p.shootCd -= dt;
-    if (heat >= 2 && pd > 40 && pd < 230 && p.shootCd <= 0 && los(p.x, p.y, P0.x, P0.y)) {
-      p.shootCd = rand(0.9, 1.5); enemyShot(p.x, p.y, P0.x, P0.y, 7, 0.14);
+    if ((p.swat || heat >= 3) && pd > 40 && pd < (p.swat ? 300 : 230) && p.shootCd <= 0 && sees) {
+      if (p.swat) { p.burst = (p.burst || 0) + 1; p.shootCd = p.burst % 3 ? 0.15 : rand(1.0, 1.5); enemyShot(p.x, p.y, P0.x, P0.y, 6, 0.09); }
+      else { p.shootCd = rand(0.9, 1.5); enemyShot(p.x, p.y, P0.x, P0.y, 7, 0.14); }
     }
     if (!player.car && pd < 14) player.bust += dt * 2;
     else if (player.car && pd < 26 && Math.abs(player.car.speed) < 25) player.bust += dt;
@@ -1430,13 +1568,14 @@ function scare(x, y, r) {
 }
 function copNear(x, y, r) {
   for (const p of peds) if (p.cop && !p.dead && d2(p.x, p.y, x, y) < r * r) return true;
-  for (const c of cars) if ((c.type === 'police' || c.type === 'tank') && c.driver === 'police' && d2(c.x, c.y, x, y) < r * r) return true;
+  for (const c of cars) if ((c.type === 'police' || c.type === 'tank' || c.type === 'swat') && c.driver === 'police' && d2(c.x, c.y, x, y) < r * r) return true;
   return false;
 }
 // does any cop currently have eyes on point (x, y)?
 function copSees(x, y) {
   for (const p of peds) if (p.cop && !p.dead) { const dd = d2(p.x, p.y, x, y); if (dd < 70 * 70 || (dd < 260 * 260 && los(p.x, p.y, x, y))) return true; }
-  for (const c of cars) if ((c.type === 'police' || c.type === 'tank') && c.driver === 'police') { const dd = d2(c.x, c.y, x, y); if (dd < 70 * 70 || (dd < 300 * 300 && los(c.x, c.y, x, y))) return true; }
+  for (const c of cars) if ((c.type === 'police' || c.type === 'tank' || c.type === 'swat') && c.driver === 'police') { const dd = d2(c.x, c.y, x, y); if (dd < 70 * 70 || (dd < 300 * 300 && los(c.x, c.y, x, y))) return true; }
+  if (heli && !heli.dead && d2(heli.lx, heli.ly, x, y) < 120 * 120) return true; // the helicopter sees everything under its searchlight
   return false;
 }
 
@@ -1548,42 +1687,55 @@ function collapse(reason) {
   labFlags.collapsed = true; if (reason === 'a cop saw you') labFlags.observed = true;
   msg(`Collapsed (${reason}): branch ${k + 1}, p = ${Math.round(w[k] / tot * 100)}%`, 3);
 }
-function tunnelInfo() {
-  if (player.down || player.hidden) return null;
-  const o = pp(), car = player.car, a = car ? car.angle : player.angle;
-  const front = car ? CT[car.type].l / 2 : 5, hx = Math.cos(a), hy = Math.sin(a);
-  let inside = false, start = 0;
-  for (let s = front; s < front + 700; s += 4) {
-    const sol = solidAt(o.x + hx * s, o.y + hy * s);
-    if (!inside) { if (sol) { inside = true; start = s; } else if (s > front + 44) return null; }
-    else if (!sol) {
-      const cx = o.x + hx * (s + front + 4), cy = o.y + hy * (s + front + 4);
-      if (car ? carHitsWall(car, cx, cy, a) : circleSolid(cx, cy, 5)) continue;
-      const d = s - start;
-      return { x: cx, y: cy, d, p: Math.exp(-d / 70) };
-    }
-  }
-  return null;
+// ---- entanglement: link with a car (T), then measure the pair (T again) to swap places with it
+function entangle() {
+  if (player.down || player.hidden) return;
+  const L = Q.link;
+  if (L && !L.dead && cars.includes(L)) { swapWith(L); return; }
+  if (Q.ent <= 0) { msg('No ε charges. Find an ε pickup.', 2); return; }
+  const o = pp(); let c = null, bd = 130 * 130;
+  for (const q of cars) { if (q === player.car || q.dead || q.ghost) continue; const d = d2(q.x, q.y, o.x, o.y); if (d < bd) { bd = d; c = q; } }
+  if (!c) { msg('Get close to a car to entangle with it.', 1.5); return; }
+  Q.ent--; Q.link = c; Q.linkT = 60; c.linked = true;
+  if (c.labGo) { c.driver = 'ai'; c.ln = null; c.labGo = false; }
+  qburst(c.x, c.y, '#3cf0ff'); qburst(o.x, o.y, '#3cf0ff'); sfx.quantum();
+  msg('Entangled with that car. Press T again to measure the pair and swap places with it.', 3.5);
+  note('swap'); labFlags.linked = true;
 }
-function tunnel() {
-  if (Q.tun <= 0) { msg('No tunnel charges. Find a T pickup.', 2); return; }
-  const info = Q.tinfo || tunnelInfo();
-  if (!info) { msg('Face a wall up close to try tunnelling.', 1.5); return; }
-  Q.tun--;
-  const o = pp();
-  note('tunnel');
-  if (Math.random() < info.p) {
-    qburst(o.x, o.y, '#4dd0e1');
-    o.x = info.x; o.y = info.y;
-    if (player.car) { player.x = o.x; player.y = o.y; }
-    qburst(o.x, o.y, '#4dd0e1');
-    sfx.tunnel(); labFlags.tunnels = (labFlags.tunnels || 0) + 1;
-    msg(`Tunnelled through ${Math.round(info.d / T * 10) / 10} tiles of wall (p was ${Math.round(info.p * 100)}%)`, 3);
-  } else {
-    sfx.crash(); shake = 0.6;
-    if (player.car) { damageCar(player.car, 25, null); player.car.vx *= -0.4; player.car.vy *= -0.4; player.car.speed *= -0.4; }
-    else hurtPlayer(15);
-    msg(`Bounced off the barrier (p was ${Math.round(info.p * 100)}%)`, 3);
+function unlink() { if (Q.link) Q.link.linked = false; Q.link = null; }
+function swapWith(c) {
+  const o = pp(), me = player.car;
+  qburst(o.x, o.y, '#3cf0ff'); qburst(c.x, c.y, '#3cf0ff');
+  const A = { x: o.x, y: o.y, angle: me ? me.angle : player.angle, vx: o.vx || 0, vy: o.vy || 0, speed: me ? me.speed : 0 };
+  const B = { x: c.x, y: c.y, angle: c.angle, vx: c.vx, vy: c.vy, speed: c.speed };
+  Object.assign(c, A); c.ln = null; // your twin takes your place...
+  if (!me) { c.speed = 0; c.vx = 0; c.vy = 0; }
+  if (me) { Object.assign(me, B); player.x = me.x; player.y = me.y; } // ...and you take its place
+  else { player.x = B.x; player.y = B.y; player.angle = B.angle; }
+  unlink(); sfx.swap(); shake = 0.3;
+  // the police are left looking at the wrong place
+  if (heat >= 1 && !copSees(player.x, player.y)) Object.assign(belief, { x: A.x, y: A.y, vx: A.vx, vy: A.vy, sig: 40, seen: false, seeT: 0.6 });
+  labFlags.swaps = (labFlags.swaps || 0) + 1;
+  msg('Measured! You and your entangled twin swapped places.', 3);
+  updateCamera(0, true);
+}
+function updateLink(dt) {
+  if (Q.decoyT > 0) { Q.decoyT -= dt; if (!Q.decoy || Q.decoy.dead || !cars.includes(Q.decoy)) Q.decoyT = 0; if (Q.decoyT <= 0 && Q.decoy) { Q.decoy.decoy = false; Q.decoy = null; } }
+  const c = Q.link; if (!c) return;
+  if (c.dead || !cars.includes(c)) { unlink(); msg('Your entangled twin is gone: the link decohered.', 2.5); return; }
+  Q.linkT -= dt;
+  if (Q.linkT <= 0) { unlink(); msg('The entanglement decohered.', 2); return; }
+  // the police measure your twin while they have lost you: the pair collapses and they take the twin for you
+  Q.obsLT = (Q.obsLT || 0) - dt;
+  if (heat >= 1 && !belief.seen && Q.obsLT <= 0) {
+    Q.obsLT = 0.3;
+    if (copSees(c.x, c.y)) {
+      unlink(); Q.decoy = c; Q.decoyT = 20; c.decoy = true;
+      Object.assign(belief, { x: c.x, y: c.y, vx: c.vx, vy: c.vy, sig: 0 });
+      qburst(c.x, c.y, '#3cf0ff'); sfx.collapse();
+      msg('Long-distance collapse: the police measured your twin and think it\'s you!', 3.5);
+      note('swap'); labFlags.decoyed = true;
+    }
   }
 }
 function updateBelief(dt) {
@@ -1591,7 +1743,8 @@ function updateBelief(dt) {
   belief.seeT -= dt;
   if (belief.seeT <= 0) { belief.seeT = 0.2; belief.seen = !Q.branches && copSees(player.x, player.y); }
   const o = pp();
-  if (belief.seen) { belief.x = o.x; belief.y = o.y; belief.vx = o.vx || 0; belief.vy = o.vy || 0; belief.sig = 0; }
+  if (belief.seen) { belief.x = o.x; belief.y = o.y; belief.vx = o.vx || 0; belief.vy = o.vy || 0; belief.sig = 0; if (Q.decoy) { Q.decoy.decoy = false; Q.decoy = null; Q.decoyT = 0; } }
+  else if (Q.decoyT > 0 && Q.decoy) { const d = Q.decoy; belief.x = d.x; belief.y = d.y; belief.vx = d.vx; belief.vy = d.vy; belief.sig = 20; }
   else {
     // the police know your last momentum: the guess moves along it and spreads out
     belief.x = clamp(belief.x + belief.vx * dt, T, (MW - 2) * T);
@@ -1719,7 +1872,7 @@ function updatePlayer(dt) {
   if (hit('Enter', 'KeyF', 'KeyE')) enterExit();
   if (hit('KeyQ', 'Tab')) { cycleWeapon(); msg(player.weapon ? WEAPONS[player.weapon].name : 'Fists', 1.2); }
   if (hit('KeyX')) superpose();
-  if (hit('KeyT')) tunnel();
+  if (hit('KeyT')) entangle();
   if (player.car) {
     const c = player.car, special = c.type === 'tank' || c.type === 'firetruck';
     // keyboard steering ramps in instead of snapping to full lock
@@ -1846,6 +1999,16 @@ function updateBullets(dt) {
         }
       }
       if (done) break;
+      if (b.owner === 'player' && heli && !heli.dead) { // shots at the helicopter (aimed at where it appears overhead)
+        const k = 1 + HELI_Z, hx = cam.x + (heli.x - cam.x) * k, hy = cam.y + (heli.y - cam.y) * k;
+        if (d2(b.x, b.y, hx, hy) < 24 * 24) {
+          heli.hp -= b.rocket ? 200 : b.dmg; done = true;
+          for (let q = 0; q < 4; q++) addPart(b.x, b.y, rand(-60, 60), rand(-60, 60), 0.25, 1.5, '#ffe08a', 0, true);
+          if (heli.hp <= 0) { heli.dead = true; heli.fall = 0; earn(800); addHeat(1); msg('You brought down the helicopter!', 3); if (onScreen(hx, hy)) sfx.boom(); }
+          if (!b.rocket) break;
+        }
+      }
+      if (done) break;
       if (b.owner === 'player') {
         for (const p of peds) {
           if (p.dead || d2(p.x, p.y, b.x, b.y) > 7 * 7) continue;
@@ -1877,13 +2040,13 @@ const PK = {
   bribe:  { c: '#f1c40f', l: '★', label: 'Bribe: -1 wanted', give: () => { heat = Math.max(0, heat - 1); } },
   cash:   { c: '#1e8449', l: '$', label: 'Cash +$250', give: () => earn(250) },
   psi:    { c: '#b388ff', l: 'ψ', label: 'Superposition charge +1 (press X in a car)', give: () => { Q.psi++; } },
-  tun:    { c: '#4dd0e1', l: 'T', label: 'Tunnel charges +2 (press T facing a wall)', give: () => { Q.tun += 2; } },
+  ent:    { c: '#3cf0ff', l: 'ε', label: 'ε charges +2 (T: entangle with a car)', give: () => { Q.ent += 2; } },
 };
 function give(w, n) { player.weapons[w] = (player.weapons[w] || 0) + n; if (!player.weapon) player.weapon = w; }
 function placePickups() {
   pickups = [];
   const kinds = ['pistol', 'pistol', 'pistol', 'pistol', 'smg', 'smg', 'smg', 'rocket', 'rocket', 'health', 'health', 'health', 'health',
-    'bribe', 'bribe', 'bribe', 'cash', 'cash', 'cash', 'cash', 'cash', 'psi', 'psi', 'psi', 'psi', 'psi', 'tun', 'tun', 'tun', 'tun', 'tun'];
+    'bribe', 'bribe', 'bribe', 'cash', 'cash', 'cash', 'cash', 'cash', 'psi', 'psi', 'psi', 'psi', 'psi', 'ent', 'ent', 'ent', 'ent', 'ent'];
   for (const k of kinds) {
     const t = randomTile([WALK, PLAZA, GRASS]);
     if (t) pickups.push({ x: t.x, y: t.y, k, cd: 0 });
@@ -2214,15 +2377,17 @@ function manageSpawns(dt) {
     if (p) makePed(p.x, p.y, { cop: Math.random() < 0.08 });
   }
   if (heat >= 1 && policeCd <= 0 && !player.down) {
-    const want = [0, 1, 2, 4, 5, 7][Math.floor(heat)];
-    const chasing = cars.filter(c => c.type === 'police' && c.driver === 'police' && c.chase).length;
-    if (chasing < want) {
-      const tankNow = heat >= 5 && !cars.some(c => c.type === 'tank' && c.driver === 'police');
-      const c = spawnTraffic(tankNow ? 'tank' : 'police', 'police');
-      if (c) { c.chase = true; c.ai.cruise = 130; if (tankNow) msg('They sent a TANK.', 3); }
-      policeCd = 2.2;
-    }
+    const stars = Math.floor(heat), n = t => cars.filter(c => c.type === t && c.driver === 'police' && c.chase && !c.block).length;
+    let c = null;
+    if (stars >= 5 && n('tank') < 1) { c = spawnTraffic('tank', 'police'); if (c) msg('They sent a TANK.', 3); }
+    else if (stars >= 4 && n('swat') < (stars >= 5 ? 2 : 1)) { c = spawnTraffic('swat', 'police'); if (c) msg('A SWAT van is on its way.', 2.5); }
+    else if (n('police') < [0, 1, 2, 3, 3, 3][stars]) c = spawnTraffic('police', 'police');
+    if (c) { c.chase = true; c.ai.cruise = 130; }
+    policeCd = stars >= 3 ? 2.2 : 3.5;
   }
+  // roadblocks ahead of you from three stars
+  rbCd -= 0.25;
+  if (heat >= 3 && player.car && !player.down && rbCd <= 0 && cars.filter(c => c.block).length < (heat >= 4 ? 4 : 2)) rbCd = placeRoadblock() ? (heat >= 4 ? 9 : 13) : 2;
 }
 function placeParked() {
   for (const s of parkSpots) if (srnd() < 0.55) {
@@ -2248,12 +2413,12 @@ const LESSONS = [
   { key: 'uncertainty', title: 'Uncertainty',
     text: 'You are wanted. Break line of sight and turn a corner or two. The blue cloud is everything the police think they know about where you are. Grow it past 9 tiles (Δx in the HUD).',
     setup() { labCar('sports'); heat = 1.6; addHeat(0); }, check: () => heat >= 1 && belief.sig > 290 },
-  { key: 'tunnel', title: 'Tunnelling',
-    text: 'Face a wall up close, on foot or in the car, and press T. The odds shown are e^(−d/λ): thin walls are easy, thick blocks almost impossible. Tunnel through twice.',
-    setup() { labCar('compact'); Q.tun = 99; }, check: () => labFlags.tunnels >= 2 },
   { key: 'entangle', title: 'Entanglement',
     text: 'Two cyan cars are an entangled pair, and the second one is across town. Blow up the near one with your rockets (Space, on foot). Fire from a safe distance and keep the far twin on the minimap!',
     setup() { give('rocket', 6); player.weapon = 'rocket'; startMission('entangle'); }, check: () => labFlags.missionDone },
+  { key: 'swap', title: 'Long-distance collapse',
+    text: 'Walk up to the car next to you and press T to entangle with it. Its driver then heads across town. Wait a few seconds, then press T again: measuring the pair swaps your places, however far apart you are.',
+    setup() { const c = labCar('sedan'); c.labGo = true; Q.ent = 99; }, check: () => labFlags.swaps >= 1 },
   { key: 'schrodinger', title: 'Schrödinger\'s briefcase',
     text: 'Pick up the case and deliver it. What\'s inside is undecided until delivery, and every hard knock raises P(bomb). Drive gently!',
     setup() { labCar('sedan'); startMission('deliver'); }, check: () => labFlags.missionDone },
@@ -2269,10 +2434,10 @@ function labCar(type) {
 function setupLesson(i) {
   if (mission) { failMission(''); }
   for (const c of labCars) { const k = cars.indexOf(c); if (k >= 0) cars.splice(k, 1); }
-  labCars = []; Q.branches = null; Q.slow = false; Q.bb = null;
+  labCars = []; Q.branches = null; Q.slow = false; Q.bb = null; unlink(); Q.decoy = null; Q.decoyT = 0;
   Object.assign(player, { car: null, x: LAB_START.x, y: LAB_START.y, angle: 0, hp: 100, down: 0, bust: 0, weapons: {}, weapon: null });
   heat = 0; belief.sig = 0; ringing = null; ringCd = 1e9; overlay = null;
-  labFlags = { collapsed: false, observed: false, tunnels: 0, missionDone: false };
+  labFlags = { collapsed: false, observed: false, swaps: 0, missionDone: false };
   lab.i = i; lab.done = false; lab.target = null;
   Q.notes.delete(LESSONS[i].key);
   LESSONS[i].setup();
@@ -2337,6 +2502,7 @@ function updateWorld(dt) {
   updateBranches(dt);
   for (const p of peds) updatePed(p, dt);
   updateBullets(dt);
+  updateHeli(dt);
   for (let i = parts.length - 1; i >= 0; i--) {
     const q = parts[i];
     q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= 0.94; q.vy *= 0.94; q.size += q.grow * dt; q.life -= dt;
@@ -2347,8 +2513,8 @@ function updateWorld(dt) {
     updateMissions(dt);
     updateBelief(dt);
     // the wanted level fades once the police have lost track of you
-    if (heat > 0 && time - lastCrime > 5 && !belief.seen && (belief.sig > 250 || heat < 1)) heat = Math.max(0, heat - dt * 0.12);
-    Q.tinfo = Q.tun > 0 ? tunnelInfo() : null;
+    if (heat > 0 && time - lastCrime > 5 && !belief.seen && (belief.sig > 250 || heat < 1 || Q.decoyT > 0)) heat = Math.max(0, heat - dt * 0.12);
+    updateLink(dt);
     const nm = placeName(player.x, player.y);
     if (nm !== curDistrict) { curDistrict = nm; msg(`— ${nm} —`, 2.5); }
     if (Q.bb) { Q.bb.t -= dt; if (Q.bb.t <= 0 || hit('KeyN')) Q.bb = null; }
@@ -3035,10 +3201,10 @@ function drawPed(p, isPlayer) {
   ctx.fillRect(sw - 2, -3.5, 4, 2.6); ctx.fillRect(-sw - 2, 1, 4, 2.6);
   ctx.fillStyle = p.shirt; ctx.beginPath(); ctx.ellipse(0, 0, 3.4, 5.6, 0, 0, TAU); ctx.fill();
   if (isPlayer && player.weapon) { ctx.fillStyle = '#111'; ctx.fillRect(3, 1.5, player.weapon === 'rocket' ? 11 : 7, player.weapon === 'rocket' ? 3 : 2); }
-  else if (p.cop) { ctx.fillStyle = '#111'; ctx.fillRect(3, 1.5, 6, 2); }
+  else if (p.cop) { ctx.fillStyle = '#111'; ctx.fillRect(3, 1.5, p.swat ? 9 : 6, p.swat ? 2.6 : 2); }
   ctx.fillStyle = p.skin; ctx.beginPath(); ctx.arc(0.5, 0, 3, 0, TAU); ctx.fill();
   ctx.fillStyle = p.hair; ctx.beginPath(); ctx.arc(-0.5, 0, 3, Math.PI * 0.5, Math.PI * 1.5); ctx.fill();
-  if (p.cop) { ctx.fillStyle = '#0d1b4a'; ctx.beginPath(); ctx.arc(0, 0, 3.2, 0, TAU); ctx.fill(); }
+  if (p.cop) { ctx.fillStyle = p.swat ? '#121418' : '#0d1b4a'; ctx.beginPath(); ctx.arc(0, 0, p.swat ? 3.6 : 3.2, 0, TAU); ctx.fill(); }
   ctx.restore();
 }
 function drawCar(c) {
@@ -3092,9 +3258,10 @@ function drawCar(c) {
       ctx.fillStyle = '#bbb'; ctx.fillRect(-l * 0.45, -4, l * 0.62, 1.5); ctx.fillRect(-l * 0.45, 2.5, l * 0.62, 1.5);
       for (let i = 0; i < 7; i++) ctx.fillRect(-l * 0.45 + i * 4.5, -4, 1, 8);
     }
-    const lit = c.type === 'police' ? c.chase : (c.type === 'ambulance' || c.type === 'firetruck') ? !!c.job : null;
+    if (c.type === 'swat') { ctx.fillStyle = '#2b3546'; ctx.fillRect(-l / 2 + 3, -w / 2 + 3, l * 0.62, w - 6); ctx.fillStyle = '#d8d8d8'; ctx.fillRect(-l * 0.32, -w / 2, 2.5, w); ctx.fillRect(-l * 0.02, -w / 2, 2.5, w); }
+    const lit = c.type === 'police' || c.type === 'swat' ? c.chase : (c.type === 'ambulance' || c.type === 'firetruck') ? !!c.job : null;
     if (lit !== null) {
-      const on = lit && Math.sin(time * 18) > 0, bx = c.type === 'police' ? -l * 0.05 : l * 0.18;
+      const on = lit && Math.sin(time * 18) > 0, bx = c.type === 'police' ? -l * 0.05 : c.type === 'swat' ? l * 0.12 : l * 0.18;
       ctx.fillStyle = lit ? (on ? '#ff3030' : '#5a0000') : '#7a1d1d'; ctx.fillRect(bx, -w / 2 + 2, 4, (w - 4) / 2);
       ctx.fillStyle = lit ? (!on ? '#3070ff' : '#00105a') : '#1d2f7a'; ctx.fillRect(bx, 0, 4, (w - 4) / 2);
       if (lit) { ctx.fillStyle = on ? 'rgba(255,40,40,.18)' : 'rgba(40,90,255,.18)'; ctx.beginPath(); ctx.arc(0, 0, 26, 0, TAU); ctx.fill(); }
@@ -3105,7 +3272,7 @@ function drawCar(c) {
   ctx.fillRect(-l / 2, -w / 2 + 1.5, 2, 3); ctx.fillRect(-l / 2, w / 2 - 4.5, 2, 3);
   if (dmg > 0.3) { ctx.fillStyle = `rgba(20,20,20,${dmg * 0.5})`; ctx.fillRect(l * 0.25, -w / 2, l * 0.25, w); }
   const steal = c.mission && mission && mission.type === 'steal' && mission.stage === 0;
-  if (steal || c.twin || c.driver === 'eve') { ctx.strokeStyle = c.twin ? '#3cf0ff' : c.driver === 'eve' ? '#c39bd3' : '#ff2bd6'; ctx.lineWidth = 2; ctx.strokeRect(-l / 2 - 3, -w / 2 - 3, l + 6, w + 6); }
+  if (steal || c.twin || c.linked || c.decoy || c.driver === 'eve') { ctx.strokeStyle = c.twin || c.linked || c.decoy ? '#3cf0ff' : c.driver === 'eve' ? '#c39bd3' : '#ff2bd6'; ctx.lineWidth = 2; if (c.decoy) ctx.setLineDash([4, 3]); ctx.strokeRect(-l / 2 - 3, -w / 2 - 3, l + 6, w + 6); ctx.setLineDash([]); }
   ctx.restore();
 }
 function drawBranches() {
@@ -3193,12 +3360,14 @@ function drawLighting(v) {
   for (const q of parts) if (q.grow > 10 && q.life > 0.2 && !q.top) l.drawImage(glowSpr, q.x - 50, q.y - 50, 100, 100);
   if (!player.car && !player.hidden) l.drawImage(glowSpr, player.x - 45, player.y - 45, 90, 90);
   if (flight.on) l.drawImage(glowSpr, flight.x + 30, (AIRPORT.ry0 + AIRPORT.ry1) / 2 - 30, 60, 60);
+  if (heli && !heli.dead && !heli.leaveT) l.drawImage(glowSpr, heli.lx - 120, heli.ly - 120, 240, 240);
   ctx.save(); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.drawImage(lightCv, 0, 0, W, H); ctx.restore();
   if (dk > 0.15) { // coloured light sources on top
     ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = dk;
     for (const p of lamps) if (vis(p.x, p.y, 10)) { ctx.fillStyle = p.c || 'rgba(255,220,140,.9)'; ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, TAU); ctx.fill(); }
     forLights(v, (n, poles) => { for (const p of poles) { ctx.fillStyle = SIG[sigCol(n, p.g)]; ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, TAU); ctx.fill(); } });
     const on = Math.sin(time * 18) > 0;
+    if (heli && !heli.dead && !heli.leaveT) { ctx.fillStyle = 'rgba(210,230,255,.16)'; ctx.beginPath(); ctx.arc(heli.lx, heli.ly, 95, 0, TAU); ctx.fill(); }
     for (const c of cars) if ((c.chase || c.job) && vis(c.x, c.y, 40)) { ctx.fillStyle = on ? 'rgba(255,40,40,.4)' : 'rgba(40,90,255,.4)'; ctx.beginPath(); ctx.arc(c.x, c.y, 34, 0, TAU); ctx.fill(); }
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
   }
@@ -3223,11 +3392,13 @@ function drawWorld() {
   for (const b of bullets) ctx.fillRect(b.x - 1.5, b.y - 1.5, b.rocket ? 5 : 3, b.rocket ? 5 : 3);
   drawParts(false);
   drawShadows(v);
+  if (heli && SUN.on) { ctx.fillStyle = `rgba(12,18,40,${0.25 * (1 - NIGHT)})`; ctx.beginPath(); ctx.ellipse(heli.x + SUN.sx * 70, heli.y + SUN.sy * 70, 22, 14, heli.angle, 0, TAU); ctx.fill(); }
   drawLighting(v);
   drawBuildings(v);
   drawTrees(v);
   drawParts(true);
   if (flight.on) drawPlane(flight.x, (AIRPORT.ry0 + AIRPORT.ry1) / 2, 0, flight.alt);
+  drawHeli();
   drawBelief();
   const tg = missionTarget();
   if (tg && !player.hidden) {
@@ -3236,6 +3407,11 @@ function drawWorld() {
     ctx.beginPath(); ctx.arc(tg.x, tg.y, 22 + pulse, 0, TAU); ctx.stroke();
     ctx.fillStyle = ctx.strokeStyle;
     ctx.beginPath(); ctx.moveTo(tg.x, tg.y - 30 - pulse); ctx.lineTo(tg.x - 8, tg.y - 44 - pulse); ctx.lineTo(tg.x + 8, tg.y - 44 - pulse); ctx.fill();
+  }
+  if (Q.link && !player.down) {
+    const o = pp(), c = Q.link, ang = Math.atan2(c.y - o.y, c.x - o.x), dl = Math.min(140, Math.hypot(c.x - o.x, c.y - o.y));
+    ctx.strokeStyle = 'rgba(60,240,255,.55)'; ctx.setLineDash([3, 5]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(o.x + Math.cos(ang) * dl, o.y + Math.sin(ang) * dl); ctx.stroke(); ctx.setLineDash([]);
   }
   if (mission && mission.type === 'entangle' && !mission.a.dead && onScreen(mission.a.x, mission.a.y)) {
     // a hint line toward the far twin
@@ -3375,12 +3551,13 @@ function drawHUD() {
   const small = W < 600, s = small ? 0.8 : 1;
   txt(fmt(player.cash), W - 16, 40 * s, 32 * s, '#ffd54a', 'right', true);
   txt(`x${player.mult}  ${'♥'.repeat(Math.max(0, player.lives))}`, W - 16, 64 * s, 16 * s, '#ff8a8a', 'right');
-  txt(`ψ×${Q.psi}  T×${Q.tun}`, W - 16, 86 * s, 15 * s, '#c9b3ff', 'right');
+  txt(`ψ×${Q.psi}  ε×${Q.ent}`, W - 16, 86 * s, 15 * s, '#c9b3ff', 'right');
   const stars = Math.floor(heat), flash = heat >= 1 && belief.seen && Math.sin(time * 8) > 0;
   for (let i = 0; i < 5; i++) star(W / 2 - 60 + i * 30, 26, 11, i < stars, flash ? '#fff' : '#ffd54a');
   if (heat >= 1) txt(belief.seen ? 'SEEN' : `LOST YOU · Δx ≈ ${Math.round(belief.sig / T)} tiles`, W / 2, 98, 12, belief.seen ? '#ff6b6b' : '#8fb4ff', 'center');
   if (Q.branches) txt(`SUPERPOSED · ${Math.ceil(Q.supT)}s · X to collapse`, W / 2, 118, 13, '#c9b3ff', 'center');
-  if (Q.tinfo) txt(`T: tunnel through ${(Q.tinfo.d / T).toFixed(1)} tiles · p = ${Math.round(Q.tinfo.p * 100)}%`, W / 2, H / 2 + 70, 13, '#4dd0e1', 'center');
+  if (Q.link) txt(`ε entangled · T: measure and swap places · ${Math.ceil(Q.linkT)} s`, W / 2, H / 2 + 70, 13, '#3cf0ff', 'center');
+  else if (Q.decoyT > 0) txt(`the police are chasing your twin · ${Math.ceil(Q.decoyT)} s`, W / 2, H / 2 + 70, 13, '#3cf0ff', 'center');
   const bx = 16, by = H - (touchOn() ? 196 : 40);
   ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(bx, by, 164, 14);
   ctx.fillStyle = player.hp > 35 ? '#2ecc71' : '#e74c3c'; ctx.fillRect(bx + 2, by + 2, 160 * clamp(player.hp / 100, 0, 1), 10);
@@ -3406,6 +3583,9 @@ function drawHUD() {
     dot(HOSPITAL.x, HOSPITAL.y, '#e74c3c', 2); dot(POLICE_HQ.x, POLICE_HQ.y, '#3498db', 2);
     for (const sp of SPRAYS) dot(sp.x, sp.y, '#c27cf0', 2);
     if (Q.branches) for (const g of Q.branches) dot(g.x, g.y, g.tint, 2);
+    if (Q.link) dot(Q.link.x, Q.link.y, '#3cf0ff', 2.5);
+    if (heli) dot(heli.x, heli.y, Math.sin(time * 10) > 0 ? '#cfe3ff' : '#f33', 3);
+    if (Q.decoy) dot(Q.decoy.x, Q.decoy.y, '#3cf0ff', 2.5);
     const tg = missionTarget(); if (tg) dot(tg.x, tg.y, '#ffe14d', 3.5);
     dot(player.x, player.y, '#fff', 3);
     txt(streetName(pp().x, pp().y) || placeName(pp().x, pp().y), mx, my + sz + 16, 12, '#ddd');
@@ -3467,7 +3647,8 @@ const HELP = [
   ['Q / Tab', 'switch weapon'],
   ['X', 'superposition: split your car into 3 branches'],
   ['V', 'slow motion + amplitude arrows (while superposed)'],
-  ['T', 'quantum-tunnel through the wall you face'],
+  ['T', 'entangle with a car nearby · T again: swap places with it'],
+  ['Wanted', '★ tail you · ★★★ roadblocks · ★★★★ SWAT + helicopter · ★★★★★ tank'],
   ['R · M', 'radio station · minimap'],
   ['P / Esc · H', 'pause · help (press H again for quantum notes)'],
   ['L (title screen)', 'Physics Lab: 7 guided quantum lessons'],
@@ -3523,19 +3704,19 @@ function drawOver() {
 
 // ============================================================ game flow
 function resetWorld() {
-  cars = []; peds = []; bullets = []; parts = []; decals = [];
+  cars = []; peds = []; bullets = []; parts = []; decals = []; heli = null;
   seed = 4242; placeParked(); placePickups();
 }
 function newGame() {
   resetWorld();
   Object.assign(player, { hp: 100, car: null, weapons: {}, weapon: null, cash: 0, lives: 5, mult: 1, down: 0, bust: 0, hidden: false, x: HOSPITAL.x, y: HOSPITAL.y, angle: 0 });
-  Object.assign(Q, { psi: 1, tun: 2, branches: null, note: null, slow: false, bb: null });
+  Object.assign(Q, { psi: 1, ent: 2, link: null, linkT: 0, decoy: null, decoyT: 0, branches: null, note: null, slow: false, bb: null });
   lab = null; labCars = []; labFlags = {}; arcProg = [0, 0, 0, 0]; dayT = 17 / 24;
   heat = 0; belief.sig = 0; mission = null; ringing = null; ringCd = 3; won = false; curDistrict = -1; msgs = []; overlay = null;
   updateCamera(0, true);
   for (let i = 0; i < 30; i++) manageSpawns(1);
   msg('Welcome to Quantum City. Find a ride, any ride.', 5);
-  msg('In a car: X superposes it, T tunnels through walls. H for help.', 6);
+  msg('X superposes your car. T entangles you with another car. H for help.', 6);
   state = 'play';
 }
 function titleInit() {
@@ -3549,7 +3730,13 @@ function titleInit() {
 titleInit();
 
 let last = performance.now();
+// the version picker (stamped into the published page) only shows on the title screen
+function showVersionPicker() {
+  const el = document.getElementById('ver'), show = state === 'title';
+  if (el && el.dataset.on !== String(show)) { el.dataset.on = show; el.style.display = show ? 'flex' : 'none'; }
+}
 function frame(nowT) {
+  showVersionPicker();
   const dt = Math.min(0.05, Math.max(0.001, (nowT - last) / 1000)); last = nowT;
   if (state === 'title') {
     player.x += dt * 60; player.y += dt * 25;
@@ -3596,6 +3783,6 @@ function frame(nowT) {
 }
 requestAnimationFrame(frame);
 // debug/test hook
-window.__gridlock = { map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
-  newGame, startLab, setupLesson, makeCar, superpose, collapse, tunnel, startMission, bb84, keys, pressed, labFlags: () => labFlags, arcProg: () => arcProg };
+window.__gridlock = { get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
+  newGame, startLab, setupLesson, makeCar, superpose, collapse, entangle, startMission, bb84, keys, pressed, labFlags: () => labFlags, arcProg: () => arcProg };
 })();
