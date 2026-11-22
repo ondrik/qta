@@ -787,6 +787,31 @@ function genMap() {
     palm(x + 0.5, y + 7.4); palm(x + 7.5, y + 7.4); palm(x + 0.5, y + 0.6); palm(x + 7.5, y + 0.6);
     lamp(x + 2, y + 7, 60, o.neon); lamp(x + 6, y + 7, 60, o.neon);
   };
+  // a strip club on an s x s lot: a bw x bw box at the back with neon under its eaves and chaser bulbs round the roof,
+  // and in front (on the side of the lot with the most road along it) its door, a red carpet between velvet ropes,
+  // a sports car and a waiting taxi
+  const club = (at, s, bw, o) => {
+    const [x, y] = at, g = (s - bw) / 2;
+    fill(x, y, s, s, PLAZA);
+    let front = 2, best = -1;
+    for (let f = 0; f < 4; f++) { // 0 north, 1 east, 2 south, 3 west (as drawBox numbers the walls)
+      let n = 0;
+      for (let t = 0; t < s; t++) for (let d = 1; d <= 4; d++) {
+        const i = f === 1 ? x + s - 1 + d : f === 3 ? x - d : x + t, j = f === 2 ? y + s - 1 + d : f === 0 ? y - d : y + t;
+        if (i >= 0 && j >= 0 && i < MW && j < MH && map[j * MW + i] === ROAD) { n += 5 - d; break; }
+      }
+      if (n > best) { best = n; front = f; }
+    }
+    const [bx, by] = [[x + g, y + s - bw], [x, y + g], [x + g, y], [x + s - bw, y + g]][front];
+    mkB(bx, by, bw, bw, Object.assign({ kind: 'club', det: [], front, mmc: o.neon }, o));
+    const nx = [0, 1, 0, -1][front], ny = [-1, 0, 1, 0][front], tx = -ny, ty = nx; // out of the door, and along the front
+    const cx = x + s / 2 + nx * bw / 2, cy = y + s / 2 + ny * bw / 2, len = s - bw; // the middle of the strip in front
+    prop('carpet', cx, cy, { len, nx, ny });
+    const fa = Math.atan2(ty, tx);
+    fixedParked.push({ type: 'sports', x: (cx + tx * 1.9) * T, y: (cy + ty * 1.9) * T, a: fa }, { type: 'taxi', x: (cx - tx * 1.9) * T, y: (cy - ty * 1.9) * T, a: fa + Math.PI });
+    const fx = cx - nx * (len / 2 - 0.3), fy = cy - ny * (len / 2 - 0.3); // just outside the door
+    lamp(fx + tx * 0.7, fy + ty * 0.7, 50, o.neon); lamp(fx - tx * 0.7, fy - ty * 0.7, 50, o.neon);
+  };
   if (!BRNO) {
   prop('statue', RB.x, RB.y);
   for (let i = 0; i < 4; i++) tree(RB.x + Math.cos(i * 1.57 + 0.8) * 1.6, RB.y + Math.sin(i * 1.57 + 0.8) * 1.6, 9);
@@ -909,6 +934,8 @@ function genMap() {
     }
     lamp(x + 2, y + 6, 70); lamp(x + 6, y + 6, 70);
   }
+  // the strip club on the Neon Strip, with searchlights sweeping the sky at night
+  if ((at = site('The Naked Singularity', 68, 57, 6, 6))) club(at, 6, 4, { wall: '#2c1a3c', roof: '#3a2650', ht: 0.11, win: 'none', mat: 'stucco', neon: '#ff3df0', sign: 'GIRLS', beams: true });
   // ---- the towns' landmarks claim their lots before the blocks fill in
   // Bell's Crossing
   if ((at = site("Bell's Chapel", 142.5, 63.5, 6, 7))) {
@@ -1041,6 +1068,9 @@ function genMap() {
       fill(x + 1, y + 3, 3, 3, GRASS); tree(x + 2.5, y + 4.5, 12); // the cloister garden
       prop('bench', x + 2.5, y + 7.5); lamp(x + 6.5, y + 7.5, 60, '#2ea3f2'); prop('flag', x + 4.6, y + 7.4, { c: '#2ea3f2' });
     }
+    // the Moulin Rouge night club, back where it stood until 2022 (the pink house on the corner of Slovákova and
+    // Kounicova), with a red mill on its roof to go with the name
+    if ((at = place('Moulin Rouge', 49.2008, 16.6026, 6, 6))) club(at, 6, 4, { wall: '#e48cb2', roof: '#9a4a66', ht: 0.15, win: 'tall', mat: 'stucco', neon: '#ff2a55', sign: 'MOULIN ROUGE', mill: true });
     // hospitals: the trauma hospital (where you wake up), the university hospital in Bohunice; the stadium; Masaryk University
     if ((at = place('Úrazová nemocnice', 49.1978, 16.6153, 7, 6))) {
       const [x, y] = at;
@@ -1435,6 +1465,46 @@ const BOOTHS = (BRNO ? ['Staré Město', 'Veveří', 'Královo Pole', 'Žabovře
 const HOSPITALS = [HOSPITAL, ...CLINICS.map(n => besideSite(n, 0.5, 1.4))];
 const POLICE_POSTS = [POLICE_HQ, ...SHERIFFS.map(n => besideSite(n, 0.5, 1.4))];
 const nearestOf = (list, x, y) => list.reduce((a, b) => d2(a.x, a.y, x, y) <= d2(b.x, b.y, x, y) ? a : b);
+// ---- fishing: what bites where (w: s the sea, l a lake or the reservoir, r a river), and the jetties to fish from
+const FISH = (BRNO ? [ // [name, Czech name, waters, kg from, kg to, $ a kg, how hard it fights, how common, tag]
+  ['Carp', 'kapr', 'lr', 1, 14, 15, 0.6, 30], ['Bream', 'cejn', 'lr', 0.4, 3, 10, 0.3, 22], ['Perch', 'okoun', 'lr', 0.1, 1.2, 24, 0.25, 22],
+  ['Zander', 'candát', 'l', 0.8, 9, 28, 0.55, 12], ['Pike', 'štika', 'lr', 1, 12, 22, 0.75, 10], ['Brown trout', 'pstruh', 'r', 0.3, 3, 36, 0.5, 9],
+  ['Asp', 'bolen', 'r', 1, 6, 20, 0.7, 6], ['Wels catfish', 'sumec', 'lr', 8, 70, 14, 1, 2.5, 'night'],
+  ['Old boot', 'stará bota', 'lr', 0.6, 1.2, 0, 0.08, 5, 'junk'], ['Shopping trolley', 'nákupní vozík', 'r', 9, 14, 0, 0.15, 2, 'junk'],
+] : [
+  ['Mackerel', '', 's', 0.3, 1.5, 20, 0.35, 28], ['Red snapper', '', 's', 0.8, 6, 28, 0.5, 18], ['Barracuda', '', 's', 2, 14, 18, 0.8, 9],
+  ['Bluefin tuna', '', 's', 20, 120, 16, 1, 1.5], ['Quantum squid', '', 's', 0.5, 3, 120, 0.6, 2.5, 'night'],
+  ['Perch', '', 'lr', 0.1, 1.2, 24, 0.25, 24], ['Rainbow trout', '', 'lr', 0.3, 3, 32, 0.45, 18], ['Largemouth bass', '', 'l', 0.5, 5, 26, 0.6, 14],
+  ['Channel catfish', '', 'lr', 1, 18, 14, 0.8, 6, 'night'], ['Pike', '', 'l', 1, 12, 22, 0.75, 7],
+  ['Old boot', '', 'slr', 0.6, 1.2, 0, 0.08, 5, 'junk'], ['Shopping cart', '', 'r', 9, 14, 0, 0.15, 2, 'junk'],
+]).map(([name, cz, w, k0, k1, pr, str, n, tag]) => ({ name, cz, w, k0, k1, pr, str, n, tag }));
+// each jetty is on the open bank tile nearest its anchor that looks straight out over at least three tiles of open water
+// (x, y: the bank, where you walk up; fx, fy: the end of the jetty, where you stand to fish; a: the way it points)
+const FISH_SPOTS = (() => {
+  const out = [], open = openTiles(), R = Math.round(14 * BK);
+  const anchors = BRNO ? [[...geo(49.2286, 16.5166), 'l'], [...geo(49.2335, 16.5060), 'l'], [...geo(49.1905, 16.5760), 'r'], [...geo(49.2060, 16.5560), 'r'],
+    [...geo(49.1700, 16.6200), 'r'], [...geo(49.2120, 16.6300), 'r']]
+    : [[30, riverY(30), 'r'], [84, riverY(84), 'r'], [LAKES[0].x - LAKES[0].rx, LAKES[0].y, 'l'], [LAKES[1].x, LAKES[1].y + LAKES[1].ry, 'l'], [154.5, MH - 4, 's', true], [100, coastY(100) + 1, 's']];
+  for (const [ax0, ay0, w, pier] of anchors) {
+    const ax = Math.round(ax0), ay = Math.round(ay0); let best = null, bd = 1e9;
+    for (let ty = ay - R; ty <= ay + R; ty++) for (let tx = ax - R; tx <= ax + R; tx++) {
+      const dd = (tx - ax) ** 2 + (ty - ay) ** 2, k = ty * MW + tx;
+      if (dd >= bd || tx < 4 || ty < 4 || tx >= MW - 4 || ty >= MH - 4 || !open[k] || (!pier && (map[k] === ROAD || bridge[k]))) continue;
+      for (let d = 0; d < 4; d++) {
+        let ok = true;
+        for (let j = 1; j <= 3 && ok; j++) { const q = (ty + DY[d] * j) * MW + tx + DX[d] * j; ok = map[q] === WATER && !bridge[q]; }
+        if (ok) { bd = dd; best = [tx, ty, d]; break; }
+      }
+    }
+    if (!best) { console.warn('no bank to fish from near', ax, ay); continue; }
+    const [tx, ty, d] = best;
+    out.push({ w, a: Math.atan2(DY[d], DX[d]), x: (tx + 0.5) * T, y: (ty + 0.5) * T, fx: (tx + 0.5 + DX[d] * 1.2) * T, fy: (ty + 0.5 + DY[d] * 1.2) * T });
+  }
+  for (const s of out) props.push({ k: 'jetty', x: s.x, y: s.y, a: s.a, s: 0 });
+  return out;
+})();
+let fishBest = {}; // the heaviest of each kind you have caught, kept between games
+try { fishBest = JSON.parse(localStorage.getItem('qta.fish') || '{}') || {}; } catch (e) { /* ignore */ }
 // where a new game can start
 const STARTS = BRNO ? [
   { name: 'Staré Město', sub: 'the old town, under Špilberk and Petrov', p: besideSite('Náměstí Svobody', 0.5, 1.4) },
@@ -1609,6 +1679,11 @@ const sfx = {
   quantum: () => { tone(220, 0.6, 'sine', 0.15, 1760); tone(330, 0.6, 'sine', 0.1, 2640, now() + 0.05); },
   collapse: () => { tone(1800, 0.35, 'sine', 0.15, 120); noise(0.2, 3000, 'bandpass', 0.2, 2); },
   swap: () => { tone(80, 0.5, 'sine', 0.2, 900); tone(1200, 0.4, 'triangle', 0.08, 300, now() + 0.1); },
+  cast: () => noise(0.3, 1400, 'bandpass', 0.25, 2),
+  plop: () => { tone(420, 0.12, 'sine', 0.14, 140); noise(0.12, 900, 'lowpass', 0.15); },
+  bite: () => { tone(300, 0.1, 'sine', 0.18, 90); noise(0.2, 700, 'lowpass', 0.3); tone(1400, 0.06, 'square', 0.05, 0, now() + 0.05); },
+  drag: () => noise(0.35, 4200, 'bandpass', 0.12, 6),
+  snap: () => { noise(0.07, 3000, 'highpass', 0.5); tone(1900, 0.1, 'triangle', 0.08, 600); },
 };
 
 // ---- car radio: tiny procedural stations
@@ -1774,6 +1849,11 @@ const NOTES = {
     title: 'Quantum key distribution (BB84)',
     body: 'Alice sends qubits, each prepared in one of two bases (+ or ×). Bob measures each one in a random basis. They then compare bases publicly and keep only the bits where the bases matched (sifting). An eavesdropper has to measure too, and she can\'t copy qubits (the no-cloning theorem). Measuring in the wrong basis disturbs them and leaves about 25% errors in the kept key. Above roughly 11% errors the key is thrown away.',
     lib: 'This is real: BB84 (Bennett & Brassard, 1984) runs on commercial fibre links today. Game liberty: real systems send millions of photons, not 24, and they correct small errors caused by noise before using the key.',
+  },
+  fishing: {
+    title: 'A superposed catch',
+    body: 'Now and then a bite is a superposition of two catches, each with its amplitude. Landing it is a measurement: the state collapses to one of them, with the probability shown (the Born rule), and that is what you find on the hook.',
+    lib: 'Game liberty: a fish (or a boot) is big, warm and wet, and the water around it measures it all the time (decoherence), so a real catch is never in a superposition you could land.',
   },
 };
 function note(k) {
@@ -2775,8 +2855,109 @@ function enterExit() {
   if (c.type === 'firetruck') msg('Fire truck: Space sprays water.', 3);
   if (mission && mission.type === 'steal' && mission.car === c && mission.stage === 0) advanceSteal();
 }
+// ---- fishing: walk up to a jetty and press Enter. Hold Space to cast (← → aim), strike when the float goes under,
+// then hold Space to reel in, keeping the line's tension out of the red: when the fish runs, ease off or pull the other
+// way. What you catch is sold on the spot; dawn and dusk are the best times, and some fish only bite at night.
+const fishSpotAt = (x, y) => FISH_SPOTS.find(s => d2(s.x, s.y, x, y) < 26 * 26);
+const fishName = sp => BRNO && sp.cz ? `${sp.name} (${sp.cz})` : sp.name;
+const castDist = pow => (0.9 + pow * 4.6) * T;
+const dawnDusk = () => { const h = dayT * 24; return (h > 5 && h < 8) || (h > 18 && h < 21); };
+function startFishing(s) {
+  if (player.isGuest) { msg('Fishing is for the host (or a single player) for now.', 2.5); return; }
+  if (heat >= 1) { msg('Not with the police after you.', 2); return; }
+  player.fish = { s, ph: 'ready', t: 0, aim: 0, pow: 0, held: !!keys.fire };
+  player.x = s.fx; player.y = s.fy; player.angle = s.a;
+}
+function stopFishing(why) {
+  const f = player.fish; if (!f) return;
+  player.fish = null; player.x = f.s.x; player.y = f.s.y; player.angle = f.s.a + Math.PI;
+  if (why) msg(why, 2.5);
+}
+// what takes the bait: the commoner kinds mostly, the rarer ones more often far out, at dawn and dusk, or at night
+function pickFish(w, deep) {
+  const night = darkness() > 0.5, dd = dawnDusk(), pool = FISH.filter(q => q.w.includes(w));
+  const wt = q => q.n * (q.n < 10 ? 0.6 + deep : 1) * (q.tag === 'night' ? (night ? 2.5 : 0.4) : 1) * (dd && q.n < 10 && q.tag !== 'junk' ? 1.5 : 1);
+  let r = Math.random() * pool.reduce((a, q) => a + wt(q), 0);
+  const sp = pool.find(q => (r -= wt(q)) <= 0) || pool[0], u = Math.pow(Math.random(), 2.4);
+  return { sp, kg: sp.k0 + (sp.k1 - sp.k0) * u, str: sp.str * (0.55 + 0.45 * u) };
+}
+function updateFishing(dt) {
+  const f = player.fish, s = f.s, fire = !!keys.fire, down = fire && !f.held, steer = keys.right - keys.left;
+  f.held = fire; f.t += dt;
+  player.x = s.fx; player.y = s.fy; player.moving = false; player.vx = player.vy = 0;
+  if (hit('Enter', 'KeyF', 'KeyE') || keys.up || keys.down) { stopFishing(f.ph === 'fight' ? 'You cut the line and walk off.' : null); return; }
+  if (heat >= 1) { stopFishing('Police! You pack up your rod.'); return; }
+  if (f.ph === 'ready' || f.ph === 'charge') { f.aim = clamp(f.aim + steer * 1.1 * dt, -0.7, 0.7); player.angle = s.a + f.aim; }
+  if (f.dip) f.dip = Math.max(0, f.dip - dt);
+  switch (f.ph) {
+    case 'ready': if (down) { f.ph = 'charge'; f.t = 0; } break;
+    case 'charge': // the power swings up and down while you hold; let go to cast
+      f.pow = 0.5 - 0.5 * Math.cos(f.t * 2.4);
+      if (!fire) { const a = s.a + f.aim, d = castDist(f.pow); f.bx = s.fx + Math.cos(a) * d; f.by = s.fy + Math.sin(a) * d; f.ph = 'fly'; f.t = 0; f.fly = 0.35 + f.pow * 0.45; sfx.cast(); }
+      break;
+    case 'fly':
+      if (f.t >= f.fly) {
+        const tx = Math.floor(f.bx / T), ty = Math.floor(f.by / T);
+        if (tile(tx, ty) !== WATER || bridge[ty * MW + tx]) { f.ph = 'snag'; f.t = 0; msg('Snagged on the bank! Reel in and try again.', 1.6); }
+        else { f.ph = 'wait'; f.t = 0; f.bite = rand(2.5, 9) * (dawnDusk() ? 0.6 : 1); f.nib = rand(0.8, 2.2); sfx.plop(); }
+      }
+      break;
+    case 'snag': case 'miss': if (f.t > 1.4) { f.ph = 'ready'; f.t = 0; } break;
+    case 'wait':
+      if (down) { f.ph = 'ready'; f.t = 0; msg('You reel in. Nothing on the hook.', 1.4); break; }
+      f.nib -= dt; if (f.nib <= 0) { f.dip = 0.35; f.nib = rand(0.9, 2.6); } // a nibble: the float bobs, but it isn't a bite
+      if (f.t >= f.bite) { f.ph = 'bite'; f.t = 0; f.win = rand(0.55, 0.8); sfx.bite(); }
+      break;
+    case 'bite': // the float goes under: strike now
+      if (down) hookFish(f);
+      else if (f.t > f.win) { f.ph = 'miss'; f.t = 0; msg('Too slow. It took the bait and left.', 1.8); }
+      break;
+    case 'fight': fightFish(f, dt, fire, steer); break;
+    case 'caught': if (f.t > 4 || (down && f.t > 0.6)) { f.ph = 'ready'; f.t = 0; f.card = null; } break;
+  }
+}
+function hookFish(f) {
+  const deep = clamp(Math.hypot(f.bx - f.s.fx, f.by - f.s.fy) / (4 * T), 0, 1);
+  f.fish = pickFish(f.s.w, deep); f.sup = null;
+  if (Math.random() < 0.1) { // a superposed bite: two catches at once, until you land it and look
+    let g = pickFish(f.s.w, deep);
+    for (let i = 0; i < 8 && g.sp === f.fish.sp; i++) g = pickFish(f.s.w, deep);
+    if (g.sp !== f.fish.sp) {
+      const p = rand(0.3, 0.7);
+      f.sup = [[f.fish, p], [g, 1 - p]]; f.fish = { str: f.fish.str * p + g.str * (1 - p) };
+      msg(`A superposed bite: ${fishName(f.sup[0][0].sp)} ⊕ ${fishName(g.sp)}. Land it to find out.`, 3.5); sfx.quantum(); note('fishing');
+    }
+  }
+  f.ph = 'fight'; f.t = 0; f.ten = 0.3; f.prog = 0.18; f.run = false; f.rest = rand(0.5, 1.2); f.dir = 1; f.lat = 0; f.over = 0;
+}
+// the fight: reeling raises the tension, more while the fish runs (less if you pull against its run); the line snaps if
+// the tension stays in the red, and the fish gets away if you let it take all the line back
+function fightFish(f, dt, fire, steer) {
+  const st = f.fish.str;
+  if (f.run) { f.runT -= dt; if (f.runT <= 0) { f.run = false; f.rest = rand(1, 2.6) * (1.2 - st * 0.5); } }
+  else { f.rest -= dt; if (f.rest <= 0) { f.run = true; f.runT = rand(0.6, 1.5) * (0.5 + st); f.dir = Math.random() < 0.5 ? -1 : 1; if (st > 0.3) sfx.drag(); } }
+  const against = f.run && steer === -f.dir, pull = f.run ? st * (against ? 0.45 : 1) : st * 0.12;
+  const target = (fire ? 0.32 + pull * 0.9 : pull * 0.35) + 0.06 * Math.sin(f.t * 9);
+  f.ten += (target - f.ten) * Math.min(1, dt * 2.2);
+  f.prog = Math.min(1, f.prog + (fire ? (f.run ? (against ? 0.03 : -0.03) : 0.15 * (1.15 - st * 0.55)) : (f.run ? -0.09 * st - 0.02 : -0.012)) * dt);
+  f.lat = clamp(f.lat + (f.run ? f.dir * (90 + st * 60) : -f.lat * 1.6) * dt, -110, 110);
+  if (f.ten >= 1) { f.over += dt; if (f.over > 0.2) { f.ph = 'miss'; f.t = 0; msg('SNAP! The line broke.', 2); sfx.snap(); return; } } else f.over = 0;
+  if (f.prog <= 0) { f.ph = 'miss'; f.t = 0; msg('It threw the hook and got away.', 2); return; }
+  if (f.prog >= 1) landFish(f);
+}
+function landFish(f) {
+  let c = f.fish;
+  if (f.sup) { const [[a, p], [b]] = f.sup; c = Math.random() < p ? a : b; sfx.collapse(); }
+  const sp = c.sp, kg = Math.max(0.1, Math.round(c.kg * 10) / 10), v = Math.round(kg * sp.pr), was = fishBest[sp.name];
+  const rec = sp.tag === 'junk' ? null : !was ? 'first' : kg > was ? 'record' : null;
+  if (rec) { fishBest[sp.name] = kg; try { localStorage.setItem('qta.fish', JSON.stringify(fishBest)); } catch (e) { /* ignore */ } }
+  if (v) earn(v);
+  f.card = { sp, kg, v, rec, was, sup: !!f.sup }; f.ph = 'caught'; f.t = 0; f.sup = null; f.fish = null;
+  (sp.tag === 'junk' ? sfx.punch : sfx.good)();
+}
 function hurtPlayer(dmg) {
   if (player.down || player.hidden) return;
+  if (player.fish) stopFishing();
   player.hp -= dmg;
   addDecal({ k: 'blood', x: player.x, y: player.y, r: 4 });
   if (player.hp <= 0) killPlayer();
@@ -2816,7 +2997,7 @@ function faceOpen(x, y) {
 function respawn() {
   if (lab) { player.down = 0; setupLesson(lab.i); return; }
   const where = nearestOf(player.downKind === 'busted' ? POLICE_POSTS : HOSPITALS, player.x, player.y);
-  player.down = 0; player.hp = 100; player.bust = 0; player.car = null;
+  player.down = 0; player.hp = 100; player.bust = 0; player.car = null; player.fish = null;
   player.x = where.x; player.y = where.y; player.angle = faceOpen(where.x, where.y);
   heat = 0; player.mult = Math.max(1, player.mult - 1);
   if (player.lives <= 0) { if (player.isGuest) { player.lives = 5; player.cash = Math.floor(player.cash / 2); msg('Out of lives: half your cash for five more.', 4); } else { state = 'over'; saveBest(); } }
@@ -2835,7 +3016,13 @@ function updatePlayer(dt) {
     if (player.down <= 0) respawn();
     return;
   }
-  if (hit('Enter', 'KeyF', 'KeyE')) enterExit();
+  if (player.fish) { updateFishing(dt); return; }
+  if (hit('Enter', 'KeyF', 'KeyE')) { const fs = !player.car && fishSpotAt(player.x, player.y); if (fs) startFishing(fs); else enterExit(); }
+  if (!player.car) { // walking up to a jetty: say what it is for
+    const fs = fishSpotAt(player.x, player.y);
+    if (fs && fs !== player.fishHint) msg(`A fishing jetty. ${touchOn() ? '⇄' : 'Enter'}: fish.`, 2.5);
+    player.fishHint = fs;
+  }
   if (hit('KeyQ', 'Tab')) { cycleWeapon(); msg(player.weapon ? WEAPONS[player.weapon].name : 'Fists', 1.2); }
   if (hit('KeyX')) superpose();
   if (hit('KeyT')) entangle();
@@ -4239,6 +4426,30 @@ function drawProps(v) {
         break;
       case 'paint':
         ctx.fillStyle = p.c; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(p.text, x, y + 4); break;
+      case 'jetty': { // a little wooden jetty from the bank out over the water, with a bucket at the end
+        ctx.save(); ctx.translate(x, y); ctx.rotate(p.a);
+        ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fillRect(7, -6, 40, 16);
+        ctx.fillStyle = '#8a6a44'; ctx.fillRect(4, -8, 40, 16);
+        ctx.fillStyle = '#6a4e30'; for (let i = 1; i < 8; i++) ctx.fillRect(4 + i * 5, -8, 1, 16);
+        ctx.fillStyle = '#3e2c1a'; for (const [px, py] of [[8, -9], [8, 9], [42, -9], [42, 9]]) { ctx.beginPath(); ctx.arc(px, py, 2, 0, TAU); ctx.fill(); }
+        ctx.fillStyle = '#5a7a8a'; ctx.beginPath(); ctx.arc(36, 5, 3.5, 0, TAU); ctx.fill(); ctx.fillStyle = '#2c3e48'; ctx.beginPath(); ctx.arc(36, 5, 2.3, 0, TAU); ctx.fill();
+        ctx.restore(); break;
+      }
+      case 'carpet': { // a red carpet from a club's door towards the street, between brass posts and velvet ropes
+        const L = p.len * T, hw = 8;
+        ctx.save(); ctx.translate(x, y); ctx.transform(p.nx, p.ny, -p.ny, p.nx, 0, 0); // u out of the door, v across
+        ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(-L / 2 + 2, -hw + 2, L - 2, hw * 2);
+        ctx.fillStyle = '#a3122a'; ctx.fillRect(-L / 2, -hw, L - 2, hw * 2);
+        ctx.fillStyle = '#d4af37'; ctx.fillRect(-L / 2, -hw, L - 2, 1.5); ctx.fillRect(-L / 2, hw - 1.5, L - 2, 1.5);
+        for (const sv of [-1, 1]) {
+          const v = sv * (hw + 6), us = [-L / 2 + 5, -L / 2 + 5 + L * 0.3, -L / 2 + 5 + L * 0.6];
+          ctx.strokeStyle = '#6e0c1e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(us[0], v);
+          for (let i = 1; i < us.length; i++) ctx.quadraticCurveTo((us[i - 1] + us[i]) / 2, v + sv * 4, us[i], v);
+          ctx.stroke();
+          for (const u of us) { ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.arc(u + 1.5, v + 1.5, 2.6, 0, TAU); ctx.fill(); ctx.fillStyle = '#d4af37'; ctx.beginPath(); ctx.arc(u, v, 2.6, 0, TAU); ctx.fill(); }
+        }
+        ctx.restore(); break;
+      }
       case 'busstop':
         ctx.save(); ctx.translate(x, y); ctx.rotate(p.a || 0);
         ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(-11, -2, 26, 9);
@@ -4519,6 +4730,15 @@ function drawBox(b, x0, y0, x1, y1, z0, z1, win, top) {
     } else { ctx.fill(pl); }
     ctx.globalAlpha = 1;
     ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fill(pe);
+    if (b.kind === 'club' && z0 === 0 && depth > 3) { // a club: its door on the front, and a neon tube under the eaves
+      const pn = new Path2D(); quad(pn, 0.02, 0.98, 0.84, 0.88);
+      if (i === b.front) {
+        const pc = new Path2D(), dh = Math.min(0.42, 22 / depth); quad(pc, 0.44, 0.56, 0, dh); quad(pn, 0.42, 0.58, dh, dh + 0.04);
+        ctx.fillStyle = '#140a12'; ctx.fill(pc);
+      }
+      ctx.fillStyle = tint(b.neon, NIGHT > 0.1 ? 1 : L * 0.75); ctx.fill(pn);
+      if (NIGHT > 0.1) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = NIGHT * 0.3; ctx.strokeStyle = b.neon; ctx.lineWidth = 5; ctx.stroke(pn); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+    }
     // curtain walls reflect the sky: a bright band that glides to and fro across the glass as you move. It follows
     // the facade's place in the world (not on the screen), so every storey of a tower shows it in the same place,
     // and it swings smoothly (it used to wrap round and jump from one edge to the other).
@@ -4741,8 +4961,70 @@ function flatRoof(b, x0, y0, x1, y1, z, top) {
     ctx.beginPath(); ctx.moveTo(rx + rw / 2, ry + ins + 8); ctx.lineTo(rx + rw / 2, ry + rh - ins - 8); ctx.stroke();
     ctx.beginPath(); ctx.arc(rx + rw / 2, ry + rh / 2, 22 * k, 0, TAU); ctx.stroke();
   }
+  if (b.kind === 'club') { ctx.fillStyle = tint('#e8dcc0', L); chaser(rx, ry, rw, rh, k, false); }
   if (b.sign && rw > 30) roofText(b.sign, rx + rw / 2, ry + rh / 2, signSize(b.sign, rw, rh), tint(b.neon || '#ffffff', 0.85));
   b._r = [rx, ry, rw, rh, k];
+}
+// a club's bulbs round the edge of its roof; at night two in three are lit, and the gaps run round the roof
+function chaser(rx, ry, rw, rh, k, lit) {
+  const i = 9 * k, w = rw - 2 * i, h = rh - 2 * i, P = 2 * (w + h), n = Math.max(12, Math.round(P / (9 * k))), ph = Math.floor(time * 8);
+  ctx.beginPath();
+  for (let j = 0; j < n; j++) {
+    if (lit && ((j - ph) % 3 + 3) % 3 === 0) continue;
+    let d = j / n * P, x, y;
+    if (d < w) { x = rx + i + d; y = ry + i; } else if ((d -= w) < h) { x = rx + i + w; y = ry + i + d; } else if ((d -= h) < w) { x = rx + i + w - d; y = ry + i + h; } else { d -= w; x = rx + i; y = ry + i + h - d; }
+    ctx.moveTo(x + 1.6 * k, y); ctx.arc(x, y, 1.6 * k, 0, TAU);
+  }
+  ctx.fill();
+}
+// the Moulin Rouge's mill: a red tower on a front corner of the roof under a pointed cap, its four lattice sails turning in a
+// plane that leans back from the street (so that they read from straight above too), outlined in red light at night
+function drawMill(b) {
+  const f = b.front, nx = [0, 1, 0, -1][f], ny = [-1, 0, 1, 0][f], tx = -ny, ty = nx; // out of the front, and along it
+  const s = b.w * 0.14, mx = b.x + b.w / 2 + (nx + tx) * (b.w / 2 - s), my = b.y + b.h / 2 + (ny + ty) * (b.h / 2 - s);
+  const m = b._mill || (b._mill = { wall: '#b3242e', roof: '#5a161c', sd: b.sd, kind: 'mill', mat: 'brick', cap: 'hip', capH: 0.05 });
+  const z1 = b.ht + 0.08;
+  drawBox(m, mx - s, my - s, mx + s, my + s, b.ht, z1, 'slit', true);
+  drawCap(m, mx - s, my - s, mx + s, my + s, z1);
+  const hx = mx + nx * (s + 3), hy = my + ny * (s + 3), hz = z1 - 0.012, R = b.w * 0.36, rot = time * 0.8;
+  const P = (u, v) => proj(hx + tx * u - nx * v * 0.64, hy + ty * u - ny * v * 0.64, Math.max(0.004, hz + v * 0.77 / HC));
+  const L = lum(0, 0, 1), sails = [];
+  for (let j = 0; j < 4; j++) {
+    const a = rot + j * Math.PI / 2, ca = Math.cos(a), sa = Math.sin(a), w = R * 0.27;
+    const at = (r, o) => P(ca * r - sa * o, sa * r + ca * o); // r along the arm, o across it (the sail trails the arm)
+    sails.push({ arm: [at(0, 0), at(R, 0)], sail: [at(R * 0.22, 0), at(R, 0), at(R, -w), at(R * 0.22, -w)], bars: [0.42, 0.61, 0.8].map(t => [at(R * t, 0), at(R * t, -w)]), rail: [at(R * 0.22, -w * 0.5), at(R, -w * 0.5)] });
+  }
+  ctx.lineCap = 'round';
+  for (const q of sails) {
+    ctx.fillStyle = tint('#f2e4d6', L); ctx.globalAlpha = 0.55; polyFill(q.sail); ctx.globalAlpha = 1;
+    ctx.strokeStyle = tint('#8a1a24', L); ctx.lineWidth = 1.2; ctx.beginPath();
+    for (const [p0, p1] of [...q.bars, q.rail]) { ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); }
+    const s0 = q.sail; ctx.moveTo(s0[1][0], s0[1][1]); ctx.lineTo(s0[2][0], s0[2][1]); ctx.lineTo(s0[3][0], s0[3][1]); ctx.stroke();
+    ctx.strokeStyle = tint('#6a141c', L); ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(q.arm[0][0], q.arm[0][1]); ctx.lineTo(q.arm[1][0], q.arm[1][1]); ctx.stroke();
+  }
+  const c = P(0, 0); ctx.fillStyle = tint('#4a1016', L); ctx.beginPath(); ctx.arc(c[0], c[1], 4 * (1 + hz), 0, TAU); ctx.fill();
+  if (NIGHT > 0.1) { // red bulbs along the arms and round the sails
+    ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = '#ff2a40';
+    for (const [lw, al] of [[5, 0.25], [1.4, 1]]) {
+      ctx.lineWidth = lw; ctx.globalAlpha = NIGHT * al; ctx.beginPath();
+      for (const q of sails) { const [a, b2, c2, d] = q.sail; ctx.moveTo(q.arm[0][0], q.arm[0][1]); ctx.lineTo(b2[0], b2[1]); ctx.lineTo(c2[0], c2[1]); ctx.lineTo(d[0], d[1]); ctx.lineTo(a[0], a[1]); }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.lineCap = 'butt';
+}
+// two searchlights on the front corners of a club's roof, sweeping to and fro
+function drawBeams(b, rx, ry, rw, rh, k) {
+  const f = b.front, nx = [0, 1, 0, -1][f], ny = [-1, 0, 1, 0][f], tx = -ny, ty = nx, Lb = 380 * k, w = 0.05;
+  for (const sg of [-1, 1]) {
+    const ox = rx + rw / 2 + (tx * sg + nx) * 0.4 * rw, oy = ry + rh / 2 + (ty * sg + ny) * 0.4 * rh;
+    const a = Math.atan2(ny, nx) + sg * 0.55 + Math.sin(time * 0.55 + (sg + 1) * 1.3) * 0.75;
+    const gr = ctx.createLinearGradient(ox, oy, ox + Math.cos(a) * Lb, oy + Math.sin(a) * Lb);
+    gr.addColorStop(0, 'rgba(255,225,250,.32)'); gr.addColorStop(1, 'rgba(255,225,250,0)');
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.moveTo(ox, oy);
+    ctx.lineTo(ox + Math.cos(a - w) * Lb, oy + Math.sin(a - w) * Lb); ctx.lineTo(ox + Math.cos(a + w) * Lb, oy + Math.sin(a + w) * Lb); ctx.closePath(); ctx.fill();
+  }
 }
 function drawDome(b) {
   const cxw = b.x + b.w / 2, cyw = b.y + b.h / 2, d = b.dome, e = b.ht;
@@ -4803,8 +5085,11 @@ function drawBuildings(v) {
       ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = NIGHT;
       if (b.neon) { ctx.strokeStyle = b.neon; ctx.lineWidth = 6 * k; ctx.globalAlpha = NIGHT * 0.25; ctx.strokeRect(rx + 4 * k, ry + 4 * k, rw - 8 * k, rh - 8 * k); ctx.globalAlpha = NIGHT; ctx.lineWidth = 1.5 * k; ctx.strokeRect(rx + 4 * k, ry + 4 * k, rw - 8 * k, rh - 8 * k); }
       if (b.sign && rw > 30) roofText(b.sign, rx + rw / 2, ry + rh / 2, signSize(b.sign, rw, rh), b.neon || '#ffffff');
+      if (b.kind === 'club') { ctx.fillStyle = '#ffe9a8'; chaser(rx, ry, rw, rh, k, true); }
+      if (b.beams) drawBeams(b, rx, ry, rw, rh, k);
       ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
     }
+    if (b.mill) drawMill(b);
   }
   if (glow.length) {
     ctx.globalCompositeOperation = 'lighter';
@@ -4932,6 +5217,105 @@ function drawDecals(v) {
     else { ctx.fillStyle = d.k === 'blood' ? 'rgba(120,8,8,.8)' : 'rgba(10,10,10,.5)'; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, TAU); ctx.fill(); }
   }
 }
+// ---- fishing, drawn: the rod, the line, the float (or the fish on the end), and the panel that says what to do
+function fishFloat() { // where the float is, while it is out on the water
+  const f = player.fish; if (!f || !(f.ph === 'wait' || f.ph === 'bite' || f.ph === 'fly' || f.ph === 'snag')) return null;
+  if (f.ph !== 'fly') return [f.bx, f.by];
+  const u = clamp(f.t / f.fly, 0, 1), tp = rodTip(f);
+  return [lerp(tp[0], f.bx, u), lerp(tp[1], f.by, u) - Math.sin(u * Math.PI) * (20 + f.pow * 40)];
+}
+function rodTip(f) {
+  const a = player.angle, b = f.ph === 'fight' ? f.ten * 0.35 * Math.sign(f.lat || 1) : 0;
+  return [player.x + Math.cos(a + b) * 28, player.y + Math.sin(a + b) * 28];
+}
+function fishShape(x, y, a, len, c, al) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.globalAlpha = al; ctx.fillStyle = c;
+  ctx.beginPath(); ctx.ellipse(0, 0, len / 2, len / 5, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-len * 0.42, 0); ctx.lineTo(-len * 0.72, -len / 5); ctx.lineTo(-len * 0.72, len / 5); ctx.closePath(); ctx.fill();
+  ctx.restore(); ctx.globalAlpha = 1;
+}
+function drawFishing() {
+  const f = player.fish; if (!f) return;
+  const a = player.angle, ca = Math.cos(a), sa = Math.sin(a), hx = player.x + ca * 5, hy = player.y + sa * 5, tp = rodTip(f);
+  if (f.ph === 'charge') { // where the cast will land: green over water, red over land
+    const d = castDist(f.pow), lx = f.s.fx + ca * d, ly = f.s.fy + sa * d, tx = Math.floor(lx / T), ty = Math.floor(ly / T), wet = tile(tx, ty) === WATER && !bridge[ty * MW + tx];
+    ctx.strokeStyle = wet ? 'rgba(120,255,160,.8)' : 'rgba(255,90,90,.8)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]);
+    ctx.beginPath(); ctx.moveTo(tp[0], tp[1]); ctx.lineTo(lx, ly); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(lx, ly, 8, 0, TAU); ctx.stroke();
+  }
+  let end = fishFloat();
+  if (f.ph === 'fight') { // the fish, coming in as you reel, darting sideways when it runs
+    const px = -sa, py = ca, k = 0.15 + 0.85 * f.prog, ex = lerp(f.bx, tp[0], k) + px * f.lat * (1 - f.prog * 0.6), ey = lerp(f.by, tp[1], k) + py * f.lat * (1 - f.prog * 0.6);
+    const fa = Math.atan2(ey - tp[1], ex - tp[0]) + (f.run ? f.dir * 0.9 : 0), len = 12 + f.fish.str * 16;
+    if (f.sup) for (const [i, [c, p]] of f.sup.entries()) fishShape(ex + px * (i ? 9 : -9), ey + py * (i ? 9 : -9), fa, 10 + c.str * 16, '#c9b3ff', 0.25 + p * 0.4);
+    else fishShape(ex, ey, fa, len, '#0a1a20', 0.72);
+    if (f.run && Math.random() < 0.5) addPart(ex + rand(-6, 6), ey + rand(-6, 6), rand(-30, 30), rand(-30, 30), 0.35, 1.6, '#e8f6ff');
+    end = [ex, ey];
+  }
+  // the rod, bending toward the line under load
+  const bend = f.ph === 'fight' ? f.ten : f.ph === 'bite' ? 0.6 : 0.1, mx = (hx + tp[0]) / 2 + (end ? (end[0] - tp[0]) : 0) * 0.04 * bend, my = (hy + tp[1]) / 2 + (end ? (end[1] - tp[1]) : 0) * 0.04 * bend;
+  ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.quadraticCurveTo(mx, my, tp[0], tp[1]); ctx.stroke();
+  if (end) { // the line: slack sags, taut is straight, red near breaking
+    const ten = f.ph === 'fight' ? f.ten : f.ph === 'bite' ? 0.7 : 0.15, sag = (1 - Math.min(1, ten)) * 10, nx = -(end[1] - tp[1]), ny = end[0] - tp[0], nl = Math.hypot(nx, ny) || 1;
+    ctx.strokeStyle = ten > 0.85 ? '#ff5a5a' : 'rgba(240,240,240,.85)'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(tp[0], tp[1]);
+    ctx.quadraticCurveTo((tp[0] + end[0]) / 2 + nx / nl * sag, (tp[1] + end[1]) / 2 + ny / nl * sag, end[0], end[1]); ctx.stroke();
+  }
+  const fl = fishFloat();
+  if (fl && f.ph !== 'fly' || f.ph === 'fight') { // rings on the water
+    const [rx, ry] = f.ph === 'fight' ? end : fl;
+    ctx.strokeStyle = 'rgba(220,240,255,.5)'; ctx.lineWidth = 1;
+    for (let i = 0; i < 2; i++) { const r = (time * 14 + i * 9) % 18; ctx.globalAlpha = 1 - r / 18; ctx.beginPath(); ctx.arc(rx, ry, r + 3, 0, TAU); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+  }
+  if (fl) { // the float: bobs at a nibble, goes under at a bite
+    const under = f.ph === 'bite', r = under ? 1.5 : f.dip ? 2.4 : 3.4, [bx, by] = fl;
+    if (f.ph === 'fly') { ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(lerp(tp[0], f.bx, clamp(f.t / f.fly, 0, 1)), lerp(tp[1], f.by, clamp(f.t / f.fly, 0, 1)), 2.5, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = '#f4f4f4'; ctx.beginPath(); ctx.arc(bx, by, r, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#e53935'; ctx.beginPath(); ctx.arc(bx, by, r, Math.PI, TAU); ctx.fill();
+    if (under) { ctx.fillStyle = '#ffe14d'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('!', bx, by - 9 - Math.abs(Math.sin(time * 14)) * 4); }
+  }
+}
+function drawFishPanel() {
+  const f = player.fish; if (!f) return;
+  const tch = touchOn(), K = tch ? { f: '●', u: '⇄', lr: '◀ ▶', l: '◀', r: '▶' } : { f: 'Space', u: 'Enter', lr: '← →', l: '←', r: '→' };
+  // below you, or above you when the jetty points down the screen (so it never covers the line), and clear of a quantum note
+  const nw = Q.note && W > 700 ? Math.min(380, W - 24) + 12 : 0, w = Math.min(400, W - 24 - nw), h = 74, x = (W - nw - w) / 2, cx = x + w / 2;
+  const y = Math.sin(f.s.a) > 0.5 ? Math.max(130, H / 2 - 84 - h) : Math.min(H / 2 + 84, H - (tch ? 250 : 176));
+  ctx.fillStyle = 'rgba(8,16,26,.8)'; ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#4fc3f7'; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, w, h);
+  txt('FISHING', x + 10, y + 16, 11, '#4fc3f7', 'left', true);
+  txt(`${K.u}: stop`, x + w - 10, y + 16, 11, '#8fa8b8', 'right');
+  const bar = (by, v, c, lbl, red) => {
+    ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(x + 70, by, w - 84, 10);
+    if (red) { ctx.fillStyle = 'rgba(255,60,60,.35)'; ctx.fillRect(x + 70 + (w - 84) * red, by, (w - 84) * (1 - red), 10); }
+    ctx.fillStyle = c; ctx.fillRect(x + 70, by, (w - 84) * clamp(v, 0, 1), 10);
+    txt(lbl, x + 10, by + 9, 11, '#cfe3ee', 'left');
+  };
+  switch (f.ph) {
+    case 'ready': txt(`Hold ${K.f} to cast · ${K.lr} to aim`, cx, y + 44, 15, '#fff', 'center');
+      txt(dawnDusk() ? 'Dawn and dusk: the fish are biting.' : 'Cast far out for the bigger fish.', cx, y + 64, 11, '#8fa8b8', 'center'); break;
+    case 'charge': bar(y + 32, f.pow, '#ffd54a', 'power');
+      txt('Let go to cast: the ring must be on the water', cx, y + 62, 12, '#fff', 'center'); break;
+    case 'fly': case 'wait': txt(f.dip ? 'A nibble…' : 'Waiting for a bite…', cx, y + 44, 15, f.dip ? '#ffe9a0' : '#fff', 'center');
+      txt(`strike when the float goes under · ${K.f} now reels in`, cx, y + 64, 11, '#8fa8b8', 'center'); break;
+    case 'bite': if (Math.sin(time * 20) > -0.3) txt(`BITE! ${K.f}!`, cx, y + 50, 24, '#ffe14d', 'center', true); break;
+    case 'fight': {
+      bar(y + 26, f.ten, f.ten > 0.85 ? '#ff5a5a' : f.ten > 0.65 ? '#ffd54a' : '#7dff8a', 'tension', 0.85);
+      bar(y + 42, f.prog, '#4fc3f7', 'line in');
+      const tip = f.run ? `It runs ${f.dir > 0 ? 'right' : 'left'}! Ease off, or hold ${f.dir > 0 ? K.l : K.r} to pull against it` : `Hold ${K.f} to reel in`;
+      txt(f.sup ? `ψ = ${fishName(f.sup[0][0].sp)} ${Math.round(f.sup[0][1] * 100)}% ⊕ ${fishName(f.sup[1][0].sp)} ${Math.round(f.sup[1][1] * 100)}%` : tip, cx, y + 66, 11, f.sup ? '#c9b3ff' : f.run ? '#ffb38a' : '#fff', 'center');
+      break;
+    }
+    case 'caught': {
+      const c = f.card, junk = c.sp.tag === 'junk';
+      txt(`${junk ? 'You fished out' : 'Caught'}: ${fishName(c.sp)}${junk ? '' : ` · ${c.kg.toFixed(1)} kg`}`, cx, y + 40, 16, junk ? '#cfd8dc' : '#fff', 'center', true);
+      txt(junk ? 'Worth nothing. At least the water is cleaner.' : `sold for ${fmt(c.v)}${c.rec === 'record' ? ` · NEW RECORD (was ${c.was.toFixed(1)} kg)` : c.rec === 'first' ? ' · your first one' : ''}`,
+        cx, y + 62, 12, c.rec === 'record' ? '#ffd54a' : '#9fe8b0', 'center');
+      break;
+    }
+    default: txt('…', cx, y + 46, 15, '#fff', 'center');
+  }
+}
 function drawMarkers() {
   const pulse = 0.5 + 0.5 * Math.sin(time * 6);
   const mk = (p, color, label) => {
@@ -4943,6 +5327,7 @@ function drawMarkers() {
   for (const h of HOSPITALS) mk(h, '#e74c3c', 'ER');
   for (const h of POLICE_POSTS) mk(h, '#3498db', 'PD');
   for (const s of SPRAYS) mk(s, '#9b59b6', 'SPRAY');
+  for (const s of FISH_SPOTS) if (!player.fish || player.fish.s !== s) mk(s, '#29b6f6', 'FISH');
   for (const b of BOOTHS) {
     ctx.fillStyle = b === ringing && pulse > 0.5 ? '#ffe14d' : '#1e5d3a'; ctx.fillRect(b.x - 6, b.y - 6, 12, 12);
     ctx.fillStyle = '#fff'; ctx.fillRect(b.x - 3, b.y - 3, 6, 3);
@@ -5153,12 +5538,14 @@ function drawLighting(v) {
   if (Q.branches) for (const g of Q.branches) l.drawImage(glowSpr, g.x - 40, g.y - 40, 80, 80);
   for (const q of parts) if (q.grow > 10 && q.life > 0.2 && !q.top) l.drawImage(glowSpr, q.x - 50, q.y - 50, 100, 100);
   if (!player.car && !player.hidden) l.drawImage(glowSpr, player.x - 45, player.y - 45, 90, 90);
+  const fp = fishFloat(); if (fp) l.drawImage(glowSpr, fp[0] - 22, fp[1] - 22, 44, 44);
   if (flight.on) l.drawImage(glowSpr, flight.x + 30, (AIRPORT.ry0 + AIRPORT.ry1) / 2 - 30, 60, 60);
   if (heli && !heli.dead && !heli.leaveT) l.drawImage(glowSpr, heli.lx - 120, heli.ly - 120, 240, 240);
   ctx.save(); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.drawImage(lightCv, 0, 0, W, H); ctx.restore();
   if (dk > 0.15) { // coloured light sources on top
     ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = dk;
     for (const p of lamps) if (vis(p.x, p.y, 10)) { ctx.fillStyle = p.c || 'rgba(255,220,140,.9)'; ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, TAU); ctx.fill(); }
+    if (fp && player.fish.ph !== 'bite') { ctx.fillStyle = 'rgba(120,255,140,.9)'; ctx.beginPath(); ctx.arc(fp[0], fp[1], 1.8, 0, TAU); ctx.fill(); } // (the float's glow stick)
     forLights(v, (n, poles) => { for (const p of poles) { ctx.fillStyle = SIG[sigCol(n, p.g)]; ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, TAU); ctx.fill(); } });
     const on = Math.sin(time * 18) > 0;
     if (heli && !heli.dead && !heli.leaveT) { ctx.fillStyle = 'rgba(210,230,255,.16)'; ctx.beginPath(); ctx.arc(heli.lx, heli.ly, 95, 0, TAU); ctx.fill(); }
@@ -5214,6 +5601,7 @@ function drawWorld() {
   for (const p of peds) if (p.dead && onScreen(p.x, p.y)) drawPed(p);
   for (const p of peds) if (!p.dead && onScreen(p.x, p.y)) drawPed(p);
   if (!player.car && !player.hidden && !(player.down && player.downKind === 'busted')) drawPed(player, true);
+  drawFishing();
   const oth = otherPlayer();
   if (oth && !oth.inCar && !oth.hidden) drawPed(oth.dead ? Object.assign({}, oth.p, { dead: true }) : oth.p);
   for (const c of cars) if (c.lay !== 1 && onScreen(c.x, c.y, 60)) drawCar(c);
@@ -5404,6 +5792,7 @@ function drawNote() {
 }
 const MMV = 100; // tiles across the minimap
 const FIT = BRNO && siteRect('FIT BUT') ? { x: (siteRect('FIT BUT').x0 + 4) * T, y: (siteRect('FIT BUT').y0 + 4) * T } : null;
+const CLUB = (r => r && { name: r.name, x: (r.x0 + r.x1 + 1) / 2 * T, y: (r.y0 + r.y1 + 1) / 2 * T })(siteRect(BRNO ? 'Moulin Rouge' : 'The Naked Singularity')); // the strip club
 const MAP_LABELS = BRNO ? [['FIT BUT', ...geo(49.2285, 16.5955), 'hi'],
   ...['Staré Město', 'Královo Pole', 'Bystrc', 'Líšeň', 'Bohunice', 'Lesná', 'Židenice', 'Slatina', 'Tuřany', 'Žabovřesky', 'Kohoutovice', 'Komárov', 'Řečkovice']
     .map((n, i) => { const p = placeAt(n); return [n, p[0], p[1] - 2, i < 9]; }),
@@ -5464,7 +5853,9 @@ function drawHUD() {
     for (const h of HOSPITALS) dot(h.x, h.y, '#e74c3c', 2);
     for (const h of POLICE_POSTS) dot(h.x, h.y, '#3498db', 2);
     for (const sp of SPRAYS) dot(sp.x, sp.y, '#c27cf0', 2);
+    for (const sp of FISH_SPOTS) dot(sp.x, sp.y, '#4fc3f7', 2);
     if (Q.branches) for (const g of Q.branches) dot(g.x, g.y, g.tint, 2);
+    if (CLUB) { dot(CLUB.x, CLUB.y, '#ff4fa8', full ? 3.5 : 2.5); if (full) txt(CLUB.name, mx + CLUB.x / T * ms, my + CLUB.y / T * ms - 9, 11, '#ff9ccf', 'center'); }
     if (Q.link) dot(Q.link.x, Q.link.y, '#3cf0ff', 2.5);
     if (heli) dot(heli.x, heli.y, Math.sin(time * 10) > 0 ? '#cfe3ff' : '#f33', 3);
     if (Q.decoy) dot(Q.decoy.x, Q.decoy.y, '#3cf0ff', 2.5);
@@ -5505,6 +5896,7 @@ function drawHUD() {
     my2 -= small ? 20 : 26;
   }
   ctx.globalAlpha = 1;
+  drawFishPanel();
   drawNote();
   drawLabCard(small);
   drawPhasorPanel(by);
@@ -5520,7 +5912,7 @@ function drawHUD() {
 const HELP = [
   ['Arrows / WASD', 'drive · walk (up = forward, left/right = turn)'],
   ['Space', 'shoot on foot · handbrake in a car'],
-  ['Enter / F / E', 'get in or out of cars (occupied ones too)'],
+  ['Enter / F / E', 'get in or out of cars (occupied ones too) · fish at a jetty'],
   ['Q / Tab', 'switch weapon'],
   ['X', 'superposition: split your car into 3 branches'],
   ['V', 'slow motion + amplitude arrows (while superposed)'],
@@ -5542,17 +5934,20 @@ function drawHelp() {
     txt('H: quantum notes', W / 2, y + h - 10, 11, '#777', 'center');
   } else {
     txt('QUANTUM NOTES', W / 2, y + 36, 22, '#b388ff', 'center', true);
+    // the notes you have met show as much of their text as fits; the others just their titles
+    const ks = Object.keys(NOTES), body = ks.map(k => Q.notes.has(k) ? wrapLines(NOTES[k].body, w - 40, '11px system-ui, sans-serif') : []);
+    let nl = 3; while (nl > 1 && ks.reduce((a, k, i) => a + 20 + (body[i].length ? Math.min(nl, body[i].length) * 13 + 4 : 0), 0) > h - 84) nl--;
     let yy = y + 64;
-    for (const k of Object.keys(NOTES)) {
-      const n = NOTES[k], seen = Q.notes.has(k);
+    ks.forEach((k, i) => {
+      if (yy > y + h - 26) return;
+      const seen = Q.notes.has(k);
       ctx.fillStyle = seen ? '#fff' : '#888'; ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'left';
-      ctx.fillText((seen ? '● ' : '○ ') + n.title, x + 16, yy);
-      const l = wrapLines(n.body, w - 40, '11px system-ui, sans-serif');
+      ctx.fillText((seen ? '● ' : '○ ') + NOTES[k].title, x + 16, yy);
       ctx.fillStyle = '#aab'; ctx.font = '11px system-ui, sans-serif';
-      l.slice(0, 3).forEach((s2, i) => ctx.fillText(s2, x + 30, yy + 15 + i * 13));
-      yy += 18 + Math.min(3, l.length) * 13 + 6;
-      if (yy > y + h - 20) break;
-    }
+      const l = body[i].slice(0, nl); if (l.length < body[i].length) l[l.length - 1] += ' …';
+      l.forEach((s2, j) => ctx.fillText(s2, x + 30, yy + 15 + j * 13));
+      yy += 20 + (l.length ? l.length * 13 + 4 : 0);
+    });
     txt('H: close', W / 2, y + h - 8, 11, '#777', 'center');
   }
 }
@@ -5939,5 +6334,5 @@ requestAnimationFrame(frame);
 // debug/test hook
 window.__gridlock = { get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
   newGame, startLab, setupLesson, makeCar, superpose, collapse, entangle, startMission, bb84, keys, pressed, labFlags: () => labFlags, arcProg: () => arcProg,
-  NET, netAttach, faceOpen, TUNNELS, RAMPS, tunT, hostSnap, hostNet, joinNet, MAP_ID, LCG, taken, dR, mm, trees, props, FIELDS, STARTS, REG, SITE_PSI, HOSPITALS, POLICE_POSTS, get startSel() { return startSel; }, set startSel(v) { startSel = v; }, get showMap() { return showMap; }, set showMap(v) { showMap = v; } };
+  NET, netAttach, faceOpen, TUNNELS, RAMPS, tunT, FISH, FISH_SPOTS, startFishing, castDist, hostSnap, hostNet, joinNet, MAP_ID, LCG, taken, dR, mm, trees, props, FIELDS, STARTS, REG, SITE_PSI, HOSPITALS, POLICE_POSTS, get startSel() { return startSel; }, set startSel(v) { startSel = v; }, get showMap() { return showMap; }, set showMap(v) { showMap = v; } };
 })();

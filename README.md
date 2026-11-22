@@ -6,7 +6,7 @@ ringing payphones and shake off the cops. The twist is that some of the rules co
 There are two maps: a whole island (a city, farmland, a desert casino town, a forested mountain and a tropical coast)
 and **Brno**. You can play alone or **online with a friend**.
 
-No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 590 KB). Online
+No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 620 KB). Online
 co-op loads one small library, and only when you open the co-op menu.
 
 Play it at **https://ondrik.github.io/qta/**.
@@ -35,7 +35,7 @@ To release, tag the commit (`git tag -a v7 -m "what changed"`) and push the tag 
 | --- | --- |
 | Arrows / WASD | drive · walk (up = forward, left/right = turn) |
 | Space | shoot on foot · handbrake in a car |
-| Enter / F / E | get in or out of cars (occupied ones too) |
+| Enter / F / E | get in or out of cars (occupied ones too) · at a jetty: go **fishing** |
 | Q / Tab | switch weapon |
 | **X** | **superposition**: split your car into 3 branches (press again to collapse) |
 | **T** | **entangle** with a car nearby · T again: measure the pair and **swap places** with it |
@@ -70,12 +70,32 @@ Officers who get out to arrest you, man a roadblock or storm out of a SWAT van l
 empty, and walk back to it when they are no longer needed. The tank and the SWAT vans head back to base once your
 wanted level drops below theirs.
 
+## Fishing
+
+Wooden jetties stand on the banks of the rivers, the lakes and the sea (in Brno: the reservoir, the Svratka and the
+Svitava), marked FISH on the street and in blue on the map. Walk up to one and press Enter (⇄ on a touch screen):
+
+- **Cast**: hold Space (●) and let go. The power swings up and down while you hold, ← → aim, and a ring shows where
+  the float will land: it has to come down on open water, which on a narrow river takes a gentle cast.
+- **Strike**: the float bobs at a nibble, but wait until it goes under, then press Space at once.
+- **Reel in**: hold Space to reel, keeping the line's tension out of the red. When the fish runs, ease off or pull the
+  other way (← or →) or the line snaps; let it run too long and it throws the hook.
+- What you land is sold on the spot. Each water has its own fish (Brno's have their Czech names too) and the odd boot
+  or shopping trolley; the rarer and bigger ones are further out, dawn and dusk are the best times, and some only bite
+  at night. Your heaviest of each kind is remembered as a record.
+- Now and then a bite is **superposed** between two catches, shown with their probabilities, and landing it
+  collapses it to one of them.
+
+You can't fish with the police after you, and in co-op only the host can fish for now.
+
 ## The island
 
 The island is 240 × 208 tiles, about seven times the size of the old city. Choose where to start on the title
 screen: Quantum City, Bell's Crossing, Las Ondas, Coral Bay or the top of Mount Eigen.
 
-- **Quantum City** fills the north-west corner (everything in the next section).
+- **Quantum City** fills the north-west corner (everything in the next section). Its strip club, the Naked
+  Singularity, is on the Neon Strip in Neon Heights: a red carpet between velvet ropes, chaser bulbs round the roof
+  and searchlights sweeping the sky at night.
 - **Harvest Valley**: farmland east of the city, with crop fields (wheat, ploughed earth, green rows, corn,
   rapeseed), hay bales, farms with barns, silos and tractors you can drive, wind turbines on the hills, and **Lake
   Bloch**, where the Copper River starts. **Bell's Crossing** is its village: a chapel, a diner, a petrol station, a
@@ -120,6 +140,9 @@ roughly 15 m a tile.
   theatres, Špilberk, the main station, Vaňkovka, the AZ Tower, Výstaviště, Lužánky, Vila Tugendhat, the observatory,
   Mendel's abbey, the trauma hospital, the university hospital and Masaryk University's campus in Bohunice, the city
   stadium, the zoo, the harbour on the reservoir, the quarry on Hády and Brno-Tuřany airport.
+- **The Moulin Rouge** is back where the night club stood until it was pulled down in 2022, on the corner of
+  Slovákova and Kounicova: the pink house with a red carpet at the door, chaser bulbs round the roof and a red mill
+  on the corner whose sails light up at night. Both clubs are marked in pink on the map.
 - **FIT BUT**, the Faculty of Information Technology of Brno University of Technology, is highlighted: the old
   Carthusian monastery with its cloister and church, the glass wing with the FIT sign, its own marker on the map, a
   start location of its own and the FIT Hackers story arc in Královo Pole.
