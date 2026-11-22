@@ -3,11 +3,13 @@
 A lightweight top-down open-world crime sandbox that runs in the browser. You steal cars, take jobs from
 ringing payphones and shake off the cops. The twist is that some of the rules come from quantum mechanics.
 
-There are two maps: a whole island (a city, farmland, a desert casino town, a forested mountain and a tropical coast)
-and **Brno**. You can play alone or **online with a friend**.
+There are three maps: a whole island (a city, farmland, a desert casino town, a forested mountain and a tropical
+coast), **Brno**, and **inner Brno in detail**, with every street and the real buildings. Streets carry their names.
+You can play alone or **online with a friend**.
 
-No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 620 KB). Online
-co-op loads one small library, and only when you open the co-op menu.
+No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 690 KB), plus
+`brno5_data.js` (1.6 MB) for the detailed map, loaded only when you pick it. Online co-op loads one small library,
+and only when you open the co-op menu.
 
 Play it at **https://ondrik.github.io/qta/**.
 
@@ -39,12 +41,13 @@ To release, tag the commit (`git tag -a v7 -m "what changed"`) and push the tag 
 | Q / Tab | switch weapon |
 | **X** | **superposition**: split your car into 3 branches (press again to collapse) |
 | **T** | **entangle** with a car nearby · T again: measure the pair and **swap places** with it |
+| **G** | **optical tweezer**: pick up the empty car behind yours (G again drops it) |
 | V | slow motion + amplitude arrows (phasors) while superposed |
 | Space in a tank / fire truck | fire the cannon / spray water |
 | R · M | radio station · minimap (M again shows the whole map, then hides it) |
 | P / Esc · H | pause (Q on the pause screen quits to the title screen) · help (press H again for the quantum notes) · N dismisses a note |
-| ← → · ↑ ↓ (title screen) | choose where to start · switch between the island and Brno |
-| L (title screen) | **Physics Lab**: 7 guided lessons (L again from the pause screen to leave) |
+| ← → · ↑ ↓ (title screen) | choose where to start · switch between the island, Brno and inner Brno in detail |
+| L (title screen) | **Physics Lab**: 10 guided lessons (L again from the pause screen to leave) |
 | O (title screen) | **online co-op** with a friend |
 
 On phones and tablets, touch buttons appear automatically. On the title screen, tap the left half to play
@@ -115,7 +118,7 @@ screen: Quantum City, Bell's Crossing, Las Ondas, Coral Bay or the top of Mount 
 
 ## Brno
 
-Switch to Brno with ↑ or ↓ on the title screen. The map is built from [OpenStreetMap](https://www.openstreetmap.org)
+Switch maps with ↑ or ↓ on the title screen (the island, Brno, inner Brno in detail). The Brno map is built from [OpenStreetMap](https://www.openstreetmap.org)
 data (© OpenStreetMap contributors, available under the [ODbL](https://opendatacommons.org/licenses/odbl/)): the
 main roads with their real names, the Svratka and Svitava, the reservoir, the railways, the land use (housing,
 industry, parks, forests, fields and vineyards) and the names of the districts. It covers about 14 × 12.5 km, from
@@ -131,6 +134,11 @@ roughly 15 m a tile.
   meeting them, and from the street you see only the ramps going down into the portals. Drive in and the city above
   fades to show the lit tube. Nobody walks or gets out down there, and the police can't see you, so a tunnel is a
   good way to shake them off.
+- **Overpasses**: where a road crosses another on a bridge (the VMO's interchanges, Vídeňská, Hlavní and others), it
+  rises on ramps to a deck of its own, drawn raised in perspective with its parapets, piers and shadow. The traffic up
+  there and the traffic underneath don't meet, and the deck turns see-through while you drive under it. A bridge only
+  counts as an overpass if it really crosses another street and a deck can be traced for it; the rest stay ordinary
+  streets, so the network never gains a gap.
 - **City blocks**: paved lanes (you can drive down them) cut the big blocks between the main roads into blocks of a
   real size. Tenement blocks are built around their edges with courtyards inside, industrial estates have yards,
   housing estates have lawns between the slabs, and the old town is a maze of narrow lanes and little squares
@@ -151,80 +159,23 @@ roughly 15 m a tile.
   and Líšeň, warehouses on industrial land, and villages round the edge.
 
 The data was fetched once through the Overpass API and is embedded in `game.js`, so playing needs no network.
-`tools/brno/build.sh` rebuilds it (it needs Python 3 with numpy, scipy and Pillow).
 
-## Online co-op
+### Inner Brno in detail
 
-Press **O** on the title screen. One of you hosts and gets a five-letter room code; the other types it in and joins.
-You share one world (the host's), each with your own cash and lives, and the same wanted level. The police go after
-whichever of you is nearer. If the host is on the other map, the guest's game switches to it.
+The third map is inner Brno at about **5 m a tile**: 1426 × 1468 tiles, 7.1 × 7.3 km from Královo Pole and
+Žabovřesky in the north to Komárov in the south, and from Pisárky to Židenice. At this scale a car, a street and a
+building are their real size.
 
-The host's browser runs the whole simulation. The guest's browser sends its keys and draws what the host sends back
-about 15 times a second. The two browsers find each other through the free public [PeerJS](https://peerjs.com)
-service and then talk directly (WebRTC). The PeerJS library is only fetched when you open the co-op menu.
-
-## Quantum City
-
-- **Four districts**, each with a three-job **story arc**. The first payphone you answer in a district
-  starts its arc, and after each job the same contact calls back from a booth nearby. Finishing an arc
-  pays a $10,000 bonus.
-- **Layout**: not a grid. The Copper River winds through the middle with roads along both banks.
-  Planck Boulevard cuts diagonally across town over a slanted bridge into Superposition Circus, a
-  six-way roundabout on Grand Avenue. Old Street and Church Lane wind through the Old Quarter. Streets jog
-  and end in T-junctions, and blocks come in all shapes. The Ring Expressway runs around the edge with
-  rounded corners (faster traffic). The HUD shows the street you're on.
-- **Landmarks**: Gridlock International Airport (planes take off on a schedule) and Quantum Stadium.
-- **Places**: Mercy General Hospital (helipad, ambulances), Police Headquarters (parked cruisers you can
-  steal), Fire Station No. 7, St. Planck's Church and its churchyard, Schrödinger Elementary (basketball
-  court), the Museum of Uncertain History, City Hall with its dome, Heisenberg Tower, the Superposition
-  Mall, Qubit Gas and Dirac Park. The HUD shows the name of the place you're in.
-- **Architecture by district**: brick blocks and warehouses in Harbor Row, glass towers in Midtown,
-  houses with pitched roofs and chimneys in the Old Quarter, neon signs in Neon Heights.
-- **Traffic and people**: crossings have traffic lights that drivers obey (cops on a chase don't).
-  Drivers follow lanes along curves and through the roundabout, route to destinations across the road
-  network, stop for pedestrians and steer around wrecks. Buses stop at bus
-  stops to pick up passengers. Pedestrians walk to places, wait for the lights at crosswalks, go into
-  buildings, and stop to chat.
-- **Vehicles**: hatchbacks, sedans, sports coupes, taxis, box trucks, motorbikes (you can get thrown off),
-  city buses, police cruisers, and at five stars a **tank** that you can also steal. Ambulances revive
-  people who've been knocked down and heal you if you get in. Fire trucks put out fires, tow wrecks, and
-  spray water when you drive one.
-- **Countryside textures**: sand with wind ripples, forest floor, dry grass, rock with lichen, snow, crops in rows
-  and vineyards, blended into each other with soft edges, with hill shading and surf on the shores.
-- **Textures**: cracked and patched asphalt with tyre wear and oil stains, paving slabs, brick pavers, grass, water and
-  quay stones on the ground; brick, stone, concrete, render, weatherboard and corrugated-metal walls; clay-tile, slate,
-  gravel, bitumen and metal roofs; glass towers that reflect the sky as you move; leafy trees and glossy cars. All of
-  them are generated from seamless noise when the game loads, so there are no image files.
-- **Roof detail**: flat roofs carry stair huts, air conditioners with turning fans, mushroom vents, drains, rain
-  stains and skylights (lit from below at night), more of them the bigger the roof, and their parapets cast a shadow
-  onto the roof.
-- **Day and night**: a full day lasts 8 minutes. Shadows follow the sun, and evenings turn golden. At
-  night windows light up, and there are neon signs, street lamps, headlight cones and glowing police
-  lights.
-- **Jobs**: delivery, car theft, hits, checkpoint races, wrecking sprees, escorts, getaways that you only
-  finish once the police have lost sight of you, plus the quantum jobs below.
-
-## The quantum mechanics
-
-Each mechanic shows a short **Quantum Note** the first time you run into it. The note explains the real
-physics and also says where the game takes liberties.
-
-| Mechanic | In the game | Real idea |
-| --- | --- | --- |
-| Superposition (ψ pickups, `X`) | Your car splits into 3 ghost branches that take different routes. When a cop sees any branch, or after 10 s, the game picks one branch at random with probability \|amplitude\|² and you end up there. A branch that touches anything loses amplitude. | Superposition, the Born rule, measurement, decoherence |
-| Police uncertainty cloud | Once cops lose sight of you, they only know your last momentum. Their guess drifts along it and spreads out, and each cruiser searches a point sampled from that cloud. Turning while out of sight sends them the wrong way. | Uncertainty principle (a loose analogy, as the note says) |
-| Entanglement swap (ε pickups, `T`) | Press T next to a car to entangle with it, then let it drive off. Press T again to measure the pair: you swap places instantly, however far apart you are. If the police spot your twin while they've lost you, the pair collapses on its own and they chase the twin instead. | Entanglement and long-distance correlations; quantum teleportation moves a *state* and still needs an ordinary signal, so nothing travels faster than light |
-| Entangled cars (job) | Wreck one cyan twin and its partner across town goes up too. | Entanglement (the note explains that the no-signalling theorem forbids this in reality) |
-| Schrödinger's briefcase (job) | The case is "cash" or "bomb" until you deliver it, and rough driving raises the bomb odds. | Schrödinger's cat thought experiment |
-| Quantum key run (job) | Carry 32 qubits while Eve tails you. If she gets close she measures them, and the **BB84 report** at the end shows every qubit's bases, the sifted key and the error rate. Over 11% errors means the key is thrown away. | BB84 quantum key distribution: an eavesdropper leaves about 25% errors; real-world QKD |
-
-### Physics Lab
-
-The Physics Lab (press `L` on the title screen) walks through the mechanics one at a time: superposition,
-measurement, uncertainty, entanglement, long-distance collapse, Schrödinger's briefcase and BB84. Each lesson has a
-goal and opens the matching Quantum Note. During superposition it shows each branch's amplitude as a
-rotating arrow (a phasor), with the probability equal to the arrow's length squared. You can't lose lives
-in the lab, so it works for teaching or a first look at the quantum ideas.
-
-Everything is original: the code, the procedural city, the procedurally generated textures, the art drawn on the
-canvas, and the synthesized sound and radio music.
+- **Every street** with its name (about 3,300 of them), traced into one network like the main roads above, with the
+  tunnels and 23 overpasses. Traffic lights stand where main roads meet; the side streets are left to the drivers.
+- **The real buildings**: 36,684 outlines from OpenStreetMap, cut into boxes, with the number of floors where it is
+  mapped (most are), the roof shape (pitched roofs on houses and old-town blocks), the kind of building, and the
+  colours where they are mapped. Courtyards stay open.
+- The land use at full resolution: squares and pedestrian streets, car parks, parks and cemeteries, railway land
+  and sports grounds; the mapped street trees, and parks and woods planted at a believable density; tram tracks in
+  the streets and every track of the railway.
+- **Landmarks from the data**: the hospitals (you wake up at the trauma hospital), police and fire stations, with
+  their vehicles outside; FIT BUT's buildings; the astronomical clock on Náměstí Svobody and the market on Zelný trh;
+  the Moulin Rouge back on its corner; the Atom Array Lab; fishing on the Svratka and the Svitava.
+- It takes about 5 s to load and a few hundred MB of memory. The data is built by `tools/brno5/build.sh` (from
+  OpenStreetMap, © OpenStreetMap contributors, ODbL) into `brno5_data.js`, which `index.html` loads only for this map.

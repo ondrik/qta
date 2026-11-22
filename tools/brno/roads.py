@@ -1,7 +1,12 @@
 import json, math, sys
 from PIL import Image, ImageDraw
-LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.698, 49.140, 49.252, 960, 832  # about 15 m a tile
-SC = MW / 480  # tiles per 30 m: the distances below were tuned at 30 m a tile and scale with it
+import os
+if os.environ.get('QTA_MAP') == 'brno5':  # the detailed map: inner Brno at about 5 m a tile (see ../brno5)
+    LON0, LON1, LAT0, LAT1, MW, MH = 16.556, 16.654, 49.166, 49.232, 1426, 1468
+    SC = 6.0
+else:
+    LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.698, 49.140, 49.252, 960, 832  # about 15 m a tile
+    SC = MW / 480  # tiles per 30 m: the distances below were tuned at 30 m a tile and scale with it
 P = lambda lat, lon: ((lon - LON0) / (LON1 - LON0) * MW, (LAT1 - lat) / (LAT1 - LAT0) * MH)
 RANK = {'motorway': 0, 'trunk': 1, 'primary': 2, 'secondary': 3, 'tertiary': 4}
 def dp(pts, eps):

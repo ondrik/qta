@@ -9,14 +9,14 @@
 // Usage: node tools/release.mjs [outdir]        (default _site)
 
 import { execFileSync, execSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RELEASE = /^v\d+$/;
-const FILES = ['index.html', 'game.js']; // everything a version needs to run
+const FILES = ['index.html', 'game.js', 'brno5_data.js']; // everything a version needs to run (older ones lack some)
 
 const git = (...args) => execFileSync('git', args,
   { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
@@ -108,7 +108,7 @@ mkdirSync(out, { recursive: true });
 const rels = releases(), label = headLabel(rels);
 
 // the current game, from the working tree
-for (const f of FILES) cpSync(join(ROOT, f), join(out, f));
+for (const f of FILES) if (existsSync(join(ROOT, f))) cpSync(join(ROOT, f), join(out, f));
 stamp(join(out, 'index.html'), rels, 'latest', label);
 console.log(`/            ${label}`);
 
@@ -116,9 +116,10 @@ console.log(`/            ${label}`);
 for (const { tag } of rels) {
   const at = join(out, 'v', tag), work = mkdtempSync(join(tmpdir(), `qta-${tag}-`));
   try {
-    execSync(`git archive ${tag} ${FILES.join(' ')} | tar -x -C ${JSON.stringify(work)}`, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    const has = FILES.filter((f) => git('ls-tree', '--name-only', tag, f) === f); // (a file added later is not in older tags)
+    execSync(`git archive ${tag} ${has.join(' ')} | tar -x -C ${JSON.stringify(work)}`, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
     mkdirSync(at, { recursive: true });
-    for (const f of FILES) cpSync(join(work, f), join(at, f));
+    for (const f of has) cpSync(join(work, f), join(at, f));
     stamp(join(at, 'index.html'), rels, tag, label);
     console.log(`/v/${tag}/`.padEnd(13), tag);
   } finally {

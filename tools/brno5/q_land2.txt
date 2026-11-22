@@ -1,0 +1,9 @@
+[out:json][timeout:300];
+(
+  way["leisure"~"^(park|garden|pitch|playground|stadium|sports_centre|track|common|dog_park|swimming_pool)$"](49.166,16.556,49.232,16.654);
+  relation["leisure"~"^(park|garden|stadium|sports_centre)$"](49.166,16.556,49.232,16.654);
+  way["natural"~"^(water|wood|scrub|grassland|heath|wetland)$"](49.166,16.556,49.232,16.654);
+  relation["natural"~"^(water|wood|scrub)$"](49.166,16.556,49.232,16.654);
+  way["waterway"~"^(river|canal|stream)$"](49.166,16.556,49.232,16.654);
+);
+out tags geom;

@@ -117,7 +117,9 @@ def raw_ways():
     for e in json.load(open('roads.json'))['elements']:
         t = e['tags']; h = t.get('highway')
         if h not in RK or t.get('area') == 'yes': continue
-        out.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'link': h.endswith('_link'), 'tunnel': t.get('tunnel') == 'yes'})
+        lv = int(t.get('layer', '0').split(';')[0]) if t.get('layer', '0').lstrip('-').split(';')[0].isdigit() else 0
+        out.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'link': h.endswith('_link'), 'tunnel': t.get('tunnel') == 'yes',
+                    'bridge': t.get('bridge') in ('yes', 'viaduct') and lv > 0, 'lv': abs(lv)})
     return out
 def graph_edges(cent, edges):
     """polylines (tile units) of a traced, cleaned graph"""
@@ -269,44 +271,63 @@ def close_gaps(out, portals=(), pair_max=25 * SC, reach=10 * SC, margin=6):
     print('gaps closed', len(add))
     return add
 if __name__ == '__main__':
+    import decks
     ways = raw_ways()
     sel, tun = [w for w in ways if not w['tunnel']], [w for w in ways if w['tunnel']]
-    portals = [w['pts'][k] for w in tun for k in (0, -1)]  # where the tunnels come up
-    TC = dict(spur=5 * R * SC, minlen=2.5 * R * SC, width=1.5 * SC, close_iter=round(SC))
-    cent, edges, near = trace_clean(sel, **TC)
-    lines = graph_edges(cent, edges)
-    con = connectors(lines, portals)
-    print('first pass', len(edges), 'edges; connectors', len(con))
-    sel = sel + con
-    cent, edges, near = trace_clean(sel, **TC)
-    print('clean', len(cent), 'nodes', len(edges), 'edges')
+    # overpasses: bridges that cross another of the main roads go up on decks of their own (see decks.py)
+    grid = decks.seg_grid([w for w in sel if not w['bridge']])
+    over_ways = [w for w in sel if w['bridge'] and decks.crosses(w['pts'], grid)]
+    sel = [w for w in sel if w not in over_ways]
+    print('overpass ways', len(over_ways))
     grid = np.load('landgrid.npy'); urban = (grid == 4) | (grid == 5)
-    out = []
-    for a, b, path in edges:
-        pts = [cent[a]] + path[1:-1] + [cent[b]]
-        pts = [(x / R + 0.25, y / R + 0.25) for x, y in pts]
-        labs = [near[min(MH * R - 1, int(y * R)), min(MW * R - 1, int(x * R))] for x, y in pts]
-        votes = {}
-        for l in labs:
-            if l >= 0: votes[l] = votes.get(l, 0) + 1
-        named = {l: v for l, v in votes.items() if sel[l]['name'] and not sel[l].get('link')}
-        best = max(votes, key=votes.get) if votes else -1
-        nb_ = max(named, key=named.get) if named else best
-        name = sel[nb_]['name'] if nb_ >= 0 else ''
-        rank = min(sel[best]['r'], 4) if best >= 0 else 4
-        for _ in range(round(3 * SC)): # smooth the pixel staircase (ends stay put so roads still meet)
-            if len(pts) > 4: pts = [pts[0], pts[1]] + [((pts[i-2][0] + pts[i-1][0] + pts[i][0] + pts[i+1][0] + pts[i+2][0]) / 5, (pts[i-2][1] + pts[i-1][1] + pts[i][1] + pts[i+1][1] + pts[i+2][1]) / 5) for i in range(2, len(pts) - 2)] + [pts[-2], pts[-1]]
-        pts = dp(pts, 0.2 * SC)
-        smp = resample(pts, 0.5)
-        ur = sum(1 for x, y in smp if 0 <= int(x) < MW and 0 <= int(y) < MH and urban[int(y), int(x)]) / max(1, len(smp))
-        if seglen(pts) < 0.3 * SC: continue
-        out.append({'name': name, 'r': rank, 'rural': 1 if (rank <= 1 or ur < 0.4) else 0, 'pts': pts})
-    out += close_gaps(out, portals)
-    out += tunnels(tun, out)
+    TC = dict(spur=5 * R * SC, minlen=2.5 * R * SC, width=1.5 * SC, close_iter=round(SC))
+    def streets(sel, over_ways):
+        portals = [w['pts'][k] for w in tun + over_ways for k in (0, -1)]  # where the tunnels come up and the overpasses rise
+        cent, edges, near = trace_clean(sel, **TC)
+        lines = graph_edges(cent, edges)
+        con = connectors(lines, portals)
+        print('first pass', len(edges), 'edges; connectors', len(con))
+        sel = sel + con
+        cent, edges, near = trace_clean(sel, **TC)
+        print('clean', len(cent), 'nodes', len(edges), 'edges')
+        out = []
+        for a, b, path in edges:
+            pts = [cent[a]] + path[1:-1] + [cent[b]]
+            pts = [(x / R + 0.25, y / R + 0.25) for x, y in pts]
+            labs = [near[min(MH * R - 1, int(y * R)), min(MW * R - 1, int(x * R))] for x, y in pts]
+            votes = {}
+            for l in labs:
+                if l >= 0: votes[l] = votes.get(l, 0) + 1
+            named = {l: v for l, v in votes.items() if sel[l]['name'] and not sel[l].get('link')}
+            best = max(votes, key=votes.get) if votes else -1
+            nb_ = max(named, key=named.get) if named else best
+            name = sel[nb_]['name'] if nb_ >= 0 else ''
+            rank = min(sel[best]['r'], 4) if best >= 0 else 4
+            for _ in range(round(3 * SC)): # smooth the pixel staircase (ends stay put so roads still meet)
+                if len(pts) > 4: pts = [pts[0], pts[1]] + [((pts[i-2][0] + pts[i-1][0] + pts[i][0] + pts[i+1][0] + pts[i+2][0]) / 5, (pts[i-2][1] + pts[i-1][1] + pts[i][1] + pts[i+1][1] + pts[i+2][1]) / 5) for i in range(2, len(pts) - 2)] + [pts[-2], pts[-1]]
+            pts = dp(pts, 0.2 * SC)
+            smp = resample(pts, 0.5)
+            ur = sum(1 for x, y in smp if 0 <= int(x) < MW and 0 <= int(y) < MH and urban[int(y), int(x)]) / max(1, len(smp))
+            if seglen(pts) < 0.3 * SC: continue
+            out.append({'name': name, 'r': rank, 'rural': 1 if (rank <= 1 or ur < 0.4) else 0, 'pts': pts})
+        out += close_gaps(out, portals)
+        out += tunnels(tun, out)
+        over, back = decks.side(over_ways, [w for w in out if not w.get('tunnel')], 'over', 1.3, 2, 4)
+        return out + back, over
+    # build the streets, then the decks; a bridge no deck came out of is an ordinary street after all, and it all goes again
+    for it in range(4):
+        out, over = streets(sel, over_ways)
+        keep = decks.covered(over_ways, over)
+        print('pass', it, 'decks kept', len(keep), 'of', len(over_ways))
+        if len(keep) == len(over_ways): break
+        sel, over_ways = sel + [w for w in over_ways if w not in keep], keep
+    over = decks.ramps(over, out, 3)
+    print('overpasses', len(over), [(o['name'], round(seglen(o['pts']), 1)) for o in over])
+    out += over
     json.dump(out, open('net.json', 'w'), ensure_ascii=False)
     S = 2; im = Image.new('RGB', (MW * S, MH * S), (35, 60, 35)); d = ImageDraw.Draw(im)
     col = {0: (230, 120, 60), 1: (230, 180, 60), 2: (240, 220, 120), 3: (240, 240, 240), 4: (170, 170, 170), 5: (140, 140, 140)}
-    for w in out: d.line([(x * S, y * S) for x, y in w['pts']], fill=col[w['r']], width=2)
+    for w in out: d.line([(x * S, y * S) for x, y in w['pts']], fill=(255, 60, 200) if w.get('over') else col[min(5, w['r'])], width=2)
     deg = {}
     for w in out:
         for p in (w['pts'][0], w['pts'][-1]): k = (round(p[0], 1), round(p[1], 1)); deg[k] = deg.get(k, 0) + 1

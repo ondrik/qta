@@ -59,7 +59,7 @@ def clip(pts, m=1.5):
         elif cur: out.append(cur); cur = []
     if cur: out.append(cur)
     return [dp(c, 0.25) for c in out if seglen(c) >= 0.6]
-roads = [dict(w, pts=c) for w in roads for c in clip(w['pts'])]
+roads = [dict(w, pts=c) for w in roads for c in ([w['pts']] if w.get('over') or w.get('tunnel') else clip(w['pts']))]
 rails = [c for r in rails for c in clip(r, 1.2)]
 cls = {0: 'motorway', 1: 'trunk', 2: 'primary', 3: 'secondary', 4: 'tertiary', 5: 'residential'}
 R = []
@@ -67,7 +67,8 @@ for w in roads:
     pts = [(round(x, 1), round(y, 1)) for x, y in w['pts']]
     nm = w['name'].split(';')[0]
     if nm.isdigit(): nm = 'Silnice ' + nm
-    R.append([nm, w['r'], w.get('rural', 1 if (w['r'] <= 1 or frac_urban(w['pts']) < 0.4) else 0), [c for p in pts for c in p]] + ([1] if w.get('tunnel') else []))
+    flag = 1 if w.get('tunnel') else (1 + w.get('lv', 1)) if w.get('over') else 0  # (1 a tunnel, 2 or 3 an overpass on that layer + 1)
+    R.append([nm, w['r'], w.get('rural', 1 if (w['r'] <= 1 or frac_urban(w['pts']) < 0.4) else 0), [c for p in pts for c in p]] + ([flag] if flag else []))
 data = {'lc': lc, 'roads': R, 'rails': [[c for x, y in r for c in (round(x, 1), round(y, 1))] for r in rails],
         'rivers': [[n, [c for x, y in pts for c in (round(x, 1), round(y, 1))]] for n, pts in rivers],
         'places': [[n, round(x, 1), round(y, 1)] for n, x, y in places]}
