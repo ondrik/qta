@@ -2,8 +2,7 @@ import json, math
 import numpy as np
 from PIL import Image, ImageDraw
 from scipy import ndimage
-LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.698, 49.140, 49.252, 480, 416  # about 30 m a tile
-P = lambda lat, lon: ((lon - LON0) / (LON1 - LON0) * MW, (LAT1 - lat) / (LAT1 - LAT0) * MH)
+from roads import MW, MH, P, SC
 OPEN, FOREST, FARM, VINE, URBAN, INDUS, GREEN, WATER, AIR = range(9)
 d = [e for e in json.load(open('layers.json'))['elements'] if e['type'] != 'relation'] + json.load(open('rels.json'))['elements']
 res = json.load(open('res.json'))['elements']
@@ -33,7 +32,7 @@ def cls(t):
     if lu in ('industrial', 'commercial', 'retail', 'construction'): return INDUS
     if lu in ('allotments', 'cemetery', 'grass', 'village_green', 'greenery', 'park', 'railway') or lei == 'park': return GREEN
     return None
-S = 4  # rasterise at 4 sub-samples per tile, then take the majority per tile
+S = max(2, round(4 / SC))  # rasterise at sub-samples of about 7.5 m, then take the majority per tile
 layers = {c: Image.new('L', (MW*S, MH*S), 0) for c in range(9)}
 order = {URBAN: 0, INDUS: 1, FARM: 2, OPEN: 3, VINE: 4, FOREST: 5, GREEN: 6, AIR: 7, WATER: 8}
 for e in d:
@@ -49,7 +48,7 @@ for e in d:
     if t.get('waterway') == 'river' and e['type'] == 'way':
         pts = [P(g['lat'], g['lon']) for g in e['geometry']]
         rivers.append((t.get('name', ''), pts))
-        ImageDraw.Draw(layers[WATER]).line([(x*S, y*S) for x, y in pts], fill=255, width=int(2.0*S))
+        ImageDraw.Draw(layers[WATER]).line([(x*S, y*S) for x, y in pts], fill=255, width=int(1.5*SC*S))
 grid = np.full((MH, MW), -1, dtype=int)
 for c in sorted(order, key=order.get):
     a = np.array(layers[c]).reshape(MH, S, MW, S).mean(axis=(1, 3)) > 110
@@ -58,11 +57,11 @@ for c in sorted(order, key=order.get):
 hint = Image.new('L', (MW*S, MH*S), 0)
 for e in res:
     if e['tags'].get('highway') in ('residential', 'living_street'):
-        ImageDraw.Draw(hint).line([(P(g['lat'], g['lon'])[0]*S, P(g['lat'], g['lon'])[1]*S) for g in e['geometry']], fill=255, width=int(5.0*S))
+        ImageDraw.Draw(hint).line([(P(g['lat'], g['lon'])[0]*S, P(g['lat'], g['lon'])[1]*S) for g in e['geometry']], fill=255, width=int(5.0*SC*S))
 hint = np.array(hint).reshape(MH, S, MW, S).mean(axis=(1, 3)) > 90
 grid[((grid == -1) | (grid == OPEN)) & hint] = URBAN
 urb = (grid == URBAN) | (grid == INDUS)
-closed = ndimage.binary_fill_holes(ndimage.binary_closing(urb, iterations=4))
+closed = ndimage.binary_fill_holes(ndimage.binary_closing(urb, iterations=round(4 * SC)))
 grid[(grid == -1) & closed] = URBAN
 grid[grid == -1] = OPEN
 np.save('landgrid.npy', grid)

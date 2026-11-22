@@ -6,7 +6,7 @@ ringing payphones and shake off the cops. The twist is that some of the rules co
 There are two maps: a whole island (a city, farmland, a desert casino town, a forested mountain and a tropical coast)
 and **Brno**. You can play alone or **online with a friend**.
 
-No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 500 KB). Online
+No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 590 KB). Online
 co-op loads one small library, and only when you open the co-op menu.
 
 Play it at **https://ondrik.github.io/qta/**.
@@ -99,16 +99,22 @@ Switch to Brno with ↑ or ↓ on the title screen. The map is built from [OpenS
 data (© OpenStreetMap contributors, available under the [ODbL](https://opendatacommons.org/licenses/odbl/)): the
 main roads with their real names, the Svratka and Svitava, the reservoir, the railways, the land use (housing,
 industry, parks, forests, fields and vineyards) and the names of the districts. It covers about 14 × 12.5 km, from
-Bystrc and the reservoir dam in the west to Líšeň and the airport in the east. The map is 480 × 416 tiles, at
-roughly 30 m a tile, so the cars and buildings are still a little small for the streets.
+Bystrc and the reservoir dam in the west to Líšeň and the airport in the east. The map is 960 × 832 tiles, at
+roughly 15 m a tile.
 
 - **The road network** is the city's motorways, the Velký městský okruh, and its primary and secondary roads, plus
   tertiary roads where they are the main way through a suburb or village. The roads are painted onto a fine grid,
   thinned to their centre lines and traced, so divided roads and small roundabouts merge into single roads; a dead
-  end is joined to the network along the residential streets that link it in reality, so the network is one
-  connected graph. The railways are traced the same way.
-- **City blocks** are built around their edges, with courtyards inside (yards on the industrial estates), and the
-  old town is a maze of narrow lanes and little squares between the burgher houses.
+  end is joined to the network along the residential streets that link it in reality (or, where there are none,
+  straight across the gap), so the network is one connected graph. The railways are traced the same way.
+- **Tunnels**: the Královopolský and Husovický tunnels run under the city. The streets above cross them without
+  meeting them, and from the street you see only the ramps going down into the portals. Drive in and the city above
+  fades to show the lit tube. Nobody walks or gets out down there, and the police can't see you, so a tunnel is a
+  good way to shake them off.
+- **City blocks**: paved lanes (you can drive down them) cut the big blocks between the main roads into blocks of a
+  real size. Tenement blocks are built around their edges with courtyards inside, industrial estates have yards,
+  housing estates have lawns between the slabs, and the old town is a maze of narrow lanes and little squares
+  between the burgher houses.
 - **Landmarks** sit at their real positions (moved a little if a road is in the way): Náměstí Svobody with the
   astronomical clock, the Old Town Hall, Zelný trh, the cathedral on Petrov, Moravské náměstí, the Mahen and Janáček
   theatres, Špilberk, the main station, Vaňkovka, the AZ Tower, Výstaviště, Lužánky, Vila Tugendhat, the observatory,

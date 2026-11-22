@@ -2,70 +2,17 @@ import json, math
 import numpy as np
 from scipy import ndimage
 from PIL import Image, ImageDraw
-from roads import build, resample, dp, seglen, P, MW, MH
+from roads import resample, dp, seglen, P, MW, MH, SC
 grid = np.load('landgrid.npy')
 OPEN, FOREST, FARM, VINE, URBAN, INDUS, GREEN, WATER, AIR = range(9)
-# 1. smooth away single-tile specks (but keep water and roads' shapes) with a 3x3 majority vote
+# 1. smooth away specks (but keep water's shape) with a majority vote over about 90 m
 def majority(g):
-    out = g.copy()
-    for c in range(9):
-        pass
-    cnt = np.stack([ndimage.uniform_filter((g == c).astype(float), 3, mode='nearest') for c in range(9)])
+    cnt = np.stack([ndimage.uniform_filter((g == c).astype(float), 2 * round(SC) + 1, mode='nearest') for c in range(9)])
     best = cnt.argmax(axis=0)
-    keep = (g == WATER)
-    out = np.where(keep, g, best)
-    return out
+    return np.where(g == WATER, g, best)
 grid = majority(grid)
 urban = (grid == URBAN) | (grid == INDUS)
-# 2. main roads, plus the residential streets that open up big blocks
-main = []
-# tertiary roads only where the bigger roads are not already close by (suburbs and villages, not the dense core)
-hi = [w for w in main if w['r'] <= 3]
-hocc = np.zeros((MH*2, MW*2), bool)
-for w in hi:
-    for x, y in resample(w['pts'], 0.25):
-        i, j = int(x*2), int(y*2)
-        if 0 <= i < MW*2 and 0 <= j < MH*2: hocc[j, i] = True
-hd = ndimage.distance_transform_edt(~hocc) / 2
-def tert_ok(w):
-    smp = [p for p in resample(w['pts'], 0.5) if 0 <= p[0] < MW and 0 <= p[1] < MH]
-    if not smp: return False
-    return sum(1 for x, y in smp if hd[int(y*2), int(x*2)] < 5.5) / len(smp) < 0.5
-main = hi + [w for w in main if w['r'] == 4 and tert_ok(w)]
-print('kept tertiary', sum(1 for w in main if w['r'] == 4))
-occ = np.zeros((MH*2, MW*2), bool)
-def stamp(pts, r):
-    for x, y in resample(pts, 0.25):
-        i, j = int(x*2), int(y*2)
-        occ[max(0, j-r):j+r+1, max(0, i-r):i+r+1] = True
-for w in main: stamp(w['pts'], 1)
-dist_main = ndimage.distance_transform_edt(~occ) / 2  # tiles from the nearest main road
-res = json.load(open('res.json'))['elements']
-extra = []
-cands = []
-for e in res:
-    t = e['tags']
-    if t.get('highway') not in ('residential', 'living_street') or t.get('area') == 'yes': continue
-    pts = [P(g['lat'], g['lon']) for g in e['geometry']]
-    if seglen(pts) < 4: continue
-    cands.append((seglen(pts), t.get('name', ''), pts))
-cands.sort(key=lambda c: -c[0])
-occ2 = occ.copy()
-for L, name, pts in cands:
-    smp = resample(pts, 0.5)
-    inside = [p for p in smp if 0 <= p[0] < MW and 0 <= p[1] < MH]
-    if len(inside) < len(smp) * 0.8: continue
-    dm = ndimage.distance_transform_edt(~occ2) / 2 if False else None
-    far = sum(1 for x, y in inside if not occ2[min(MH*2-1, int(y*2)), min(MW*2-1, int(x*2))] and dist_main[min(MH*2-1, int(y*2)), min(MW*2-1, int(x*2))] > 3.2) / len(inside)
-    if far < 0.45: continue
-    # not too close to an already chosen street either (keeps blocks at least ~6 tiles deep)
-    near2 = sum(1 for x, y in inside if occ2[min(MH*2-1, int(y*2)), min(MW*2-1, int(x*2))]) / len(inside)
-    if near2 > 0.25: continue
-    p2 = dp(pts, 0.3)
-    extra.append({'r': 5, 'name': name, 'pts': p2})
-    for x, y in resample(pts, 0.25):
-        i, j = int(x*2), int(y*2); occ2[max(0, j-7):j+8, max(0, i-7):i+8] = True
-print('main', len(main), 'extra residential', len(extra))
+# 2. the connected road network from net.py
 roads = json.load(open('net.json'))  # the connected network from net.py
 def frac_urban(pts):
     smp = resample(pts, 0.5); n = 0
@@ -78,13 +25,13 @@ import net
 lay = json.load(open('layers.json'))['elements']
 rsel = [{'r': 0, 'name': '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']]} for e in lay
         if e['type'] == 'way' and e.get('tags', {}).get('railway') == 'rail' and e['tags'].get('service') not in ('yard', 'siding', 'spur', 'crossover')]
-rc, re_, _ = net.trace_clean(rsel, spur=8 * net.R, minlen=3 * net.R, width=1.0, close_iter=2)
+rc, re_, _ = net.trace_clean(rsel, spur=8 * net.R * SC, minlen=3 * net.R * SC, width=1.0 * SC, close_iter=round(2 * SC))
 rails = []
 for pts in net.graph_edges(rc, re_):
-    for _ in range(4):
+    for _ in range(round(4 * SC)):
         if len(pts) > 4: pts = [pts[0], pts[1]] + [((pts[i-2][0] + pts[i-1][0] + pts[i][0] + pts[i+1][0] + pts[i+2][0]) / 5, (pts[i-2][1] + pts[i-1][1] + pts[i][1] + pts[i+1][1] + pts[i+2][1]) / 5) for i in range(2, len(pts) - 2)] + [pts[-2], pts[-1]]
-    pts = dp(pts, 0.3)
-    if seglen(pts) >= 2: rails.append(pts)
+    pts = dp(pts, 0.2 * SC)
+    if seglen(pts) >= 2 * SC: rails.append(pts)
 print('rails', len(rails))
 # 4. districts and landmarks
 places = [(e['tags']['name'], *P(e['lat'], e['lon'])) for e in lay if e['type'] == 'node' and 'place' in e.get('tags', {})]
@@ -92,15 +39,6 @@ places = [p for p in places if -10 < p[1] < MW + 10 and -10 < p[2] < MH + 10 and
 places.append(('Staré Město', *P(49.1951, 16.6080)))
 rivers = json.load(open('rivers.json'))
 # 5. encode: land use as run lengths, coordinates as tenths of a tile
-def rle(g):
-    flat = g.flatten().tolist(); out = []; i = 0
-    while i < len(flat):
-        j = i
-        while j < len(flat) and flat[j] == flat[i] and j - i < 35 * 36: j += 1
-        n = j - i
-        out.append(str(flat[i]) + (('0123456789abcdefghijklmnopqrstuvwxyz'[n // 36] + '0123456789abcdefghijklmnopqrstuvwxyz'[n % 36]) if n > 1 else ''))
-        i = j
-    return ''.join(c if len(c) == 1 else c for c in out)
 def enc_runs(g):
     # class digit, then 2 base-36 digits of run length (1-1295), or a bare digit for a single tile followed by another digit
     flat = g.flatten().tolist(); s = []; i = 0
@@ -129,7 +67,7 @@ for w in roads:
     pts = [(round(x, 1), round(y, 1)) for x, y in w['pts']]
     nm = w['name'].split(';')[0]
     if nm.isdigit(): nm = 'Silnice ' + nm
-    R.append([nm, w['r'], w.get('rural', 1 if (w['r'] <= 1 or frac_urban(w['pts']) < 0.4) else 0), [c for p in pts for c in p]])
+    R.append([nm, w['r'], w.get('rural', 1 if (w['r'] <= 1 or frac_urban(w['pts']) < 0.4) else 0), [c for p in pts for c in p]] + ([1] if w.get('tunnel') else []))
 data = {'lc': lc, 'roads': R, 'rails': [[c for x, y in r for c in (round(x, 1), round(y, 1))] for r in rails],
         'rivers': [[n, [c for x, y in pts for c in (round(x, 1), round(y, 1))]] for n, pts in rivers],
         'places': [[n, round(x, 1), round(y, 1)] for n, x, y in places]}

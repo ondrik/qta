@@ -1,6 +1,7 @@
 import json, math, sys
 from PIL import Image, ImageDraw
-LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.698, 49.140, 49.252, 480, 416  # about 30 m a tile
+LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.698, 49.140, 49.252, 960, 832  # about 15 m a tile
+SC = MW / 480  # tiles per 30 m: the distances below were tuned at 30 m a tile and scale with it
 P = lambda lat, lon: ((lon - LON0) / (LON1 - LON0) * MW, (LAT1 - lat) / (LAT1 - LAT0) * MH)
 RANK = {'motorway': 0, 'trunk': 1, 'primary': 2, 'secondary': 3, 'tertiary': 4}
 def dp(pts, eps):
@@ -20,7 +21,7 @@ def resample(pts, step):
         while t <= L: out.append((a[0]+(b[0]-a[0])*t/L, a[1]+(b[1]-a[1])*t/L)); t += step
         acc = (acc + L) % step
     out.append(pts[-1]); return out
-def build(maxrank, pair=1.7):
+def build(maxrank, pair=1.7 * SC):
     d = json.load(open('roads.json'))
     ways, rbs = [], []
     for e in d['elements']:
@@ -54,7 +55,7 @@ def build(maxrank, pair=1.7):
         for end in (0, -1):
             x, y = w['pts'][end]
             for cx, cy, r in rbs:
-                if math.hypot(x-cx, y-cy) < r + 0.6: w['pts'][end] = (cx, cy); break
+                if math.hypot(x-cx, y-cy) < r + 0.6 * SC: w['pts'][end] = (cx, cy); break
     out = []
     for w in kept:
         pts = dp(w['pts'], 0.25)

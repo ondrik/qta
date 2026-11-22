@@ -5,7 +5,7 @@ import json, math
 import numpy as np
 from scipy import ndimage
 from PIL import Image, ImageDraw
-from roads import build, resample, dp, seglen, P, MW, MH
+from roads import resample, dp, seglen, P, MW, MH, SC
 R = 2  # raster cells per tile
 def zhang_suen(img):
     img = img.copy().astype(np.uint8)
@@ -78,7 +78,7 @@ def trace(sk):
             if cur not in nodes: continue
             used.add((p, q)); used.add((cur, path[-2]))
             a, b = nid[p], nid[cur]
-            if a == b and len(path) < 8: continue
+            if a == b and len(path) < 8 * SC: continue
             edges.append([a, b, [(x, y) for y, x in path]])
     return cent, edges
 def prune(cent, edges, spur=5.0 * R, rounds=4):
@@ -117,7 +117,7 @@ def raw_ways():
     for e in json.load(open('roads.json'))['elements']:
         t = e['tags']; h = t.get('highway')
         if h not in RK or t.get('area') == 'yes': continue
-        out.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'link': h.endswith('_link')})
+        out.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'link': h.endswith('_link'), 'tunnel': t.get('tunnel') == 'yes'})
     return out
 def graph_edges(cent, edges):
     """polylines (tile units) of a traced, cleaned graph"""
@@ -133,7 +133,9 @@ def trace_clean(sel, spur, minlen, width=1.3, close_iter=1):
     cent, edges = contract(cent, edges, minlen)
     edges = prune(cent, edges, spur)
     return cent, edges, near
-def connectors(lines, max_len=60, min_far=8):
+def near_portal(p, portals, r=6 * SC):
+    return any(math.hypot(p[0] - q[0], p[1] - q[1]) < r for q in portals)
+def connectors(lines, portals=(), max_len=60 * SC, min_far=8 * SC):
     """dead ends of the main network joined to it again along the residential streets they really lead into"""
     key = lambda g: (round(g['lat'] * 1e7), round(g['lon'] * 1e7))
     pos, adj = {}, {}
@@ -154,18 +156,19 @@ def connectors(lines, max_len=60, min_far=8):
         for x, y in resample(pts, 0.25):
             i, j = int(x * 2), int(y * 2)
             if 0 <= i < MW * 2 and 0 <= j < MH * 2: occ[j, i] = True
-    occ = ndimage.binary_dilation(occ, iterations=2)  # within about a tile
+    occ = ndimage.binary_dilation(occ, iterations=round(2 * SC))  # within about 30 m
     onmain = lambda p: 0 <= int(p[0] * 2) < MW * 2 and 0 <= int(p[1] * 2) < MH * 2 and occ[int(p[1] * 2), int(p[0] * 2)]
     deg = {}
     for pts in lines:
         for p in (pts[0], pts[-1]): k = (round(p[0], 1), round(p[1], 1)); deg[k] = deg.get(k, 0) + 1
-    ends = [k for k, n in deg.items() if n == 1 and 4 < k[0] < MW - 4 and 4 < k[1] < MH - 4]
+    ends = [k for k, n in deg.items() if n == 1 and 4 < k[0] < MW - 4 and 4 < k[1] < MH - 4 and not near_portal(k, portals)]  # (a road into a tunnel ends there)
     grid = {}
     for k, p in pos.items(): grid.setdefault((int(p[0]), int(p[1])), []).append(k)
     import heapq
     out = []
     for ex, ey in ends:
-        starts = [k for i in range(int(ex) - 2, int(ex) + 3) for j in range(int(ey) - 2, int(ey) + 3) for k in grid.get((i, j), ()) if math.hypot(pos[k][0] - ex, pos[k][1] - ey) < 1.6]
+        rr = int(2 * SC) + 1
+        starts = [k for i in range(int(ex) - rr, int(ex) + rr + 1) for j in range(int(ey) - rr, int(ey) + rr + 1) for k in grid.get((i, j), ()) if math.hypot(pos[k][0] - ex, pos[k][1] - ey) < 1.6 * SC]
         if not starts: continue
         dist, prev, pq, goal = {}, {}, [], None
         for k in starts: dist[k] = 0; heapq.heappush(pq, (0, k))
@@ -174,7 +177,7 @@ def connectors(lines, max_len=60, min_far=8):
             if d0 > dist.get(u, 1e9): continue
             if d0 > max_len: break
             p = pos[u]
-            if d0 > 2 and onmain(p) and math.hypot(p[0] - ex, p[1] - ey) > min_far: goal = u; break
+            if d0 > 2 * SC and onmain(p) and math.hypot(p[0] - ex, p[1] - ey) > min_far: goal = u; break
             for v, L, kind, nm in adj.get(u, ()):
                 nd = d0 + L
                 if nd < dist.get(v, 1e9): dist[v] = nd; prev[v] = (u, nm); heapq.heappush(pq, (nd, v))
@@ -185,14 +188,97 @@ def connectors(lines, max_len=60, min_far=8):
         nm = max((n for n in names if n), key=lambda n: names[n], default='')
         out.append({'r': 5, 'name': nm, 'pts': pts, 'link': False})
     return out
+def tunnels(tun, out):
+    """the tunnels, traced on their own (so the streets above them don't meet them), each end hooked onto the
+    surface road at its portal"""
+    cent, edges, _ = trace_clean(tun, spur=3 * R * SC, minlen=2 * R * SC, width=3.5 * SC, close_iter=round(2 * SC))  # (twin tubes merge into one)
+    from scipy.spatial import cKDTree
+    surf = [(x, y) for w in out for x, y in resample(w['pts'], 0.25)]
+    tree = cKDTree(surf)
+    res = []
+    for pts in graph_edges(cent, edges):
+        for _ in range(round(3 * SC)):
+            if len(pts) > 4: pts = [pts[0], pts[1]] + [((pts[i-2][0] + pts[i-1][0] + pts[i][0] + pts[i+1][0] + pts[i+2][0]) / 5, (pts[i-2][1] + pts[i-1][1] + pts[i][1] + pts[i+1][1] + pts[i+2][1]) / 5) for i in range(2, len(pts) - 2)] + [pts[-2], pts[-1]]
+        for end in (0, -1):
+            p = pts[end]
+            dist, k = tree.query(p); best = surf[k]
+            if dist < 5 * SC: # (dropping the traced points close to the new end, so the tube does not hook round to meet it)
+                keep = [q for q in pts if math.hypot(q[0] - best[0], q[1] - best[1]) > 3 * SC]
+                pts = [best] + keep if end == 0 else keep + [best]
+        pts = dp(pts, 0.2 * SC)
+        if seglen(pts) < 3 * SC: continue
+        # one carriageway in a tunnel and the other on the surface (Žabovřeská's gallery): the surface road is enough
+        smp = resample(pts, 0.5); alongside = sum(1 for q in smp if tree.query(q)[0] < 2.5 * SC) / len(smp)
+        if alongside > 0.6: continue
+        votes = {}
+        for x, y in resample(pts, 1):
+            for w in tun:
+                if w['name'] and min(math.hypot(x - a, y - b) for a, b in w['pts']) < 3 * SC: votes[w['name']] = votes.get(w['name'], 0) + 1
+        name = max(votes, key=votes.get) if votes else 'tunel'
+        res.append({'name': name, 'r': 1, 'rural': 0, 'pts': pts, 'tunnel': 1})
+    print('tunnels', [(t['name'], round(seglen(t['pts']))) for t in res])
+    return res
+def close_gaps(out, portals=(), pair_max=25 * SC, reach=10 * SC, margin=6):
+    """the last dead ends: where OpenStreetMap has no street across a gap (a tunnel tagged as something else, a road
+    under construction), join two dead ends that face each other with a smooth curve, or carry a dead end straight
+    on to the road ahead of it"""
+    deg, endinfo = {}, []
+    key = lambda p: (round(p[0], 1), round(p[1], 1))
+    for wi, w in enumerate(out):
+        for p in (w['pts'][0], w['pts'][-1]): deg[key(p)] = deg.get(key(p), 0) + 1
+    for wi, w in enumerate(out):
+        pts = w['pts']
+        for end in (0, -1):
+            p = pts[end]
+            if deg[key(p)] != 1 or not (margin < p[0] < MW - margin and margin < p[1] < MH - margin) or near_portal(p, portals): continue
+            back = resample(pts if end == -1 else pts[::-1], 0.5)
+            q = back[max(0, len(back) - 1 - int(3 * SC * 2))]  # about 3 tiles back along the road
+            dx, dy = p[0] - q[0], p[1] - q[1]; L = math.hypot(dx, dy) or 1
+            endinfo.append({'w': wi, 'p': p, 'd': (dx / L, dy / L)})
+    add, used = [], set()
+    pairs = []
+    for i, a in enumerate(endinfo):
+        for j, b in enumerate(endinfo):
+            if j <= i: continue
+            vx, vy = b['p'][0] - a['p'][0], b['p'][1] - a['p'][1]; L = math.hypot(vx, vy)
+            if L > pair_max or L < 0.5: continue
+            ca = (vx * a['d'][0] + vy * a['d'][1]) / L; cb = -(vx * b['d'][0] + vy * b['d'][1]) / L
+            if ca > 0.6 and cb > 0.6: pairs.append((L, i, j))
+    for L, i, j in sorted(pairs):
+        if i in used or j in used: continue
+        a, b = endinfo[i], endinfo[j]; used |= {i, j}
+        h = L / 3; c1 = (a['p'][0] + a['d'][0] * h, a['p'][1] + a['d'][1] * h); c2 = (b['p'][0] + b['d'][0] * h, b['p'][1] + b['d'][1] * h)
+        n = max(4, int(L / 2)); bz = []
+        for k in range(n + 1):
+            t = k / n; u = 1 - t
+            bz.append((u**3 * a['p'][0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t**3 * b['p'][0], u**3 * a['p'][1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t**3 * b['p'][1]))
+        wa, wb = out[a['w']], out[b['w']]
+        add.append({'name': wa['name'] or wb['name'], 'r': min(wa['r'], wb['r']), 'rural': wa['rural'] and wb['rural'], 'pts': dp(bz, 0.1)})
+    for i, a in enumerate(endinfo):
+        if i in used: continue
+        best = None
+        for wi, w in enumerate(out):
+            if wi == a['w']: continue
+            for x, y in resample(w['pts'], 0.5):
+                vx, vy = x - a['p'][0], y - a['p'][1]; L = math.hypot(vx, vy)
+                if L < 0.5 or L > reach or (vx * a['d'][0] + vy * a['d'][1]) / L < 0.8: continue
+                if best is None or L < best[0]: best = (L, (x, y))
+        if best:
+            w = out[a['w']]
+            add.append({'name': w['name'], 'r': w['r'], 'rural': w['rural'], 'pts': [a['p'], best[1]]})
+    print('gaps closed', len(add))
+    return add
 if __name__ == '__main__':
-    sel = raw_ways()
-    cent, edges, near = trace_clean(sel, spur=5 * R, minlen=2.5 * R)
+    ways = raw_ways()
+    sel, tun = [w for w in ways if not w['tunnel']], [w for w in ways if w['tunnel']]
+    portals = [w['pts'][k] for w in tun for k in (0, -1)]  # where the tunnels come up
+    TC = dict(spur=5 * R * SC, minlen=2.5 * R * SC, width=1.5 * SC, close_iter=round(SC))
+    cent, edges, near = trace_clean(sel, **TC)
     lines = graph_edges(cent, edges)
-    con = connectors(lines)
+    con = connectors(lines, portals)
     print('first pass', len(edges), 'edges; connectors', len(con))
     sel = sel + con
-    cent, edges, near = trace_clean(sel, spur=5 * R, minlen=2.5 * R)
+    cent, edges, near = trace_clean(sel, **TC)
     print('clean', len(cent), 'nodes', len(edges), 'edges')
     grid = np.load('landgrid.npy'); urban = (grid == 4) | (grid == 5)
     out = []
@@ -208,13 +294,15 @@ if __name__ == '__main__':
         nb_ = max(named, key=named.get) if named else best
         name = sel[nb_]['name'] if nb_ >= 0 else ''
         rank = min(sel[best]['r'], 4) if best >= 0 else 4
-        for _ in range(3): # smooth the pixel staircase (ends stay put so roads still meet)
+        for _ in range(round(3 * SC)): # smooth the pixel staircase (ends stay put so roads still meet)
             if len(pts) > 4: pts = [pts[0], pts[1]] + [((pts[i-2][0] + pts[i-1][0] + pts[i][0] + pts[i+1][0] + pts[i+2][0]) / 5, (pts[i-2][1] + pts[i-1][1] + pts[i][1] + pts[i+1][1] + pts[i+2][1]) / 5) for i in range(2, len(pts) - 2)] + [pts[-2], pts[-1]]
-        pts = dp(pts, 0.3)
+        pts = dp(pts, 0.2 * SC)
         smp = resample(pts, 0.5)
         ur = sum(1 for x, y in smp if 0 <= int(x) < MW and 0 <= int(y) < MH and urban[int(y), int(x)]) / max(1, len(smp))
-        if seglen(pts) < 0.3: continue
+        if seglen(pts) < 0.3 * SC: continue
         out.append({'name': name, 'r': rank, 'rural': 1 if (rank <= 1 or ur < 0.4) else 0, 'pts': pts})
+    out += close_gaps(out, portals)
+    out += tunnels(tun, out)
     json.dump(out, open('net.json', 'w'), ensure_ascii=False)
     S = 2; im = Image.new('RGB', (MW * S, MH * S), (35, 60, 35)); d = ImageDraw.Draw(im)
     col = {0: (230, 120, 60), 1: (230, 180, 60), 2: (240, 220, 120), 3: (240, 240, 240), 4: (170, 170, 170), 5: (140, 140, 140)}
