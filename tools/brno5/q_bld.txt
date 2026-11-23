@@ -1,6 +1,5 @@
 [out:json][timeout:300];
-(
-  way["building"](49.166,16.556,49.232,16.654);
-  relation["building"](49.166,16.556,49.232,16.654);
-);
+way["building"](49.166,16.556,49.232,16.654);
 out tags geom;
+relation["building"](49.166,16.556,49.232,16.654);
+out geom;

@@ -118,8 +118,9 @@ def raw_ways():
         t = e['tags']; h = t.get('highway')
         if h not in RK or t.get('area') == 'yes': continue
         lv = int(t.get('layer', '0').split(';')[0]) if t.get('layer', '0').lstrip('-').split(';')[0].isdigit() else 0
+        from decks import level
         out.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'link': h.endswith('_link'), 'tunnel': t.get('tunnel') == 'yes',
-                    'bridge': t.get('bridge') in ('yes', 'viaduct') and lv > 0, 'lv': abs(lv)})
+                    'bridge': t.get('bridge') in ('yes', 'viaduct') and lv > 0, 'lv': abs(level(t)), 'lev': level(t)})
     return out
 def graph_edges(cent, edges):
     """polylines (tile units) of a traced, cleaned graph"""
@@ -274,11 +275,14 @@ if __name__ == '__main__':
     import decks
     ways = raw_ways()
     sel, tun = [w for w in ways if not w['tunnel']], [w for w in ways if w['tunnel']]
-    # overpasses: bridges that cross another of the main roads go up on decks of their own (see decks.py)
-    grid = decks.seg_grid([w for w in sel if not w['bridge']])
-    over_ways = [w for w in sel if w['bridge'] and decks.crosses(w['pts'], grid)]
-    sel = [w for w in sel if w not in over_ways]
-    print('overpass ways', len(over_ways))
+    # overpasses: a road on a higher level than one it crosses goes up on a deck of its own, never meeting it (see
+    # decks.py); short streets between two decks go up with them, and the streets carrying on from a deck are kept clear
+    # of the road it crosses, beyond the tracer's reach
+    over_ways, low, sel = decks.separate(sel)
+    sel += low
+    over_ways, sel = decks.join_decks(over_ways, sel, 6.0)
+    sel = decks.clear_ends(over_ways, sel, 5.0)
+    print('overpass ways', len(over_ways), 'levels', sorted({w['lev'] for w in over_ways}))
     grid = np.load('landgrid.npy'); urban = (grid == 4) | (grid == 5)
     TC = dict(spur=5 * R * SC, minlen=2.5 * R * SC, width=1.5 * SC, close_iter=round(SC))
     def streets(sel, over_ways):
@@ -312,15 +316,12 @@ if __name__ == '__main__':
             out.append({'name': name, 'r': rank, 'rural': 1 if (rank <= 1 or ur < 0.4) else 0, 'pts': pts})
         out += close_gaps(out, portals)
         out += tunnels(tun, out)
-        over, back = decks.side(over_ways, [w for w in out if not w.get('tunnel')], 'over', 1.3, 2, 4)
+        over, back = [], []
+        for g in decks.by_level(over_ways):  # (each level on its own; what crosses a road at another level stays apart from it)
+            o_, b_ = decks.side(g, [w for w in out if not w.get('tunnel')], 'over', 1.3, 2, 8, apart=decks.seg_grid([w for w in sel + tun + over_ways if w.get('lev', 0) < g[0]['lev']]), lines=decks.tube_lines(g, 1.5))
+            over += o_; back += b_
         return out + back, over
-    # build the streets, then the decks; a bridge no deck came out of is an ordinary street after all, and it all goes again
-    for it in range(4):
-        out, over = streets(sel, over_ways)
-        keep = decks.covered(over_ways, over)
-        print('pass', it, 'decks kept', len(keep), 'of', len(over_ways))
-        if len(keep) == len(over_ways): break
-        sel, over_ways = sel + [w for w in over_ways if w not in keep], keep
+    out, over = streets(sel, over_ways)
     over = decks.ramps(over, out, 3)
     print('overpasses', len(over), [(o['name'], round(seglen(o['pts']), 1)) for o in over])
     out += over

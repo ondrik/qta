@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 from roads import resample, dp, seglen, P, MW, MH, SC
 import net
 from net import R, trace_clean, graph_edges, close_gaps
-from decks import seg_grid, crosses, smooth, side, ramps, covered
+from decks import seg_grid, crosses, smooth, side, ramps, level, separate, by_level, tube_lines, clear_ends, join_decks
 RK = {'motorway': 0, 'motorway_link': 0, 'trunk': 1, 'trunk_link': 1, 'primary': 2, 'primary_link': 2, 'secondary': 3, 'secondary_link': 3,
       'tertiary': 4, 'tertiary_link': 4, 'residential': 5, 'unclassified': 5, 'living_street': 5}
 RAMP = 4.0  # tiles of approach that rise to an overpass (20 m)
@@ -18,16 +18,12 @@ if __name__ == '__main__':
     for e in json.load(open('roads.json'))['elements']:
         t = e['tags']; h = t.get('highway')
         if h not in RK or t.get('area') == 'yes' or t.get('access') in ('private', 'no'): continue
-        lv = int(t.get('layer', '0').split(';')[0]) if t.get('layer', '0').lstrip('-').split(';')[0].isdigit() else 0
-        kind = 'tunnel' if t.get('tunnel') == 'yes' and lv < 0 else 'bridge' if t.get('bridge') in ('yes', 'viaduct') and lv > 0 else ''
-        ways.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'link': h.endswith('_link'), 'kind': kind, 'lv': abs(lv)})
-    ground = [w for w in ways if not w['kind']]
-    grid = seg_grid(ground)
-    # a bridge is an overpass only if it crosses a street; a tunnel only if it passes under one
-    decks = [w for w in ways if w['kind'] == 'bridge' and crosses(w['pts'], grid)]
-    tubes = [w for w in ways if w['kind'] == 'tunnel' and crosses(w['pts'], grid)]
-    ground += [w for w in ways if w['kind'] and w not in decks and w not in tubes]
-    print('ground ways', len(ground), 'overpass ways', len(decks), 'tunnel ways', len(tubes))
+        ways.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'link': h.endswith('_link'), 'lev': level(t), 'lv': abs(level(t))})
+    # a road on another level than one it crosses is carried over it on a deck, or under it in a tunnel: never a junction
+    decks, tubes, ground = separate(ways)
+    decks, ground = join_decks(decks, ground, 16.0)
+    ground = clear_ends(decks, ground, 5.0)  # (a short bridge's streets kept clear of the road it crosses, beyond the tracer's reach)
+    print('ground ways', len(ground), 'overpass ways', len(decks), 'tunnel ways', len(tubes), 'levels', sorted({w['lev'] for w in decks + tubes}))
     land = np.load('land5.npy'); urban = np.isin(land, (4, 5, 9, 10, 11, 12))
     def streets(ground, decks, tubes):
         portals = [w['pts'][k] for w in decks + tubes for k in (0, -1)]
@@ -52,16 +48,16 @@ if __name__ == '__main__':
             ur = sum(1 for x, y in smp if 0 <= int(x) < MW and 0 <= int(y) < MH and urban[int(y), int(x)]) / max(1, len(smp))
             out.append({'name': name, 'r': rank, 'rural': 1 if (rank <= 1 or ur < 0.4) else 0, 'pts': pts})
         out += close_gaps(out, portals, pair_max=8, reach=5, margin=6)
-        tun, tback = side(tubes, out, 'tunnel', 3.0, 4, 30)
-        over, oback = side(decks, out, 'over', 1.3, 3, 8)
-        return out + tback + oback, tun, over
-    for it in range(4):
-        out, tun, over = streets(ground, decks, tubes)
-        keep_d, keep_t = covered(decks, over), covered(tubes, tun, 3.0)
-        drop = [w for w in decks if w not in keep_d] + [w for w in tubes if w not in keep_t]
-        print('pass', it, 'decks kept', len(keep_d), 'of', len(decks), 'tunnels kept', len(keep_t), 'of', len(tubes))
-        if not drop: break
-        ground, decks, tubes = ground + drop, keep_d, keep_t  # (what no deck carries is an ordinary street after all)
+        # each level on its own (a tunnel's tubes apart from the slip roads that dip under the street beside it), hooked on
+        # to the streets; what really crosses a road at another level stays apart from it, the rest joins the streets
+        tun, over, back = [], [], []
+        for g in by_level(tubes):
+            t_, b_ = side(g, out, 'tunnel', 3.0, 4, 30, apart=seg_grid([w for w in ground if w['lev'] > g[0]['lev']]), lines=tube_lines(g, 8)); tun += t_; back += b_
+        for g in by_level(decks):
+            o_, b_ = side(g, out, 'over', 1.3, 3, 8, apart=seg_grid([w for w in ground + tubes + decks if w['lev'] < g[0]['lev']]), lines=tube_lines(g, 4)); over += o_; back += b_
+        return out + back, tun, over
+    out, tun, over = streets(ground, decks, tubes)
+    print('decks', len(over), 'tunnels', len(tun))
     ramps(over, out, RAMP)
     for t in tun: t['r'] = 1; t['rural'] = 0
     print('tunnels', [(t['name'], round(seglen(t['pts']))) for t in tun])

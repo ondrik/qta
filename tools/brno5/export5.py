@@ -58,17 +58,31 @@ if __name__ == '__main__':
         elif e.get('bounds'): b = e['bounds']; x, y = P((b['minlat'] + b['maxlat']) / 2, (b['minlon'] + b['maxlon']) / 2)
         else: continue
         if 2 < x < MW - 2 and 2 < y < MH - 2: pois.append([am, t.get('name', ''), round(x, 1), round(y, 1)])
-    # buildings: sorted top to bottom; each one's corner relative to the previous one, its rectangles relative to its corner
+    # buildings, sorted top to bottom: kind, floors, roof shape and height, glass, colours, name, then each piece in
+    # tenths of a tile: a turned rectangle (corner, angle, size), a right-angled outline (angle, then each ring's first
+    # corner and its steps along and across the frame in turn) or a free polygon (each ring's corner and steps); every
+    # first corner is relative to the one before
     bl = json.load(open('bld5.json'))
-    for b in bl: b['x0'] = min(r[0] for r in b['r']); b['y0'] = min(r[1] for r in b['r'])
-    bl.sort(key=lambda b: (b['y0'], b['x0']))
+    def first(q): return (q['x'], q['y']) if q['t'] == 'r' else (q['r'][0]['x'], q['r'][0]['y']) if q['t'] == 'o' else q['r'][0][0]
+    bl.sort(key=lambda b: (first(b['p'][0])[1], first(b['p'][0])[0]))
     names, cols = [], []
     idx = lambda arr, v: 0 if v is None else (arr.index(v) + 1 if v in arr else (arr.append(v) or len(arr)))
     s, px, py = [], 0, 0
+    T10 = lambda v: int(round(v * 10))
+    def at(x, y):
+        global px, py
+        o = vlq(T10(x) - px) + vlq(T10(y) - py); px, py = T10(x), T10(y); return o
     for b in bl:
-        s.append(vlq(b['k']) + vlq(b['lv']) + vlq(b['rf'] + 1) + vlq(idx(cols, b['wc'])) + vlq(idx(cols, b['rc'])) + vlq(idx(names, b['nm'])) + vlq(b['x0'] - px) + vlq(b['y0'] - py) + vlq(len(b['r'])))
-        for x, y, w, h in b['r']: s.append(vlq(x - b['x0']) + vlq(y - b['y0']) + vlq(w) + vlq(h))
-        px, py = b['x0'], b['y0']
+        s.append(''.join(vlq(v) for v in (b['k'], b['lv'], b['rf'] + 1, b['rh'], b['gl'], idx(cols, b['wc']), idx(cols, b['rc']), idx(names, b['nm']), len(b['p']))))
+        for q in b['p']:
+            if q['t'] == 'r': s.append(vlq(0) + at(q['x'], q['y']) + vlq(T10(q['a'] + 45)) + vlq(T10(q['w'])) + vlq(T10(q['h'])))
+            elif q['t'] == 'o':
+                s.append(vlq(1) + vlq(T10(q['a'] + 45)) + vlq(len(q['r'])))
+                for r in q['r']: s.append(at(r['x'], r['y']) + vlq(len(r['d'])) + ''.join(vlq(T10(d)) for d in r['d']))
+            else:
+                s.append(vlq(2) + vlq(len(q['r'])))
+                for r in q['r']:
+                    s.append(at(*r[0]) + vlq(len(r)) + ''.join(vlq(T10(b2[0]) - T10(a2[0])) + vlq(T10(b2[1]) - T10(a2[1])) for a2, b2 in zip(r, r[1:])))
     bld = ''.join(s)
     # trees, in quarter tiles, sorted, as deltas
     tr = sorted({(round(P(e['lat'], e['lon'])[0] * 4), round(P(e['lat'], e['lon'])[1] * 4)) for e in json.load(open('trees.json'))['elements'] if e['type'] == 'node'}, key=lambda p: (p[1], p[0]))
