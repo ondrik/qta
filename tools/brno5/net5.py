@@ -10,6 +10,7 @@ import net
 from net import R, trace_clean, graph_edges, close_gaps
 from decks import seg_grid, crosses, smooth, side, ramps, level, separate, by_level, tube_lines, clear_ends, join_decks
 from lanes5 import way_lanes, Index, assign
+from straight5 import straighten
 RK = {'motorway': 0, 'motorway_link': 0, 'trunk': 1, 'trunk_link': 1, 'primary': 2, 'primary_link': 2, 'secondary': 3, 'secondary_link': 3,
       'tertiary': 4, 'tertiary_link': 4, 'residential': 5, 'unclassified': 5, 'living_street': 5}
 RAMP = 4.0  # tiles of approach that rise to an overpass (20 m)
@@ -32,10 +33,16 @@ if __name__ == '__main__':
         portals = [w['pts'][k] for w in decks + tubes for k in (0, -1)]
         cent, edges, near = trace_clean(ground, spur=4 * R, minlen=3 * R, width=1.3, close_iter=3)
         print('ground graph', len(cent), 'nodes', len(edges), 'edges')
+        # (the traced streets put back on the ways they follow, and the junctions where those ways meet)
+        tile = lambda q: (q[0] / R + 0.25, q[1] / R + 0.25)
+        raw = [(a, b, [tile(q) for q in [cent[a]] + path[1:-1] + [cent[b]]]) for a, b, path in edges]
+        nodes = {n: tile(cent[n]) for a, b, _ in edges for n in (a, b)}
+        newn, spts = straighten(raw, nodes, Index(ground), keep=[w['pts'][k] for w in tubes for k in (0, -1)])
+        moved = [math.hypot(newn[n][0] - nodes[n][0], newn[n][1] - nodes[n][1]) for n in nodes]
+        print('straightened', sum(1 for _, ok in spts if ok), 'of', len(spts), 'streets; junctions moved', round(sum(moved) / max(1, len(moved)), 2), 'tiles on average')
         out = []
-        for a, b, path in edges:
-            pts = [cent[a]] + path[1:-1] + [cent[b]]
-            pts = [(x / R + 0.25, y / R + 0.25) for x, y in pts]
+        for (a, b, path), (spt, snapped) in zip(edges, spts):
+            pts = spt
             votes = {}
             for x, y in pts:
                 l = near[min(MH * R - 1, int(y * R)), min(MW * R - 1, int(x * R))]
@@ -45,7 +52,7 @@ if __name__ == '__main__':
             nb_ = max(named, key=named.get) if named else best
             name = ground[nb_]['name'] if nb_ >= 0 else ''
             rank = ground[best]['r'] if best >= 0 else 5
-            pts = dp(smooth(pts, 8), 0.25)
+            pts = pts if snapped else dp(smooth(pts, 8), 0.25) # (one put back on its ways is as straight, or as curved, as they are)
             if seglen(pts) < 1.5: continue
             smp = resample(pts, 0.5)
             ur = sum(1 for x, y in smp if 0 <= int(x) < MW and 0 <= int(y) < MH and urban[int(y), int(x)]) / max(1, len(smp))

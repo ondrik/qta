@@ -170,8 +170,10 @@ The third map is inner Brno at about **5 m a tile**: 2241 × 1690 tiles, 11.2 ×
 reservoir, Bystrc and Královo Pole in the north to Komárov in the south, and from Kohoutovice to Židenice. At this
 scale a car, a street and a building are their real size.
 
-- **Every street** with its name (about 4,300 of them), traced into one network like the main roads above, with
-  the Husovický, Královopolský and Pisárecký tunnels and 50 overpasses. Each is as wide as its lanes, which come from
+- **Every street** with its name (about 4,300 of them), traced into one network like the main roads above, then put
+  back on the OpenStreetMap ways it follows (a dual carriageway on the line between its halves), each junction where
+  those ways meet: a main road runs straight through, a side street meets it at its real angle. With the Husovický,
+  Královopolský and Pisárecký tunnels and 50 overpasses. Each is as wide as its lanes, which come from
   OpenStreetMap (one to four each way; a dual carriageway's two halves add up), with a dashed centre line, a double
   one on four lanes or more, and lane lines between lanes going the same way. One-way streets are one-way: traffic
   keeps to its lanes, turns into the kerbside lane after a right turn and the inner one after a left, and never takes a
