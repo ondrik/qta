@@ -37,7 +37,7 @@ To release, tag the commit (`git tag -a v7 -m "what changed"`) and push the tag 
 | --- | --- |
 | Arrows / WASD | drive · walk (up = forward, left/right = turn) |
 | Space | shoot on foot · handbrake in a car |
-| Enter / F / E | get in or out of cars (occupied ones too) · at a jetty: go **fishing** |
+| Enter / F / E | get in or out of cars (occupied ones too: you walk to the driver's door, open it, drag the driver out and climb in) · at a jetty: go **fishing** |
 | Q / Tab | switch weapon |
 | **X** | **superposition**: split your car into 3 branches (press again to collapse) |
 | **T** | **entangle** with a car nearby · T again: measure the pair and **swap places** with it |
@@ -156,7 +156,8 @@ roughly 15 m a tile.
   on the corner whose sails light up at night. Both clubs are marked in pink on the map.
 - **FIT BUT**, the Faculty of Information Technology of Brno University of Technology, is highlighted: the old
   Carthusian monastery with its cloister and church, the glass wing with the FIT sign, its own marker on the map, a
-  start location of its own and the FIT Hackers story arc in Královo Pole.
+  start location of its own and the FIT Hackers story arc in Královo Pole. BUT's other faculties (FEKT, FSI, FCH, FP,
+  FAST, FA and FaVU) stand where they are, each with its letters on the roof in its colour and a diamond on the map.
 - **Districts** get their own buildings: burgher houses in the old town, tenements in the inner districts, villas
   in Černá Pole, Stránice and Pisárky, panel estates in Lesná, Bystrc, Bohunice, Lískovec, Kohoutovice, Vinohrady
   and Líšeň, warehouses on industrial land, and villages round the edge.
@@ -170,7 +171,11 @@ reservoir, Bystrc and Královo Pole in the north to Komárov in the south, and f
 scale a car, a street and a building are their real size.
 
 - **Every street** with its name (about 4,300 of them), traced into one network like the main roads above, with
-  the Husovický, Královopolský and Pisárecký tunnels and 50 overpasses. The Královopolský tunnel's two tubes run apart, as they do, from the
+  the Husovický, Královopolský and Pisárecký tunnels and 50 overpasses. Each is as wide as its lanes, which come from
+  OpenStreetMap (one to four each way; a dual carriageway's two halves add up), with a dashed centre line, a double
+  one on four lanes or more, and lane lines between lanes going the same way. One-way streets are one-way: traffic
+  keeps to its lanes, turns into the kerbside lane after a right turn and the inner one after a left, and never takes a
+  one-way street the wrong way (one that would strand it is two-way after all). The Královopolský tunnel's two tubes run apart, as they do, from the
   Žabovřeská interchange to Královo Pole; the slip roads that dip under the interchange beside it stay streets of
   their own. Traffic lights stand where main roads meet; the side streets are left to the drivers.
 - **The real buildings**: 51,972 outlines from OpenStreetMap (multi-part ones with their courtyards included), each
@@ -188,13 +193,17 @@ scale a car, a street and a building are their real size.
   it and two places to fish from its banks.
 - **Landmarks**, the real buildings made to look like themselves: FIT BUT (the Carthusian monastery's wings round
   their garden, the church and its tower, the onion-domed towers, the FIT sign, the faculty's flag and a blue lamp at
-  its door, all blue on the map); the Old Town Hall and its tower over the gate on Radnická; the cathedral on Petrov
+  its door, all blue on the map); BUT's other faculties, each in its colour from the university's visual style (FEKT,
+  FSI, FCH and FP in Královo Pole, FAST on Veveří, FA on Poříčí, FaVU on Údolní), found by their grounds as they are
+  mapped, with their letters on the biggest flat roof, a banner, a flag and a lamp at the door, and a diamond on the
+  map; the Old Town Hall and its tower over the gate on Radnická; the cathedral on Petrov
   with its two 84 m spires; St James's, St Thomas's and the Red Church with their towers; Špilberk with its
   courtyards; the main station; the AZ Tower; Pavilion Z's great dome and Pavilion A's at Výstaviště; Vila
   Tugendhat; the Mahen and Janáček theatres; the observatory's domes on Kraví hora; the Rondo arena; the Grandhotel,
   the International and Vaňkovka with their signs; the cooling towers. Also the hospitals (you wake up at the trauma
   hospital), police and fire stations with their vehicles outside, the astronomical clock on Náměstí Svobody and the
-  market on Zelný trh, the Moulin Rouge back on its corner, the Atom Array Lab, and fishing on the Svratka and the
+  market on Zelný trh, the Moulin Rouge back on its corner, a circus (big top, animal tent and wagons) where the
+  Faculty of Informatics of Masaryk University stands on Botanická, the Atom Array Lab, and fishing on the Svratka and the
   Svitava.
 - It takes about 9 s to load and about 500 MB of memory. The data is built by `tools/brno5/build.sh` (from
   OpenStreetMap, © OpenStreetMap contributors, ODbL) into `brno5_data.js`, which `index.html` loads only for this map.

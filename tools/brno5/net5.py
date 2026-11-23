@@ -9,6 +9,7 @@ from roads import resample, dp, seglen, P, MW, MH, SC
 import net
 from net import R, trace_clean, graph_edges, close_gaps
 from decks import seg_grid, crosses, smooth, side, ramps, level, separate, by_level, tube_lines, clear_ends, join_decks
+from lanes5 import way_lanes, Index, assign
 RK = {'motorway': 0, 'motorway_link': 0, 'trunk': 1, 'trunk_link': 1, 'primary': 2, 'primary_link': 2, 'secondary': 3, 'secondary_link': 3,
       'tertiary': 4, 'tertiary_link': 4, 'residential': 5, 'unclassified': 5, 'living_street': 5}
 RAMP = 4.0  # tiles of approach that rise to an overpass (20 m)
@@ -18,7 +19,9 @@ if __name__ == '__main__':
     for e in json.load(open('roads.json'))['elements']:
         t = e['tags']; h = t.get('highway')
         if h not in RK or t.get('area') == 'yes' or t.get('access') in ('private', 'no'): continue
-        ways.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'link': h.endswith('_link'), 'lev': level(t), 'lv': abs(level(t))})
+        d, f, b = way_lanes(t, h)
+        ways.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'link': h.endswith('_link'), 'lev': level(t), 'lv': abs(level(t)),
+                     'dir': d, 'lf': f, 'lb': b})
     # a road on another level than one it crosses is carried over it on a deck, or under it in a tunnel: never a junction
     decks, tubes, ground = separate(ways)
     decks, ground = join_decks(decks, ground, 16.0)
@@ -63,6 +66,12 @@ if __name__ == '__main__':
     print('tunnels', [(t['name'], round(seglen(t['pts']))) for t in tun])
     print('overpasses', len(over), [(o['name'], round(seglen(o['pts']))) for o in over][:40])
     out += tun + over
+    # each street's lanes each way and its width, from the ways alongside it (a tunnel's from its tubes, a deck's from its
+    # bridges; a street that has none of its own, from those)
+    gi, ti, di, ui = Index(ground), Index(tubes), Index(decks), Index(tubes + decks)
+    for w in out: assign(w, ti if w.get('tunnel') else di if w.get('over') else gi, fallback=None if w.get('tunnel') or w.get('over') else ui)
+    from collections import Counter
+    print('lanes', sorted(Counter((w['lf'], w['lb']) for w in out).items(), key=lambda kv: -kv[1])[:12], 'one-way', sum(1 for w in out if w['lb'] == 0))
     json.dump(out, open('net5.json', 'w'), ensure_ascii=False)
     from PIL import Image, ImageDraw
     S = 1; im = Image.new('RGB', (MW * S, MH * S), (35, 60, 35)); d = ImageDraw.Draw(im)

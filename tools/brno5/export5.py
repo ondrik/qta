@@ -39,7 +39,7 @@ if __name__ == '__main__':
         if nm.isdigit(): nm = 'Silnice ' + nm
         flag = 1 if w.get('tunnel') else (1 + w.get('lv', 1)) if w.get('over') else 0
         for c in ([w['pts']] if (w.get('tunnel') or w.get('over')) else clip(w['pts'])):
-            R.append([nm, w['r'], w['rural'], fl(c)] + ([flag] if flag else []))
+            R.append([nm, w['r'], w['rural'], fl(c), flag, w.get('lf', 1), w.get('lb', 1), w.get('wd', 64)])  # (lanes forward and back, carriageway px)
     lay = json.load(open('land3.json'))['elements']
     rails, trams = [], []
     for e in lay:
@@ -59,6 +59,15 @@ if __name__ == '__main__':
         elif e.get('bounds'): b = e['bounds']; x, y = P((b['minlat'] + b['maxlat']) / 2, (b['minlon'] + b['maxlon']) / 2)
         else: continue
         if 2 < x < MW - 2 and 2 < y < MH - 2: pois.append([am, t.get('name', ''), round(x, 1), round(y, 1)])
+    # universities' and colleges' grounds, by name (the game finds faculties' buildings in them): outer rings, in tiles
+    from land5 import rings as land_rings
+    unis = []
+    for e in lay:
+        t = e.get('tags', {})
+        if t.get('amenity') not in ('university', 'college') or not t.get('name') or e['type'] == 'node': continue
+        for r in land_rings(e):
+            r = dp(r, 0.3)
+            if len(r) >= 3 and any(0 <= x < MW and 0 <= y < MH for x, y in r): unis.append([t['name'], fl(r)])
     # buildings, sorted top to bottom: kind, floors, roof shape and height, glass, colours, name, then each piece in
     # tenths of a tile: a turned rectangle (corner, angle, size), a right-angled outline (angle, then each ring's first
     # corner and its steps along and across the frame in turn) or a free polygon (each ring's corner and steps); every
@@ -103,7 +112,7 @@ if __name__ == '__main__':
     rivers = json.load(open('rivers5.json'))
     data = {'bbox': [LON0, LON1, LAT0, LAT1], 'mw': MW, 'mh': MH, 'lc': runs(land), 'roads': R, 'rails': rails, 'trams': trams,
             'rivers': [[n, [c for x, y in pts for c in (round(x, 1), round(y, 1))]] for n, pts in rivers], 'places': places, 'pois': pois,
-            'bld': bld, 'bnames': names, 'bcols': cols, 'trees': ''.join(ts), 'land': lands}
+            'bld': bld, 'bnames': names, 'bcols': cols, 'trees': ''.join(ts), 'land': lands, 'unis': unis}
     js = '// Inner Brno at about 5 m a tile, from OpenStreetMap (© OpenStreetMap contributors, ODbL). Built by tools/brno5.\nwindow.BRNO5_DATA = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n'
     out = sys.argv[1] if len(sys.argv) > 1 else 'brno5_data.js'
     open(out, 'w').write(js)

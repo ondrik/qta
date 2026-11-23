@@ -173,14 +173,15 @@ if __name__ == '__main__':
     for i, b in enumerate(B):
         small = [B[j]['g'] for j in tree.query(b['g']) if j > i and B[j]['g'].intersects(b['g'])]
         if small: b['g'] = b['g'].difference(unary_union(small))
-    # off the streets: nothing on a carriageway (a tile and a bit either side of its centre line); a tunnel runs under the
-    # city, but its ramps down to the portals (the game's last 4 tiles of it at each end) are open to the sky
+    # off the streets: nothing on a carriageway (half its width, 32 px a tile, and a bit either side of its centre line); a
+    # tunnel runs under the city, but its ramps down to the portals (the game's last 4 tiles of it at each end) are open
     net = [w for w in json.load(open('net5.json')) if len(w['pts']) > 1]
-    ends = [LineString(w['pts']).buffer(1.1) for w in net if not w.get('tunnel')]
+    half = lambda w: w.get('wd', 64) / 64 + 0.1
+    ends = [LineString(w['pts']).buffer(half(w)) for w in net if not w.get('tunnel')]
     for w in net:
         if not w.get('tunnel'): continue
         L = LineString(w['pts']); r = min(6.0, L.length / 3)
-        for a, b in ((0, r), (L.length - r, L.length)): ends.append(LineString([L.interpolate(a + (b - a) * i / 8) for i in range(9)]).buffer(1.1))
+        for a, b in ((0, r), (L.length - r, L.length)): ends.append(LineString([L.interpolate(a + (b - a) * i / 8) for i in range(9)]).buffer(half(w)))
     rt = STRtree(ends)
     out, npc, kinds = [], 0, {}
     for b in B:
