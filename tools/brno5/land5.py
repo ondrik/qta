@@ -1,9 +1,13 @@
-# Inner Brno's ground at 5 m a tile: what every tile is when no road or building stands on it.
+# Inner Brno's ground at 5 m a tile: what every tile is when no road or building stands on it (land5.npy, for the
+# game's rules), and the same areas as polygons in paint order (land5poly.json, for drawing their real edges).
 # Run from the data directory, with QTA_MAP=brno5 (the extent and resolution come from ../brno/roads.py).
 import json, math, os, sys
 import numpy as np
 from PIL import Image, ImageDraw
 from scipy import ndimage
+from shapely.geometry import LineString, Polygon, box
+from shapely.ops import unary_union
+from shapely.validation import make_valid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'brno'))
 from roads import MW, MH, P
 OPEN, FOREST, FARM, VINE, URBAN, INDUS, GREEN, WATER, AIR, PLAZA, PARK_LOT, RAIL, PITCH = range(13)
@@ -48,6 +52,8 @@ if __name__ == '__main__':
     els = load('land1.json', 'land2.json', 'land3.json')
     layers = {c: Image.new('L', (MW * S, MH * S), 0) for c in ORDER}
     holes = {c: [] for c in ORDER}
+    geoms = {c: [] for c in ORDER}  # (each area with its own holes, for the polygons)
+    lines = {c: [] for c in ORDER}  # (and the areas drawn as lines: rivers, pedestrian streets), with their widths
     for e in els:
         if e['type'] == 'node': continue
         t = e.get('tags', {}); c = cls(t)
@@ -57,11 +63,17 @@ if __name__ == '__main__':
         for r in rings(e):
             if len(r) >= 3: ImageDraw.Draw(layers[c]).polygon([(x * S, y * S) for x, y in r], fill=255)
         for r in rings(e, 'inner'): holes[c].append(r)
+        try:
+            g = unary_union([make_valid(Polygon(r)) for r in rings(e) if len(r) >= 3])
+            ins = [make_valid(Polygon(r)) for r in rings(e, 'inner') if len(r) >= 3]
+            if ins: g = g.difference(unary_union(ins))
+            if not g.is_empty: geoms[c].append(g)
+        except Exception as ex: print('skipped', e['type'], e['id'], ex)
     for c, hs in holes.items():
         for r in hs:
             if len(r) >= 3: ImageDraw.Draw(layers[c]).polygon([(x * S, y * S) for x, y in r], fill=0)
     # rivers and canals as lines where they have no water area of their own; pedestrian streets as squares
-    rivers = []
+    rivers, dams = [], ([], [])  # (dams and weirs: areas, and lines with their widths)
     for e in els:
         t = e.get('tags', {})
         if e['type'] != 'way' or 'geometry' not in e: continue
@@ -69,11 +81,20 @@ if __name__ == '__main__':
         ww = t.get('waterway')
         if ww in ('river', 'canal', 'stream') and t.get('tunnel') not in ('culvert', 'yes'):
             if ww == 'river': rivers.append((t.get('name', ''), pts))
-            ImageDraw.Draw(layers[WATER]).line([(x * S, y * S) for x, y in pts], fill=255, width=int((4 if ww == 'river' else 1.6 if ww == 'canal' else 0.9) * S))
+            wd = 4 if ww == 'river' else 1.6 if ww == 'canal' else 0.9
+            ImageDraw.Draw(layers[WATER]).line([(x * S, y * S) for x, y in pts], fill=255, width=int(wd * S)); lines[WATER].append((wd, pts))
+        elif ww in ('dam', 'weir'):  # the reservoir's dam (a paved crest you can walk) and the rivers' weirs, drawn over the water
+            if len(pts) >= 4 and pts[0] == pts[-1]:
+                dams[0].append(make_valid(Polygon(pts)))
+                if ww == 'dam': ImageDraw.Draw(layers[PLAZA]).polygon([(x * S, y * S) for x, y in pts], fill=255)
+            else:
+                dams[1].append((2.0 if ww == 'dam' else 0.8, pts))
+                if ww == 'dam': ImageDraw.Draw(layers[PLAZA]).line([(x * S, y * S) for x, y in pts], fill=255, width=int(2.0 * S))
     for e in json.load(open('roads.json'))['elements']:
         t = e['tags']
         if t.get('highway') == 'pedestrian' and t.get('area') != 'yes' and t.get('tunnel') is None:
             ImageDraw.Draw(layers[PLAZA]).line([(P(g['lat'], g['lon'])[0] * S, P(g['lat'], g['lon'])[1] * S) for g in e['geometry']], fill=255, width=int(2.4 * S))
+            lines[PLAZA].append((2.4, [P(g['lat'], g['lon']) for g in e['geometry']]))
     grid = np.full((MH, MW), -1, dtype=np.int16)
     for c in ORDER:
         a = np.array(layers[c]).reshape(MH, S, MW, S).mean(axis=(1, 3)) > 100
@@ -89,6 +110,41 @@ if __name__ == '__main__':
     grid[(grid == -1) & town] = URBAN
     grid[grid == -1] = OPEN
     np.save('land5.npy', grid)
+    # the polygons: first the built-up land nobody mapped (the town mask, its tile steps smoothed away), then each kind
+    # of area in paint order, merged, simplified to 0.15 tile and cut to the map; lines go with their kind
+    B = box(0, 0, MW, MH)
+    def runs_of(m):
+        bx = []
+        for y in range(m.shape[0]):
+            d = np.flatnonzero(np.diff(np.concatenate(([0], m[y].astype(np.int8), [0]))))
+            bx += [box(a, y, b, y + 1) for a, b in zip(d[::2], d[1::2])]
+        return unary_union(bx)
+    polys = lambda g: [g] if g.geom_type == 'Polygon' else [q for q in getattr(g, 'geoms', []) if q.geom_type == 'Polygon']
+    def cut(q, cell=32):  # (a big polygon is cut on a 32-tile grid, so that drawing one chunk of ground never walks all of it;
+        # the cuts fall on whole pixels, where the pieces meet without a seam)
+        if len(q.exterior.coords) + sum(len(i.coords) for i in q.interiors) <= 300: return [q]
+        x0, y0, x1, y1 = q.bounds
+        return [r for gx in range(int(x0 // cell), int(x1 // cell) + 1) for gy in range(int(y0 // cell), int(y1 // cell) + 1)
+                for r in polys(q.intersection(box(gx * cell, gy * cell, (gx + 1) * cell, (gy + 1) * cell)))]
+    def parts(g):
+        out = [r for q in polys(g.intersection(B)) for r in cut(q)]
+        return [[[(round(x, 2), round(y, 2)) for x, y in q.exterior.coords[:-1]]] + [[(round(x, 2), round(y, 2)) for x, y in i.coords[:-1]] for i in q.interiors] for q in out if q.area >= 0.3]
+    def cut_lines(ls):
+        out = []
+        for wd, pts in ls:
+            g = LineString(pts).simplify(0.15).intersection(B.buffer(wd))
+            for q in [g] if g.geom_type == 'LineString' else getattr(g, 'geoms', []):
+                if q.geom_type == 'LineString' and len(q.coords) >= 2: out.append([wd, [(round(x, 2), round(y, 2)) for x, y in q.coords]])
+        return out
+    # (the town mask's edge is made up, so it is rounded: closed and opened by 1.5 tiles, which smooths its tile steps)
+    poly = [[URBAN, parts(runs_of(town).buffer(1.5, quad_segs=2).buffer(-3, quad_segs=2).buffer(1.5, quad_segs=2).simplify(0.4)), []]]
+    for c in ORDER:
+        ps, ls = parts(unary_union(geoms[c]).simplify(0.15)) if geoms[c] else [], cut_lines(lines[c])
+        if ps or ls: poly.append([c, ps, ls])
+    ps, ls = parts(unary_union(dams[0]).simplify(0.15)) if dams[0] else [], cut_lines(dams[1])
+    if ps or ls: poly.append([PLAZA, ps, ls])
+    json.dump(poly, open('land5poly.json', 'w'))
+    print('polygons', [(c, len(ps), sum(len(r) for p in ps for r in p), len(ls)) for c, ps, ls in poly])
     json.dump([[n, [[round(x, 2), round(y, 2)] for x, y in pts]] for n, pts in rivers], open('rivers5.json', 'w'), ensure_ascii=False)
     pal = {OPEN: (120, 160, 80), FOREST: (40, 90, 45), FARM: (200, 180, 90), VINE: (110, 140, 60), URBAN: (150, 140, 130), INDUS: (110, 110, 120), GREEN: (80, 170, 80),
            WATER: (40, 90, 160), AIR: (70, 70, 80), PLAZA: (210, 200, 180), PARK_LOT: (90, 90, 95), RAIL: (120, 90, 70), PITCH: (190, 120, 80)}

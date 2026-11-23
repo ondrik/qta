@@ -1,13 +1,13 @@
 [out:json][timeout:300];
 (
-  way["amenity"~"^(parking|hospital|police|fire_station|fuel|clinic|place_of_worship|university|college|school)$"](49.166,16.556,49.232,16.654);
-  relation["amenity"~"^(hospital|university|parking)$"](49.166,16.556,49.232,16.654);
-  node["amenity"~"^(hospital|police|fire_station|fuel|clinic)$"](49.166,16.556,49.232,16.654);
-  way["highway"="pedestrian"]["area"="yes"](49.166,16.556,49.232,16.654);
-  relation["highway"="pedestrian"](49.166,16.556,49.232,16.654);
-  way["place"="square"](49.166,16.556,49.232,16.654);
-  way["area:highway"](49.166,16.556,49.232,16.654);
-  way["railway"~"^(rail|tram|light_rail)$"](49.166,16.556,49.232,16.654);
+  way["amenity"~"^(parking|hospital|police|fire_station|fuel|clinic|place_of_worship|university|college|school)$"](49.166,16.500,49.242,16.654);
+  relation["amenity"~"^(hospital|university|parking)$"](49.166,16.500,49.242,16.654);
+  node["amenity"~"^(hospital|police|fire_station|fuel|clinic)$"](49.166,16.500,49.242,16.654);
+  way["highway"="pedestrian"]["area"="yes"](49.166,16.500,49.242,16.654);
+  relation["highway"="pedestrian"](49.166,16.500,49.242,16.654);
+  way["place"="square"](49.166,16.500,49.242,16.654);
+  way["area:highway"](49.166,16.500,49.242,16.654);
+  way["railway"~"^(rail|tram|light_rail)$"](49.166,16.500,49.242,16.654);
   node["place"~"^(suburb|quarter|neighbourhood|village)$"](49.12,16.50,49.28,16.71);
 );
-out tags geom;
+out geom;

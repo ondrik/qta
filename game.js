@@ -205,7 +205,13 @@ function mesaV(x, y) { // > 0 on a mesa (a flat-topped rock with cliffs all roun
 }
 const GW = MW + 1, GH = MH + 1;
 // water, rock, desert sand, beach sand, forest floor, dry grass, snow, hill shading; then the region weights
-const F = {}; for (const k of ['wa', 'ro', 'sd', 'sb', 'fo', 'dr', 'sn', 'sh', 'dw', 'tw', 'ww', 'mh']) F[k] = new Float32Array(GW * GH);
+// (inner Brno has no rock, sand, snow, dry grass or desert, and draws its own water and woods: those fields are one shared
+// array of -9, or of 0, to save memory on its big grid)
+const F = {}; {
+  const NIL = B5 && new Float32Array(GW * GH).fill(-9), ZERO = B5 && new Float32Array(GW * GH);
+  for (const k of ['wa', 'ro', 'sd', 'sb', 'fo', 'dr', 'sn', 'sh', 'dw', 'tw', 'ww', 'mh'])
+    F[k] = B5 && ['ro', 'sd', 'sb', 'dr', 'sn'].includes(k) ? NIL : B5 && ['dw', 'tw', 'ww'].includes(k) ? ZERO : new Float32Array(GW * GH);
+}
 function terrainIsland() {
   const el = new Float32Array(GW * GH);
   for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
@@ -285,12 +291,12 @@ function terrainBrno() {
     const t = LCG[Math.min(MH - 1, y) * MW + Math.min(MW - 1, x)], urb = t === LC_URBAN || t === LC_INDUS;
     // (the noise only matters near an edge, so it is skipped where it cannot change anything: this map is big)
     F.wa[i] = (wet[i] ? dIn[i] - 0.5 : 0.5 - dOut[i]) + ((wet[i] ? dIn[i] : dOut[i]) < 2.5 ? 0.4 * (fbm2(x * 0.2, y * 0.2, 67) - 0.5) : 0);
-    F.ro[i] = hady > 0 ? (hady - 0.6) * 9 + 2.5 * (fbm2(x * 0.22, y * 0.22, 51) - 0.5) : -9; // the old limestone quarry on Hády
+    F.ro[i] = !B5 && hady > 0 ? (hady - 0.6) * 9 + 2.5 * (fbm2(x * 0.22, y * 0.22, 51) - 0.5) : -9; // the old limestone quarry on Hády
     F.sd[i] = -9; F.sn[i] = -9;
-    const bx = x - HARBOUR[0], by = y - HARBOUR[1]; F.sb[i] = bx * bx + by * by < 160 * BK * BK ? 1.2 + F.wa[i] : -9; // the reservoir's beach by the harbour
+    const bx = x - HARBOUR[0], by = y - HARBOUR[1]; F.sb[i] = !B5 && bx * bx + by * by < 160 * BK * BK ? 1.2 + F.wa[i] : -9; // the reservoir's beach by the harbour (the 15 m map's)
     F.fo[i] = (f - 0.5) * 5 + (f > 0 && f < 1 ? 1.5 * (fbm2(x * 0.1, y * 0.1, 57) - 0.5) : 0);
     F.dr[i] = urb || f >= 1 || B5 ? -9 : (1 - f) * (fbm2(x * 0.07, y * 0.07, 59) - 0.6) * 8;
-    F.dw[i] = 0; F.tw[i] = 0; F.ww[i] = f; F.mh[i] = hill;
+    F.dw[i] = 0; F.tw[i] = 0; F.ww[i] = B5 ? 0 : f; F.mh[i] = hill;
     el[i] = (hill * 16 + (B5 ? 0 : 2.5 * fbm2(x * 0.05, y * 0.05, 69))) * BK; // (the same slopes, whatever the tile size)
   }
   for (let y = 1; y < GH - 1; y++) for (let x = 1; x < GW - 1; x++) {
@@ -420,7 +426,27 @@ road('Coral Pier', [[154, palmY(154)], [154, MH - 3]], RU);
 
 const NODES = [], EDGES = [], LANES = [], LIGHT_NODES = [], BUS_STOPS = [];
 const LSTEP = 8, LGRID = new Map();
-let HOP = null;
+let HOP = null, HOP_IN = null; // routing: HOP[g] holds, for every node, the lane to take towards goal node g (-1: none)
+// the best lane from every node towards goal node g (Dijkstra on the lane graph), worked out the first time a car heads
+// for g: a table for every pair at once is a few seconds' work on the big maps, and most goals are never used
+function hopRow(g) {
+  let row = HOP[g]; if (row) return row;
+  const N = NODES.length; row = HOP[g] = new Int16Array(N).fill(-1);
+  if (!HOP_IN) { HOP_IN = NODES.map(() => []); for (const L of LANES) HOP_IN[L.to].push(L); }
+  const dist = new Float64Array(N).fill(Infinity), hk = [], hv = []; // a binary heap of (distance, node)
+  const push = (k, v) => { let i = hk.length; hk.push(k); hv.push(v); while (i) { const p = (i - 1) >> 1; if (hk[p] <= k) break; hk[i] = hk[p]; hv[i] = hv[p]; i = p; } hk[i] = k; hv[i] = v; };
+  const pop = () => {
+    const v = hv[0], k = hk.pop(), w = hv.pop(), n = hk.length; if (!n) return v;
+    let i = 0; for (;;) { let c = 2 * i + 1; if (c >= n) break; if (c + 1 < n && hk[c + 1] < hk[c]) c++; if (hk[c] >= k) break; hk[i] = hk[c]; hv[i] = hv[c]; i = c; }
+    hk[i] = k; hv[i] = w; return v;
+  };
+  dist[g] = 0; push(0, g);
+  while (hk.length) {
+    const d0 = hk[0], u = pop(); if (d0 > dist[u]) continue;
+    for (const L of HOP_IN[u]) { const d = d0 + L.len + 60; if (d < dist[L.from]) { dist[L.from] = d; row[L.from] = L.id; push(d, L.from); } }
+  }
+  return row;
+}
 function closestOnSeg(p, a, b) {
   const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1;
   const t = clamp(((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2, 0, 1), x = a[0] + dx * t, y = a[1] + dy * t;
@@ -546,23 +572,8 @@ function buildNet() {
     const outs = OUT[L.to].filter(o => o.e !== L.e);
     L.next = outs.length ? outs : OUT[L.to]; // U-turn only at a dead end
   }
-  // routing table: for every goal node, the best lane to take from every node (Dijkstra on the lane graph)
-  const N = NODES.length; HOP = new Int16Array(N * N).fill(-1);
-  const IN = NODES.map(() => []); for (const L of LANES) IN[L.to].push(L);
-  const dist = new Float64Array(N), hk = [], hv = []; // a binary heap of (distance, node)
-  const push = (k, v) => { let i = hk.length; hk.push(k); hv.push(v); while (i) { const p = (i - 1) >> 1; if (hk[p] <= k) break; hk[i] = hk[p]; hv[i] = hv[p]; i = p; } hk[i] = k; hv[i] = v; };
-  const pop = () => {
-    const v = hv[0], k = hk.pop(), w = hv.pop(), n = hk.length; if (!n) return v;
-    let i = 0; for (;;) { let c = 2 * i + 1; if (c >= n) break; if (c + 1 < n && hk[c + 1] < hk[c]) c++; if (hk[c] >= k) break; hk[i] = hk[c]; hv[i] = hv[c]; i = c; }
-    hk[i] = k; hv[i] = w; return v;
-  };
-  for (let g = 0; g < N; g++) {
-    dist.fill(Infinity); dist[g] = 0; push(0, g);
-    while (hk.length) {
-      const d0 = hk[0], u = pop(); if (d0 > dist[u]) continue;
-      for (const L of IN[u]) { const d = d0 + L.len + 60; if (d < dist[L.from]) { dist[L.from] = d; HOP[g * N + L.from] = L.id; push(d, L.from); } }
-    }
-  }
+  // routing: each goal's table is worked out when first needed (hopRow)
+  HOP = new Array(NODES.length); HOP_IN = null;
   // spatial index of lane samples
   for (const L of LANES) for (let i = 0; i < L.n; i += 2) {
     const key = Math.floor(L.x[i] / 128) + Math.floor(L.y[i] / 128) * 1024;
@@ -722,6 +733,41 @@ function b5Buildings() {
     out.push({ k, lv, rf, rh, gl, wc: wc ? BRNO_DATA.bcols[wc - 1] : null, rc: rc ? BRNO_DATA.bcols[rc - 1] : null, nm: nm ? BRNO_DATA.bnames[nm - 1] : null, p });
   }
   return out;
+}
+// inner Brno's ground as OpenStreetMap draws it: every kind of area (the built-up land, parks, squares, car parks,
+// railway land, woods, fields, pitches, water) as polygons and lines in paint order, so that their edges run where the
+// real ones do rather than along the tiles; each one remembers its box, and farmland its crop and the way its rows run
+let LAND5 = null;
+const LAND5G = new Map();
+function b5Land() {
+  const s = BRNO_DATA.land || '', out = [], nx = () => { const a = vlq(s, i); i = a[1]; return a[0]; };
+  let i = 0, px = 0, py = 0;
+  const run = (P, o, close) => { // one ring or line: its first point (from the last first point), then its steps
+    px += nx(); py += nx(); const n = nx(); let X = px, Y = py, lx = 0, ly = 0;
+    for (let q = 0; q < n; q++) {
+      if (q) { X += nx(); Y += nx(); }
+      const x = X * T / 10, y = Y * T / 10;
+      if (q) { P.lineTo(x, y); const l = (x - lx) ** 2 + (y - ly) ** 2; if (l > o.long) { o.long = l; o.ang = Math.atan2(y - ly, x - lx); } } else P.moveTo(x, y);
+      lx = x; ly = y; const b = o.bb; if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y;
+    }
+    if (close) P.closePath();
+  };
+  while (i < s.length) {
+    const c = nx(), np = nx(), nl = nx();
+    for (let j = 0; j < np; j++) { const o = { c, P: new Path2D(), bb: [1e9, 1e9, -1e9, -1e9], w: 0, long: 0, ang: 0 }, nr = nx(); for (let r = 0; r < nr; r++) run(o.P, o, true); out.push(o); }
+    for (let j = 0; j < nl; j++) { const o = { c, P: new Path2D(), bb: [1e9, 1e9, -1e9, -1e9], w: nx() * T / 10, long: 0, ang: 0 }; run(o.P, o, false); for (let q = 0; q < 4; q++) o.bb[q] += q < 2 ? -o.w : o.w; out.push(o); }
+  }
+  const CR = ['wheat', 'wheat', 'plough', 'green', 'corn', 'rape', 'stubble'];
+  out.forEach((o, n) => { if (o.c === LC_FARM || o.c === LC_VINE) o.crop = o.c === LC_VINE ? 'vine' : CR[((n + 7) * 2654435761 >>> 0) % CR.length]; });
+  return out;
+}
+// the polygons that reach into ground chunk (cx, cy), in paint order
+function land5At(cx, cy) {
+  if (!LAND5) {
+    LAND5 = b5Land();
+    LAND5.forEach((o, n) => { for (let y = Math.max(0, Math.floor(o.bb[1] / CHK)); y <= Math.floor(o.bb[3] / CHK); y++) for (let x = Math.max(0, Math.floor(o.bb[0] / CHK)); x <= Math.floor(o.bb[2] / CHK); x++) { const k = y * 4096 + x; let a = LAND5G.get(k); if (!a) LAND5G.set(k, a = []); a.push(n); } });
+  }
+  return LAND5G.get(cy * 4096 + cx);
 }
 // which side of a real building faces the way (ux, uy): front, a side of its box in its own frame (for its sign, mill and
 // searchlights), and frontE, the longest wall of its outline that faces that way (for its door)
@@ -1730,12 +1776,20 @@ function genMap() {
       else if (map[k] === SAND && !taken[k] && dR[k] > 50) { prop('umb', tx + 0.5, ty + 0.5, { c: spick(['#e53935', '#1e88e5', '#fdd835', '#43a047']) }); taken[k] = 1; }
     }
     } // (the 15 m map's airport and reservoir)
+    if (B5) for (let i = 0; i < 900; i++) { // inner Brno's corner of the reservoir: motorboats and rowing boats, out from the banks
+      const tx = 2 + Math.floor(srnd() * (RESERVOIR[0] - 2)), ty = 2 + Math.floor(srnd() * (RESERVOIR[1] - 2)), k = ty * MW + tx;
+      if (tx > 0 && ty > 0 && tx < MW && ty < MH && map[k] === WATER && fieldAt('wa', tx, ty) > 5 && srnd() < 0.2)
+        prop('boat', tx + 0.5, ty + 0.5, { a: srnd() * TAU, row: srnd() < 0.4, c: spick(['#f4f4f4', '#1e5aa8', '#c0392b', '#f4f4f4']) });
+    }
     const TS = B5 ? 1.6 : 1; // (trees are bigger next to 5 m tiles)
     if (B5) { // the trees OpenStreetMap knows, on the streets and in the parks
       const r = BRNO_DATA.trees; let x = 0, y = 0;
       for (let i = 0; i < r.length;) { const a = vlq(r, i); i = a[1]; const b = vlq(r, i); i = b[1]; x += a[0]; y += b[0]; const k = (y >> 2) * MW + (x >> 2); if (map[k] !== BUILD && map[k] !== ROAD && map[k] !== WATER && dR[k] > 40 && tunT[k] !== 2 && ovT[k] !== 2 && !solidAt(x / 4 * T, y / 4 * T)) { tree(x / 4, y / 4, (10 + srnd() * 6) * TS, srnd() * 6 | 0); taken[k] = 1; } }
     }
-    const fieldOk = (i, j) => i > 0 && j > 0 && i < MW - 1 && j < MH - 1 && (LCG[j * MW + i] === LC_FARM || LCG[j * MW + i] === LC_VINE) && map[j * MW + i] === GRASS && !taken[j * MW + i] && dR[j * MW + i] > 46 && fieldAt('wa', i, j) < -0.6;
+    // crop fields: inner Brno's are its real farmland, drawn as polygons (the tiles only slow you down); elsewhere,
+    // rectangles fitted into the farmland
+    if (B5) for (let k = 0; k < MW * MH; k++) if ((LCG[k] === LC_FARM || LCG[k] === LC_VINE) && map[k] === GRASS) map[k] = FIELD;
+    const fieldOk = (i, j) => !B5 && i > 0 && j > 0 && i < MW - 1 && j < MH - 1 && (LCG[j * MW + i] === LC_FARM || LCG[j * MW + i] === LC_VINE) && map[j * MW + i] === GRASS && !taken[j * MW + i] && dR[j * MW + i] > 46 && fieldAt('wa', i, j) < -0.6;
     const CROPS = ['wheat', 'wheat', 'wheat', 'plough', 'plough', 'green', 'green', 'corn', 'rape', 'rape'];
     for (let gy = 2; gy < MH - 2;) {
       const ch = 6 + Math.floor(srnd() * 4);
@@ -1885,7 +1939,7 @@ const FISH = (BRNO ? [ // [name, Czech name, waters, kg from, kg to, $ a kg, how
 const FISH_SPOTS = (() => {
   const out = [], open = openTiles(), R = Math.round(14 * BK);
   const anchors = B5 ? [[...geo(49.1905, 16.5760), 'r'], [...geo(49.1850, 16.5950), 'r'], [...geo(49.1795, 16.6150), 'r'], [...geo(49.1700, 16.6230), 'r'],
-    [...geo(49.2120, 16.6300), 'r'], [...geo(49.1960, 16.6400), 'r']] : BRNO ? [[...geo(49.2286, 16.5166), 'l'], [...geo(49.2335, 16.5060), 'l'], [...geo(49.1905, 16.5760), 'r'], [...geo(49.2060, 16.5560), 'r'],
+    [...geo(49.2120, 16.6300), 'r'], [...geo(49.1960, 16.6400), 'r'], [...geo(49.2286, 16.5166), 'l'], [...geo(49.2335, 16.5060), 'l']] : BRNO ? [[...geo(49.2286, 16.5166), 'l'], [...geo(49.2335, 16.5060), 'l'], [...geo(49.1905, 16.5760), 'r'], [...geo(49.2060, 16.5560), 'r'],
     [...geo(49.1700, 16.6200), 'r'], [...geo(49.2120, 16.6300), 'r']]
     : [[30, riverY(30), 'r'], [84, riverY(84), 'r'], [LAKES[0].x - LAKES[0].rx, LAKES[0].y, 'l'], [LAKES[1].x, LAKES[1].y + LAKES[1].ry, 'l'], [154.5, MH - 4, 's', true], [100, coastY(100) + 1, 's']];
   for (const [ax0, ay0, w, pier] of anchors) {
@@ -2505,7 +2559,7 @@ function chooseNext(c, L) {
     return straightest(outs, L);
   }
   const a = c.ai;
-  if (a && a.goal >= 0 && Math.random() < 0.9) { const h = HOP[a.goal * NODES.length + L.to]; if (h >= 0 && outs.includes(LANES[h])) return LANES[h]; }
+  if (a && a.goal >= 0 && Math.random() < 0.9) { const h = hopRow(a.goal)[L.to]; if (h >= 0 && outs.includes(LANES[h])) return LANES[h]; }
   return Math.random() < 0.6 ? straightest(outs, L) : pick(outs);
 }
 function laneAcquire(c, maxD = 96) {
@@ -4762,6 +4816,32 @@ function drawTerrain(cx, cy) {
   });
   tint2(x0, y0, q => { const w = V.wa[q]; return w > -0.06 && w < 0.28 ? rgba(240, 248, 250, 0.55 * (1 - Math.abs(w - 0.08) / 0.2)) : null; }); // foam on the shore
 }
+// inner Brno's ground for one chunk: grass, then each area that reaches into it, in paint order
+function drawLand5(cx, cy) {
+  const x0 = cx * CHK, y0 = cy * CHK, L = land5At(cx, cy);
+  ctx.fillStyle = PAT[GRASS]; ctx.fillRect(x0, y0, CHK, CHK);
+  if (!L) return;
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  for (const n of L) {
+    const o = LAND5[n], c = o.c;
+    if (o.crop) { // a field: its crop, rows along its longest side, round a strip of bare earth
+      const pat = CROP[o.crop], a = o.ang, ca = Math.cos(a), sa = Math.sin(a);
+      pat.setTransform(setPM(ca, sa, -sa, ca, o.bb[0], o.bb[1]));
+      ctx.fillStyle = pat; ctx.fill(o.P, 'evenodd');
+      ctx.strokeStyle = PAT.dirt; ctx.lineWidth = 9; ctx.stroke(o.P);
+      continue;
+    }
+    const f = c === LC_FOREST ? PAT.forest : c === LC_WATER ? PAT[WATER] : c === LC_LOT ? PAT.lot : c === LC_URBAN || c === LC_INDUS || c === LC_PLAZA || c === LC_RAIL ? PAT[PLAZA] : PAT[GRASS];
+    if (o.w) { // a river, a stream or a pedestrian street drawn as a line
+      if (c === LC_WATER) { ctx.strokeStyle = 'rgba(48,40,30,.45)'; ctx.lineWidth = o.w + 4; ctx.stroke(o.P); }
+      ctx.strokeStyle = f; ctx.lineWidth = o.w; ctx.stroke(o.P);
+    } else {
+      ctx.fillStyle = f; ctx.fill(o.P, 'evenodd');
+      if (c === LC_WATER) { ctx.strokeStyle = 'rgba(48,40,30,.45)'; ctx.lineWidth = 3; ctx.stroke(o.P); } // (its banks)
+    }
+  }
+  ctx.lineCap = 'butt';
+}
 function hillShade(cx, cy) {
   const x0 = cx * CHK, y0 = cy * CHK, V = TV;
   tint2(x0, y0, q => { const s = V.sh[q]; return s > 0.02 ? rgba(255, 248, 230, Math.min(0.22, s * 0.3)) : s < -0.02 ? rgba(10, 16, 34, Math.min(0.5, -s * 0.42)) : null; });
@@ -4776,7 +4856,8 @@ function groundChunk(cx, cy) {
   ctx = g;
   try {
     const country = hasCountry(cx, cy);
-    if (country) drawTerrain(cx, cy);
+    if (B5) { sampleTerrain(cx * CHK, cy * CHK); drawLand5(cx, cy); } // (inner Brno: its mapped areas; the terrain only shades)
+    else if (country) drawTerrain(cx, cy);
     drawGroundStatic({ x0: cx * CHK - T, y0: cy * CHK - T, x1: (cx + 1) * CHK + T - 1, y1: (cy + 1) * CHK + T - 1 }); // 1-tile margin so kerb details cross chunk seams
     ctx.fillStyle = PAT.grime; ctx.fillRect(cx * CHK, cy * CHK, CHK, CHK); // dirt and bleaching, continuous across chunks
     if (country) hillShade(cx, cy);
@@ -4800,6 +4881,7 @@ function drawWaterAnim(v) {
   const x1 = Math.min(MW - 1, Math.floor(v.x1 / T)), y1 = Math.min(MH - 1, Math.floor(v.y1 / T));
   for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
     if (map[ty * MW + tx] !== WATER) continue;
+    if (B5 && (tile(tx - 1, ty) !== WATER || tile(tx + 1, ty) !== WATER || tile(tx, ty - 1) !== WATER || tile(tx, ty + 1) !== WATER)) continue; // (inner Brno's banks are its real ones: no ripples over them)
     const px = tx * T, py = ty * T, riv = inRiver(tx, ty);
     if (riv && Math.abs(ty + 0.5 - riverY(tx + 0.5)) > RIVER_HW - 0.9) continue;
     ctx.fillStyle = '#2a6596';
@@ -4879,6 +4961,12 @@ function drawGroundStatic(v) {
   // (in the countryside the terrain is already there: null leaves it showing)
   const kind = (tx, ty) => {
     const k = ty * MW + tx, t = map[k] === BUILD && GU && GU[k] ? GU[k] - 1 : map[k]; // (round a real building's outline: the ground it stands on)
+    if (B5) { // (inner Brno's areas are polygons already: a tile is drawn only where the game paved or planted it itself)
+      if (map[k] === BUILD || t === WALK || t === ROAD || t === WATER || t === FIELD || t === SAND || t === ROCK) return null; // (pavements come with the streets; water, banks and the ground round a building from the areas)
+      const c = LCG[k], paved = c === LC_URBAN || c === LC_INDUS || c === LC_PLAZA || c === LC_RAIL || c === LC_LOT;
+      if (t === GRASS) return paved ? GRASS : null; // (a lawn laid on paved land)
+      return t !== PLAZA ? null : lotT[k] === 2 ? 'dirt' : lotT[k] ? (c === LC_LOT ? null : 'lot') : paved ? null : PLAZA; // (a yard, a car park or a dirt lot of its own)
+    }
     if (!inCity(tx, ty) && (t === GRASS || t === SAND || t === ROCK || t === WATER || t === FIELD || (t === ROAD && (bridge[k] || (eR[k] >= 0 && EDGES[eR[k]].rural))))) return null;
     return t === WATER ? (inRiver(tx, ty) ? 'quay' : WATER) : t === PLAZA && lotT[k] ? (lotT[k] === 2 ? 'dirt' : 'lot') : t !== ROAD ? t : bridge[k] ? 'quay' : hwT[k] ? GRASS : WALK;
   };
@@ -6861,7 +6949,17 @@ function drawHUD() {
     for (const sp of SPRAYS) dot(sp.x, sp.y, '#c27cf0', 2);
     for (const sp of FISH_SPOTS) dot(sp.x, sp.y, '#4fc3f7', 2);
     if (Q.branches) for (const g of Q.branches) dot(g.x, g.y, g.tint, 2);
-    if (CLUB) { dot(CLUB.x, CLUB.y, '#ff4fa8', full ? 3.5 : 2.5); if (full) txt(CLUB.name, mx + CLUB.x / T * ms, my + CLUB.y / T * ms - 9, 11, '#ff9ccf', 'center'); }
+    if (CLUB) {
+      dot(CLUB.x, CLUB.y, '#ff4fa8', full ? 3.5 : 2.5);
+      if (full) { // its name above the dot, or else below, right or left of it: wherever no district's name is
+        const cx = mx + CLUB.x / T * ms, cy = my + CLUB.y / T * ms, mono = 'bold 11px ui-monospace, Menlo, Consolas, monospace';
+        const boxes = MAP_LABELS.map(([nm, x, y, big]) => { ctx.font = big ? '15px Bungee, Impact, sans-serif' : mono; const w = ctx.measureText(nm).width; return [mx + x * ms - w / 2, my + y * ms - (big ? 15 : 11), mx + x * ms + w / 2, my + y * ms + 3]; });
+        ctx.font = mono; const w = ctx.measureText(CLUB.name).width;
+        const free = ([dx, dy, al]) => { const x0 = cx + dx - (al === 'center' ? w / 2 : al === 'right' ? w : 0), y0 = cy + dy - 11; return !boxes.some(b => b[0] < x0 + w && b[2] > x0 && b[1] < y0 + 14 && b[3] > y0); };
+        const [dx, dy, al] = [[0, -9, 'center'], [0, 18, 'center'], [8, 4, 'left'], [-8, 4, 'right']].find(free) || [0, -9, 'center'];
+        txt(CLUB.name, cx + dx, cy + dy, 11, '#ff9ccf', al);
+      }
+    }
     if (Q.link) dot(Q.link.x, Q.link.y, '#3cf0ff', 2.5);
     if (heli) dot(heli.x, heli.y, Math.sin(time * 10) > 0 ? '#cfe3ff' : '#f33', 3);
     if (Q.decoy) dot(Q.decoy.x, Q.decoy.y, '#3cf0ff', 2.5);

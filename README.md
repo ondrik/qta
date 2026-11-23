@@ -8,7 +8,7 @@ coast), **Brno**, and **inner Brno in detail**, with every street and the real b
 You can play alone or **online with a friend**.
 
 No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 690 KB), plus
-`brno5_data.js` (1.8 MB) for the detailed map, loaded only when you pick it. Online co-op loads one small library,
+`brno5_data.js` (3 MB) for the detailed map, loaded only when you pick it. Online co-op loads one small library,
 and only when you open the co-op menu.
 
 Play it at **https://ondrik.github.io/qta/**.
@@ -165,24 +165,27 @@ The data was fetched once through the Overpass API and is embedded in `game.js`,
 
 ### Inner Brno in detail
 
-The third map is inner Brno at about **5 m a tile**: 1426 × 1468 tiles, 7.1 × 7.3 km from Královo Pole and
-Žabovřesky in the north to Komárov in the south, and from Pisárky to Židenice. At this scale a car, a street and a
-building are their real size.
+The third map is inner Brno at about **5 m a tile**: 2241 × 1690 tiles, 11.2 × 8.5 km from the dam of the Brno
+reservoir, Bystrc and Královo Pole in the north to Komárov in the south, and from Kohoutovice to Židenice. At this
+scale a car, a street and a building are their real size.
 
-- **Every street** with its name (about 3,300 of them), traced into one network like the main roads above, with
-  both tunnels and about 40 overpasses. The Královopolský tunnel's two tubes run apart, as they do, from the
+- **Every street** with its name (about 4,300 of them), traced into one network like the main roads above, with
+  the Husovický, Královopolský and Pisárecký tunnels and 50 overpasses. The Královopolský tunnel's two tubes run apart, as they do, from the
   Žabovřeská interchange to Královo Pole; the slip roads that dip under the interchange beside it stay streets of
   their own. Traffic lights stand where main roads meet; the side streets are left to the drivers.
-- **The real buildings**: 37,926 outlines from OpenStreetMap (multi-part ones with their courtyards included), each
+- **The real buildings**: 51,972 outlines from OpenStreetMap (multi-part ones with their courtyards included), each
   at its real angle and in its real shape: a rectangle at any angle, an L, U or T in its own turned frame, or any
   polygon, with walls along every edge and collisions that follow them exactly. Each keeps its number of floors where
   it is mapped (most are), its kind and its colours. Pitched roofs slope up from every wall at one pitch until they
   meet in ridges (as a straight skeleton does), with a flat top on deep blocks; spires, cones and domes where they are
   mapped. Tall building parts (church towers and spires) rise at their real height, and a big church with no tower
   mapped gets one over its west front. Where a building stood on a street's carriageway, the street wins.
-- The land use at full resolution: squares and pedestrian streets, car parks, parks and cemeteries, railway land
-  and sports grounds; the mapped street trees, and parks and woods planted at a believable density; tram tracks in
-  the streets and every track of the railway.
+- **The ground as it is mapped**: squares and pedestrian streets, car parks, parks and cemeteries, railway land,
+  sports grounds, woods, water and farmland (each field with its own crop), each drawn to its real outline rather
+  than in 5 m tiles; the mapped street trees, and parks and woods planted at a believable density; tram tracks in the
+  streets and every track of the railway.
+- **The reservoir's south end**: the dam, the harbour at Bystrc and the lake up to Kozí horka, with boats out on
+  it and two places to fish from its banks.
 - **Landmarks**, the real buildings made to look like themselves: FIT BUT (the Carthusian monastery's wings round
   their garden, the church and its tower, the onion-domed towers, the FIT sign, the faculty's flag and a blue lamp at
   its door, all blue on the map); the Old Town Hall and its tower over the gate on Radnická; the cathedral on Petrov
@@ -193,5 +196,5 @@ building are their real size.
   hospital), police and fire stations with their vehicles outside, the astronomical clock on Náměstí Svobody and the
   market on Zelný trh, the Moulin Rouge back on its corner, the Atom Array Lab, and fishing on the Svratka and the
   Svitava.
-- It takes about 6 s to load and a few hundred MB of memory. The data is built by `tools/brno5/build.sh` (from
+- It takes about 9 s to load and about 500 MB of memory. The data is built by `tools/brno5/build.sh` (from
   OpenStreetMap, © OpenStreetMap contributors, ODbL) into `brno5_data.js`, which `index.html` loads only for this map.

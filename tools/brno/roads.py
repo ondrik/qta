@@ -2,7 +2,7 @@ import json, math, sys
 from PIL import Image, ImageDraw
 import os
 if os.environ.get('QTA_MAP') == 'brno5':  # the detailed map: inner Brno at about 5 m a tile (see ../brno5)
-    LON0, LON1, LAT0, LAT1, MW, MH = 16.556, 16.654, 49.166, 49.232, 1426, 1468
+    LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.654, 49.166, 49.242, 2241, 1690
     SC = 6.0
 else:
     LON0, LON1, LAT0, LAT1, MW, MH = 16.500, 16.698, 49.140, 49.252, 960, 832  # about 15 m a tile

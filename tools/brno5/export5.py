@@ -1,5 +1,6 @@
 # Pack inner Brno (5 m a tile) into brno5_data.js, which the game loads only for that map.
-# Land is run-length coded; buildings and trees are variable-length base-64 numbers (like source maps' VLQ).
+# Land is run-length coded per tile (for the rules) and as polygons (for drawing); buildings, land polygons and trees are
+# variable-length base-64 numbers (like source maps' VLQ).
 import json, math, os, sys
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'brno'))
@@ -84,6 +85,16 @@ if __name__ == '__main__':
                 for r in q['r']:
                     s.append(at(*r[0]) + vlq(len(r)) + ''.join(vlq(T10(b2[0]) - T10(a2[0])) + vlq(T10(b2[1]) - T10(a2[1])) for a2, b2 in zip(r, r[1:])))
     bld = ''.join(s)
+    # the ground's areas as polygons, in paint order: for each kind its class, how many polygons and lines, then each
+    # polygon's rings (first corner relative to the last first corner, then steps) and each line's width and points,
+    # all in tenths of a tile
+    lp, px, py = [], 0, 0
+    steps = lambda r: vlq(len(r)) + ''.join(vlq(T10(b2[0]) - T10(a2[0])) + vlq(T10(b2[1]) - T10(a2[1])) for a2, b2 in zip(r, r[1:]))
+    for c, ps, ls in json.load(open('land5poly.json')):
+        lp.append(vlq(c) + vlq(len(ps)) + vlq(len(ls)))
+        for q in ps: lp.append(vlq(len(q)) + ''.join(at(*r[0]) + steps(r) for r in q))
+        for wd, pts in ls: lp.append(vlq(T10(wd)) + at(*pts[0]) + steps(pts))
+    lands = ''.join(lp)
     # trees, in quarter tiles, sorted, as deltas
     tr = sorted({(round(P(e['lat'], e['lon'])[0] * 4), round(P(e['lat'], e['lon'])[1] * 4)) for e in json.load(open('trees.json'))['elements'] if e['type'] == 'node'}, key=lambda p: (p[1], p[0]))
     tr = [p for p in tr if 4 < p[0] < MW * 4 - 4 and 4 < p[1] < MH * 4 - 4 and 0 <= p[1] // 4 < MH and 0 <= p[0] // 4 < MW and land[p[1] // 4, p[0] // 4] != 7]
@@ -92,7 +103,7 @@ if __name__ == '__main__':
     rivers = json.load(open('rivers5.json'))
     data = {'bbox': [LON0, LON1, LAT0, LAT1], 'mw': MW, 'mh': MH, 'lc': runs(land), 'roads': R, 'rails': rails, 'trams': trams,
             'rivers': [[n, [c for x, y in pts for c in (round(x, 1), round(y, 1))]] for n, pts in rivers], 'places': places, 'pois': pois,
-            'bld': bld, 'bnames': names, 'bcols': cols, 'trees': ''.join(ts)}
+            'bld': bld, 'bnames': names, 'bcols': cols, 'trees': ''.join(ts), 'land': lands}
     js = '// Inner Brno at about 5 m a tile, from OpenStreetMap (© OpenStreetMap contributors, ODbL). Built by tools/brno5.\nwindow.BRNO5_DATA = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n'
     out = sys.argv[1] if len(sys.argv) > 1 else 'brno5_data.js'
     open(out, 'w').write(js)
