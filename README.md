@@ -54,7 +54,7 @@ On phones and tablets, touch buttons appear automatically. On the title screen, 
 and the right half for the Physics Lab.
 
 Goal: reach **$100,000**. Ringing payphones give jobs, and each finished job raises your cash multiplier.
-Spray shops ($500) clear your wanted level. If you are wasted or busted you come back at the nearest hospital or
+Spray shops ($500) clear your wanted level (up to five stars). If you are wasted or busted you come back at the nearest hospital or
 police station, facing the street. Ramming a police car gets you at least one star, and that cruiser gives chase.
 The car you drive has a health bar over it (and in the corner of the screen), and it holds out longer than the
 other cars on the road.
@@ -72,6 +72,19 @@ other cars on the road.
 Officers who get out to arrest you, man a roadblock or storm out of a SWAT van leave their vehicle parked and
 empty, and walk back to it when they are no longer needed. The tank and the SWAT vans head back to base once your
 wanted level drops below theirs.
+
+Past five stars the state itself comes after you. You get there by staying in their sight: every 40 s they see
+you, the next level comes, and so does taking out what they send (the tank, a carrier, a bulldozer, the drone, the
+army's helicopter, the airship). Anything else you do counts for a tenth. A second row of stars, the level's name
+and its way out show under the first. From seven stars up a level doesn't fade by itself: only its way out ends it.
+
+| Stars | Who comes, and the way out |
+| --- | --- |
+| 6 · The Measurement Bureau | Black vans with a detector dish: near one, your superposition collapses, your entanglement breaks, and X and T don't work. The Bureau's drone keeps you measured, so the police never lose you (the quantum Zeno effect). Lose it under trees or an overpass or in a tunnel, or shoot it down. Spike strips ahead of you halve your top speed until you swap cars. Lose them as at five stars. |
+| 7 · State of emergency | The army: checkpoints of armoured carriers and soldiers on the bridges and at the tunnel mouths ahead, carriers with mounted guns, and an attack helicopter whose rockets land where a red ring marks the street. Way out: lie low for 60 s unseen, or on foot face a wall and press T to spend an ε charge tunnelling through the building, out of their sight. Either takes you back to five stars. |
+| 8 · The Observer | A measurement sweep every 20 s: wherever you are, they know. No superposition or entanglement at all, no ε pickups. Jets strafe your street (a red strip marks their run). Way out: one of the entangled payphones, cyan on the map (at the Atom Array Lab and, in Brno, at FIT BUT). A Bell measurement there (press Space as the arrow crosses the window, two out of three) teleports you to the other one, and you are down to three stars. |
+| 9 · Demolition | Armoured bulldozers come straight through the buildings. Hide behind one and a wrecking crew brings it down on you, leaving rubble across the street. Fuel tankers lie jack-knifed and burning in the junctions ahead, and a crane swings a wrecking ball over a main junction. Way out: 45 s unseen in a pedestrian zone or square, back to five stars. |
+| 10 · Air assault | Swarms of kamikaze drones (a red ring marks where each dives; shoot them down), paratroopers, squads roped down from helicopters onto the street ahead, and an airship whose searchlight finds you. Way out: go to ground, through two different tunnels from end to end, unseen going in and coming out, back to five stars. On the island, with no tunnels, lie low 75 s unseen. |
 
 ## Fishing
 

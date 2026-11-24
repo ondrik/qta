@@ -2400,6 +2400,8 @@ const sfx = {
   bite: () => { tone(300, 0.1, 'sine', 0.18, 90); noise(0.2, 700, 'lowpass', 0.3); tone(1400, 0.06, 'square', 0.05, 0, now() + 0.05); },
   drag: () => noise(0.35, 4200, 'bandpass', 0.12, 6),
   snap: () => { noise(0.07, 3000, 'highpass', 0.5); tone(1900, 0.1, 'triangle', 0.08, 600); },
+  jet: () => { noise(1.8, 600, 'lowpass', 0.7, 0.7); tone(200, 1.5, 'sawtooth', 0.05, 45); },
+  siren: () => [0, 0.32, 0.64].forEach(w => { tone(880, 0.16, 'square', 0.05, 0, now() + w); tone(660, 0.16, 'square', 0.05, 0, now() + w + 0.16); }),
   tram: () => [0, 0.2].forEach(w => { tone(2150, 0.18, 'triangle', 0.06, 0, now() + w); tone(3230, 0.12, 'sine', 0.025, 0, now() + w); }), // (the bell: ding-ding)
 };
 
@@ -2480,6 +2482,10 @@ const CT = {
   ambulance: { label: 'Ambulance',    w: 18, l: 38, max: 310, acc: 195, turn: 2.6, hp: 300, mass: 1.4, colors: ['#f4f6f7'] },
   swat:    { label: 'SWAT Van',       w: 20, l: 42, max: 300, acc: 170, turn: 2.2, hp: 650, mass: 2.6, colors: ['#1c2330'] },
   firetruck: { label: 'Fire Truck',   w: 20, l: 50, max: 260, acc: 150, turn: 2.0, hp: 480, mass: 2.6, colors: ['#c0392b'] },
+  bureau:  { label: 'Bureau Van',     w: 20, l: 40, max: 330, acc: 210, turn: 2.4, hp: 700, mass: 2.6, colors: ['#15171c'] },
+  apc:     { label: 'Armoured Carrier', w: 24, l: 48, max: 270, acc: 150, turn: 2.0, hp: 1500, mass: 6.0, colors: ['#4b5320'] },
+  dozer:   { label: 'Armoured Bulldozer', w: 28, l: 46, max: 175, acc: 110, turn: 1.6, hp: 2400, mass: 10, colors: ['#d4a017'] },
+  tanker:  { label: 'Fuel Tanker',    w: 20, l: 60, max: 200, acc: 90, turn: 1.6, hp: 400, mass: 3.4, colors: ['#e9ecef'] },
   tram:    { label: 'Tram',           w: 16, l: 62, max: 150, acc: 63, turn: 0, hp: 1500, mass: 40, colors: ['#d3202a'] }, // (only the cab you drive: see the trams)
   tractor: { label: 'Tractor',        w: 17, l: 27, max: 150, acc: 120, turn: 2.6, hp: 340, mass: 2.0, colors: ['#2e7d32', '#c62828', '#1565c0', '#e0a800'], offroad: true },
 };
@@ -2496,6 +2502,7 @@ const SKINS = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
 
 let cars = [], peds = [], bullets = [], parts = [], decals = [], pickups = [];
 let trams = [], tramId = 1; // (inner Brno's trams, see updateTrams)
+let HQ = hqNew(), tankerCars = [], EPR = null; // (wanted levels 6 to 10, see updateWanted)
 let player = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, hp: 100, car: null, weapons: {}, weapon: null, cash: 0, lives: 5, mult: 1,
   anim: 0, moving: false, shootCd: 0, bust: 0, down: 0, downKind: null, hidden: true,
   shirt: '#ff7a1a', skin: '#e0ac69', hair: '#1a1a1a', pants: '#1e2a3a' };
@@ -2591,6 +2598,11 @@ const NOTES = {
     body: 'An acousto-optic deflector makes a grid of moving tweezers from a set of x and y radio tones: there is a tweezer wherever a chosen row meets a chosen column. Moving a tone moves its whole row or column, so many atoms shuttle in parallel, but every atom at a crossing comes along, and rows and columns can never cross or merge. Planning such moves is a puzzle that compilers for neutral-atom quantum computers solve.',
     lib: 'Game liberty: here a move takes one press. A real one takes hundreds of microseconds, and the moving tweezers travel between the static traps so they don\'t disturb the atoms left behind.',
   },
+  teleport: {
+    title: 'Quantum teleportation',
+    body: 'Teleportation sends a quantum state, not matter. Alice and Bob share an entangled pair. Alice measures her unknown qubit together with her half of the pair in the Bell basis, gets one of four outcomes and tells Bob by an ordinary call. Bob applies one of four corrections to his half, which then is the state Alice had. Hers was destroyed by the measurement, so nothing gets copied.',
+    lib: 'Game liberty: what teleports is a qubit\'s state, never a person, and it needs that call, so it is no faster than light. It has been done from a satellite to the ground, over 1,400 km.',
+  },
 };
 function note(k) {
   if (Q.notes.has(k)) return;
@@ -2612,7 +2624,10 @@ function applyControls(c, throttle, steer, hand, dt) {
   // Traffic only brushes the verge on the bends of its lanes, so it gets off lightly.
   const tl = tileAtP(c.x, c.y), lane = c.driver === 'ai' || c.driver === 'service';
   const surf = c.ghost || t.offroad || c.type === 'tank' || c.lay ? 1 : tl === SAND ? (lane ? 0.62 : 0.36) : tl === FIELD ? (lane ? 0.7 : 0.42) : tl === GRASS ? (lane ? 0.85 : 0.5) : 1;
-  const maxF = t.max * (c.hp < t.hp * 0.3 ? 0.7 : 1);
+  const inB = c.type === 'dozer' && tl === BUILD; // (ploughing through a building)
+  const maxF = t.max * (c.hp < t.hp * 0.3 ? 0.7 : 1) * (c.spiked ? 0.5 : 1) * (inB ? 0.55 : 1);
+  if (c.spiked && Math.abs(c.speed) > 40 && Math.random() < 0.3 && onScreen(c.x, c.y)) addPart(c.x - Math.cos(c.angle) * t.l * 0.3, c.y - Math.sin(c.angle) * t.l * 0.3, rand(-40, 40), rand(-40, 40), 0.25, 1.5, '#ffd27a'); // (on its rims)
+  if (inB && Math.abs(c.speed) > 10 && Math.random() < 0.7 && onScreen(c.x, c.y, 60)) addPart(c.x + Math.cos(c.angle) * t.l / 2 + rand(-12, 12), c.y + Math.sin(c.angle) * t.l / 2 + rand(-12, 12), rand(-30, 30), rand(-30, 30), rand(1, 2), rand(6, 12), pick(['#9e9a92', '#8a857c', '#b5b0a6']), 12, true);
   c.speed = clamp(c.speed, -t.max * 0.35, maxF);
   if (c.speed > maxF * surf) c.speed -= (c.speed - maxF * surf) * Math.min(1, 2.5 * dt);
   const tk = Math.floor(c.y / T) * MW + Math.floor(c.x / T);
@@ -2636,11 +2651,13 @@ function carCorners(c, x, y, a, pad = 1) {
   return [[hl, hw], [hl, -hw], [-hl, hw], [-hl, -hw], [0, hw], [0, -hw]].map(([lx, ly]) => [x + ca * lx - sa * ly, y + sa * lx + ca * ly]);
 }
 function carHitsWall(c, x, y, a) {
-  for (const [px, py] of carCorners(c, x, y, a)) if (c.lay ? layerSolid(c, px, py) : solidAt(px, py)) return true;
+  const dz = c.type === 'dozer' && !c.lay && !c.ghost; // (an armoured bulldozer goes through buildings)
+  for (const [px, py] of carCorners(c, x, y, a)) if (c.lay ? layerSolid(c, px, py) : dz ? dozerSolid(px, py) : solidAt(px, py)) return true;
   if (c.lay === 1 || c.lay === 3) return false; // (no trees in a tunnel, or up on a deck)
+  if (HQ.rubble.length && !c.ghost && rubbleHit(c, x, y, a)) return true;
   const t = carTrunk(c, x, y, a);
   if (t && c.lay === 2 && tunT[Math.floor(t.y / T) * MW + Math.floor(t.x / T)]) return false; // (down a ramp, in the cutting: the trees are up above)
-  if (t) { if (c.type === 'tank' && !c.ghost) { knockTree(t); return false; } return true; }
+  if (t) { if ((c.type === 'tank' || c.type === 'dozer') && !c.ghost) { knockTree(t); return false; } return true; }
   return false;
 }
 // is (x, y) up on a deck: within its carriageway and the parapets (8 px past each kerb)?
@@ -2775,7 +2792,8 @@ function explodeCar(c) {
   c.dead = true; c.fire = 0; c.hp = 0; c.speed = 0; c.chase = false; c.job = null; c.block = false;
   if (c.lastHit === 'player') {
     earn(c.type === 'police' ? 250 : 100);
-    addHeat(c.type === 'police' ? 1 : 0.35);
+    const heavy = c.type === 'tank' || c.type === 'apc' || c.type === 'dozer' || c.type === 'bureau';
+    addHeat(c.type === 'police' ? 1 : heavy ? 0.6 : 0.35, heavy);
     if (mission && mission.type === 'wreck') { mission.count++; if (mission.count >= mission.need) completeMission(); else msg(`${mission.need - mission.count} more to go.`, 2); }
   }
   if (mission && mission.type === 'steal' && mission.car === c) failMission('The car got torched.');
@@ -2970,7 +2988,8 @@ function aiPolice(c, dt) {
   }
   if (heat < 1 || player.down || player.hidden) { c.chase = false; c.lostT = 0; aiTraffic(c, dt); return; }
   const P0 = copTarget(c), d = Math.hypot(P0.x - c.x, P0.y - c.y), tank = c.type === 'tank', swat = c.type === 'swat';
-  if ((tank && stars < 5) || (swat && stars < 4)) { c.chase = false; c.recall = true; aiTraffic(c, dt); return; } // stood down: head back to base
+  const heavy = c.type === 'apc' || c.type === 'dozer';
+  if ((tank && stars < 5) || (swat && stars < 4) || (c.type === 'bureau' && stars < 6) || (c.type === 'apc' && stars < 7) || (c.type === 'dozer' && stars < 9)) { c.chase = false; c.recall = true; aiTraffic(c, dt); return; } // stood down: head back to base
   const see = !Q.branches && d < (tank ? 320 : 240) && los(c.x, c.y, P0.x, P0.y);
   if (!c.chase) { // patrols join in only when they see you or get the call on the radio
     if (see || d < 200 || (stars >= 2 && d < 1000) || stars >= 3) c.chase = true;
@@ -2981,7 +3000,7 @@ function aiPolice(c, dt) {
   c.copCd -= dt; c.shootCd -= dt;
   const tp = P0 === pp() ? player : NET.guest.player, youStopped = !tp.car || Math.abs(tp.car.speed) < 30;
   // an officer gets out to arrest you when you are on foot or have stopped
-  if (see && !tank && !swat && d < 120 && Math.abs(c.speed) < 60 && youStopped && c.copCd <= 0) {
+  if (see && !tank && !swat && !heavy && d < 120 && Math.abs(c.speed) < 60 && youStopped && c.copCd <= 0) {
     c.copCd = 3;
     if (crewOut(c, { cop: true })) { applyControls(c, 0, 0, true, dt); return; }
   }
@@ -2993,7 +3012,11 @@ function aiPolice(c, dt) {
   }
   if (see) {
     if (tank) { c.turret = Math.atan2(P0.y - c.y, P0.x - c.x); if (c.shootCd <= 0) { c.shootCd = 3; fireShell(c, c.turret, 'cop'); } }
-    else if (stars >= 4 && !swat && d < 260 && c.shootCd <= 0) { c.shootCd = 1.3; enemyShot(c.x, c.y, P0.x, P0.y, 9, 0.12); }
+    else if (c.type === 'apc') { // the carrier's mounted gun: bursts
+      c.turret = Math.atan2(P0.y - c.y, P0.x - c.x);
+      if (d < 330 && c.shootCd <= 0) { c.burst = (c.burst || 0) + 1; c.shootCd = c.burst % 6 ? 0.13 : 1.6; enemyShot(c.x + Math.cos(c.turret) * 20, c.y + Math.sin(c.turret) * 20, P0.x, P0.y, 7, 0.1); }
+    }
+    else if (stars >= 4 && !swat && !heavy && d < 260 && c.shootCd <= 0) { c.shootCd = 1.3; enemyShot(c.x, c.y, P0.x, P0.y, 9, 0.12); }
   }
   if (see && d < 170) {
     if (stars < 2 && tp.car) { // one star: tail you rather than ram you, and pull up behind when you stop
@@ -3019,15 +3042,16 @@ function placeRoadblock() {
   if (sp < 60) return false;
   const dir = Math.atan2(P0.vy, P0.vx), v = viewRect(0);
   const reach = Math.abs(Math.cos(dir)) * (v.x1 - v.x0) / 2 + Math.abs(Math.sin(dir)) * (v.y1 - v.y0) / 2; // just beyond the screen edge ahead
-  for (let i = 0; i < 14; i++) {
+  const army = heat >= 7, cps = army ? checkpointSpots(P0, dir, reach) : []; // (from seven stars the army's checkpoints: on the bridges and at the tunnel mouths ahead first)
+  for (let i = 0; i < 14 + cps.length; i++) {
     const a = dir + rand(-0.4, 0.4), dist = reach + rand(120, 420);
-    const p = nearestLanePt(P0.x + Math.cos(a) * dist, P0.y + Math.sin(a) * dist, null, 140);
+    const p = i < cps.length ? cps[i] : nearestLanePt(P0.x + Math.cos(a) * dist, P0.y + Math.sin(a) * dist, null, 140);
     if (!p || p.L.hw || onScreen(p.x, p.y, 60) || cars.some(c => c.block && d2(c.x, c.y, p.x, p.y) < 400 * 400)) continue;
     const h = p.h, nx = -Math.sin(h), ny = Math.cos(h), cx = p.x - nx * p.L.off, cy = p.y - ny * p.L.off, blk = []; // (from kerb to kerb)
-    const W = p.L.e.wd, nb = Math.max(2, Math.round(W / 34));
+    const W = p.L.e.wd, nb = Math.max(2, Math.round(W / (army ? 44 : 34)));
     for (let i = 0; i < nb; i++) {
       const o = (i - (nb - 1) / 2) * W / nb, sd = o < 0 ? -1 : 1, x = cx + nx * o, y = cy + ny * o, ang = h + Math.PI / 2 + sd * 0.25;
-      const c = makeCar('police', x, y, ang, null);
+      const c = makeCar(army ? 'apc' : 'police', x, y, ang, null);
       if (carHitsWall(c, x, y, ang)) { cars.splice(cars.indexOf(c), 1); continue; }
       c.block = true; c.chase = true; blk.push(c);
     }
@@ -3035,7 +3059,7 @@ function placeRoadblock() {
     const bx = cx + Math.cos(dir) * 36, by = cy + Math.sin(dir) * 36;
     for (const sd of [-1, 1]) {
       const x = bx + nx * sd * (W / 2 - 2), y = by + ny * sd * (W / 2 - 2); if (circleSolid(x, y, 5)) continue;
-      const p = makePed(x, y, { cop: true }); p.post = true; p.car = blk[sd < 0 ? 0 : blk.length - 1];
+      const p = army ? soldier(x, y, true) : makePed(x, y, { cop: true }); p.post = true; p.car = blk[sd < 0 ? 0 : blk.length - 1];
     }
     for (const c of blk) if (!peds.some(q => q.car === c)) c.driver = 'police'; // nobody could stand by this one: its driver stays in
     return true;
@@ -3050,12 +3074,13 @@ function updateHeli(dt) {
   if (!heli) {
     if (stars >= 4 && !player.down && !player.hidden) {
       const a = rand(TAU);
-      heli = { x: P0.x + Math.cos(a) * 1300, y: P0.y + Math.sin(a) * 1300, vx: 0, vy: 0, angle: a + Math.PI, rot: 0, hp: 260, shootCd: 2, burst: 0, leaveT: 0, orbit: rand(TAU), lx: P0.x, ly: P0.y, snd: 0, dead: false, fall: 0 };
+      heli = { army: stars >= 7, x: P0.x + Math.cos(a) * 1300, y: P0.y + Math.sin(a) * 1300, vx: 0, vy: 0, angle: a + Math.PI, rot: 0, hp: stars >= 7 ? 520 : 260, shootCd: 2, burst: 0, leaveT: 0, orbit: rand(TAU), lx: P0.x, ly: P0.y, snd: 0, dead: false, fall: 0 };
       msg('Police helicopter overhead!', 2.5);
     }
     return;
   }
   const h = heli; h.rot += dt * 38;
+  if (!h.dead && !h.army && stars >= 7) { h.army = true; h.hp = Math.max(h.hp, 520); msg('The army\'s attack helicopter takes over the sky.', 2.5); }
   if (AC && onScreen(h.x, h.y, 200) && (h.snd -= dt) <= 0) { h.snd = 0.1; noise(0.07, 150, 'lowpass', h.dead ? 0.1 : 0.2); }
   if (h.dead) { // spinning down
     h.fall += dt; h.angle += dt * 7; h.x += h.vx * dt; h.y += h.vy * dt;
@@ -3091,6 +3116,13 @@ function updateHeli(dt) {
     const a = Math.atan2(P0.y - h.y, P0.x - h.x);
     enemyShot(P0.x - Math.cos(a) * 40, P0.y - Math.sin(a) * 40, P0.x, P0.y, 5, 0.12);
   }
+  // the army's helicopter fires rockets: a red ring marks where each will land
+  HQ.rocketCd -= dt;
+  if (h.army && !leaving && HQ.rocketCd <= 0 && (belief.seen || d2(h.lx, h.ly, P0.x, P0.y) < 140 * 140)) {
+    HQ.rocketCd = stars >= 8 ? 2.6 : 4;
+    HQ.strikes.push({ x: P0.x + (P0.vx || 0) * 1.1 + rand(-20, 20), y: P0.y + (P0.vy || 0) * 1.1 + rand(-20, 20), t: 1.3, r: 52, k: 'rocket' });
+    if (onScreen(h.x, h.y, 300)) sfx.rocket();
+  }
 }
 function drawHeli() {
   const h = heli; if (!h) return;
@@ -3106,9 +3138,11 @@ function drawHeli() {
   }
   const nb = 1 + NIGHT * 1.6; // lit by the city below, so it stays readable at night
   ctx.save(); ctx.translate(x, y); ctx.rotate(h.angle); ctx.scale(k * 0.85, k * 0.85);
-  ctx.fillStyle = tint('#1d2b4a', nb); ctx.fillRect(-36, -2, 26, 4); ctx.fillRect(-39, -7, 5, 14);
-  ctx.fillStyle = tint('#e9edf2', nb); ctx.beginPath(); ctx.ellipse(0, 0, 16, 9, 0, 0, TAU); ctx.fill();
-  ctx.fillStyle = tint('#1d2b4a', nb); ctx.fillRect(-12, -9, 6, 18);
+  const dk = h.army ? '#2b3018' : '#1d2b4a'; // (the army's: olive, with stub wings and rocket pods)
+  ctx.fillStyle = tint(dk, nb); ctx.fillRect(-36, -2, 26, 4); ctx.fillRect(-39, -7, 5, 14);
+  if (h.army) { ctx.fillStyle = tint('#3a4220', nb); ctx.fillRect(-4, -16, 6, 32); ctx.fillStyle = tint('#1e2212', nb); ctx.fillRect(-6, -17, 10, 4); ctx.fillRect(-6, 13, 10, 4); }
+  ctx.fillStyle = tint(h.army ? '#4b5320' : '#e9edf2', nb); ctx.beginPath(); ctx.ellipse(0, 0, 16, 9, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = tint(dk, nb); ctx.fillRect(-12, -9, 6, 18);
   ctx.fillStyle = tint('#7fb3d5', 1.1 * nb); ctx.beginPath(); ctx.ellipse(8, 0, 6, 6.5, 0, 0, TAU); ctx.fill();
   ctx.strokeStyle = 'rgba(25,25,25,.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-10, -11); ctx.lineTo(10, -11); ctx.moveTo(-10, 11); ctx.lineTo(10, 11); ctx.stroke();
   ctx.fillStyle = 'rgba(20,20,20,.12)'; ctx.beginPath(); ctx.arc(0, 0, 29, 0, TAU); ctx.fill();
@@ -3368,7 +3402,8 @@ function copNear(x, y, r) {
 function copSees(x, y) {
   if (player.car && player.car.lay === 1 && d2(player.car.x, player.car.y, x, y) < 40 * 40) return false; // (nobody sees you in a tunnel)
   for (const p of peds) if (p.cop && !p.dead) { const dd = d2(p.x, p.y, x, y); if (dd < 70 * 70 || (dd < 260 * 260 && los(p.x, p.y, x, y))) return true; }
-  for (const c of cars) if ((c.type === 'police' || c.type === 'tank' || c.type === 'swat') && c.driver === 'police') { const dd = d2(c.x, c.y, x, y); if (dd < 70 * 70 || (dd < 300 * 300 && los(c.x, c.y, x, y))) return true; }
+  if (HQ.sweep > 0 || (HQ.drone && HQ.drone.lock && !HQ.drone.fall) || (HQ.blimp && HQ.blimp.see)) return true; // (the sweep, the Bureau's drone, the airship's light)
+  for (const c of cars) if ((c.type === 'police' || c.type === 'tank' || c.type === 'swat' || c.type === 'bureau' || c.type === 'apc' || c.type === 'dozer') && c.driver === 'police') { const dd = d2(c.x, c.y, x, y); if (dd < 70 * 70 || (dd < 300 * 300 && los(c.x, c.y, x, y))) return true; }
   if (heli && !heli.dead && d2(heli.lx, heli.ly, x, y) < 120 * 120) return true; // the helicopter sees everything under its searchlight
   return false;
 }
@@ -3414,6 +3449,7 @@ function explode(x, y, r, src) {
 function superpose() {
   const c = player.car;
   if (Q.branches) { collapse('you looked'); return; }
+  const qb = qBlocked(); if (qb) { msg(qb, 2.5); return; }
   if (!c) { msg('Superposition needs a car.', 1.5); return; }
   if (Q.psi <= 0) { msg('No ψ charges. Find a ψ pickup.', 2); return; }
   if (player.tow) dropTow('The tweezer can only follow one branch: it let go.');
@@ -3491,6 +3527,8 @@ function collapse(reason) {
 // ---- entanglement: link with a car (T), then measure the pair (T again) to swap places with it
 function entangle() {
   if (player.down || player.hidden) return;
+  if (!player.car && Math.floor(heat) === 7 && Q.ent > 0 && !lab && tunnelJump()) return;
+  const qb = qBlocked(); if (qb) { msg(qb, 2.5); return; }
   const L = Q.link;
   if (L && !L.dead && cars.includes(L)) { swapWith(L); return; }
   if (Q.ent <= 0) { msg('No ε charges. Find an ε pickup.', 2); return; }
@@ -3941,7 +3979,7 @@ function faceOpen(x, y) {
 function respawn() {
   if (lab) { player.down = 0; setupLesson(lab.i); return; }
   const where = nearestOf(player.downKind === 'busted' ? POLICE_POSTS : HOSPITALS, player.x, player.y);
-  player.down = 0; player.hp = 100; player.bust = 0; player.car = null; player.fish = null;
+  player.down = 0; player.hp = 100; player.bust = 0; player.car = null; player.fish = null; HQ = hqNew(); tankerCars = [];
   player.x = where.x; player.y = where.y; player.angle = faceOpen(where.x, where.y);
   heat = 0; player.mult = Math.max(1, player.mult - 1);
   if (player.lives <= 0) { if (player.isGuest) { player.lives = 5; player.cash = Math.floor(player.cash / 2); msg('Out of lives: half your cash for five more.', 4); } else { state = 'over'; saveBest(); } }
@@ -3952,7 +3990,9 @@ function earn(v) {
   if (player.cash > best) saveBest();
 }
 function saveBest() { if (player.isGuest) return; best = Math.max(best, player.cash); try { localStorage.setItem('gridlock.best', String(best)); } catch (e) { /* ignore */ } }
-function addHeat(v) { heat = Math.min(5.99, heat + v); lastCrime = time; if (heat >= 1) revealPlayer(); }
+// (past five stars an ordinary crime counts for a tenth: what brings the next level is outlasting this one in plain sight,
+// or taking out what the state sends: big)
+function addHeat(v, big) { heat = Math.min(lab ? 5.99 : 10.99, heat + (heat >= 5 && !big ? v * 0.1 : v)); lastCrime = time; if (heat >= 1) revealPlayer(); }
 
 function updatePlayer(dt) {
   if (player.down) {
@@ -3963,8 +4003,11 @@ function updatePlayer(dt) {
   }
   if (player.fish) { updateFishing(dt); return; }
   if (player.jack) { updateJack(dt); return; }
+  if (HQ.bell && !player.isGuest) { updateBell(dt); return; }
   const con = !player.car && CONSOLES.find(c => d2(c.x, c.y, player.x, player.y) < 28 * 28);
-  if (hit('Enter', 'KeyF', 'KeyE')) { const fs = !player.car && fishSpotAt(player.x, player.y); if (con) { aodOpen(); return; } if (fs) startFishing(fs); else enterExit(); }
+  const epr = !player.car && heat >= 8 ? eprPhones().findIndex(e => d2(e.x, e.y, player.x, player.y) < 30 * 30) : -1;
+  if (epr !== player.eprHint) { if (epr >= 0) msg(`An entangled payphone. ${touchOn() ? '⇄' : 'Enter'}: a Bell measurement, and you teleport to its twin.`, 3); player.eprHint = epr; }
+  if (hit('Enter', 'KeyF', 'KeyE')) { const fs = !player.car && fishSpotAt(player.x, player.y); if (con) { aodOpen(); return; } if (epr >= 0) { startBell(epr); return; } if (fs) startFishing(fs); else enterExit(); }
   if (!player.car) { // walking up to a jetty or the AOD console: say what it is for
     const fs = fishSpotAt(player.x, player.y) || con;
     if (fs && fs !== player.fishHint) msg(fs === con ? `The AOD console: plan atom moves. ${touchOn() ? '⇄' : 'Enter'}: sit down.` : `A fishing jetty. ${touchOn() ? '⇄' : 'Enter'}: fish.`, 2.5);
@@ -4127,11 +4170,12 @@ function updateBullets(dt) {
         if (d2(b.x, b.y, hx, hy) < 24 * 24) {
           heli.hp -= b.rocket ? 200 : b.dmg; done = true;
           for (let q = 0; q < 4; q++) addPart(b.x, b.y, rand(-60, 60), rand(-60, 60), 0.25, 1.5, '#ffe08a', 0, true);
-          if (heli.hp <= 0) { heli.dead = true; heli.fall = 0; earn(800); addHeat(1); msg('You brought down the helicopter!', 3); if (onScreen(hx, hy)) sfx.boom(); }
+          if (heli.hp <= 0) { heli.dead = true; heli.fall = 0; earn(800); addHeat(heli.army ? 0.6 : 1, heli.army); msg('You brought down the helicopter!', 3); if (onScreen(hx, hy)) sfx.boom(); }
           if (!b.rocket) break;
         }
       }
       if (done) break;
+      if (b.owner === 'player' && airHit(b)) { done = true; break; } // (the drones, the airship)
       if (b.owner === 'player') {
         for (const p of peds) {
           if (p.dead || d2(p.x, p.y, b.x, b.y) > 7 * 7) continue;
@@ -4188,6 +4232,7 @@ function updatePickups(dt) {
   const P0 = pp();
   for (const u of pickups) {
     if (u.cd > 0) { u.cd -= dt; continue; }
+    if (u.k === 'ent' && heat >= 8) continue; // (the Observer took them)
     if (!player.down && d2(u.x, u.y, P0.x, P0.y) < 20 * 20) { PK[u.k].give(); msg(PK[u.k].label, 2); sfx.pickup(); u.cd = 45; }
   }
 }
@@ -4481,6 +4526,7 @@ function updateMissions(dt) {
     if (d2(s.x, s.y, player.x, player.y) > 30 * 30) continue;
     sprayCd = 4;
     if (heat < 1) { msg('Spray shop: you\'re not wanted. Come back when you are.', 2); break; }
+    if (heat >= 6) { msg('Spray shop: with the state after you? Nobody here will touch your car.', 2.5); break; }
     if (player.cash < 500) { msg('Spray shop: a respray costs $500. Come back with cash.', 2); break; }
     player.cash -= 500; heat = 0; player.car.color = pick(SHIRTS);
     if (player.car.type === 'police') player.car.type = 'sedan';
@@ -4568,7 +4614,10 @@ function manageSpawns(dt) {
   if (heat >= 1 && policeCd <= 0 && !player.down) {
     const stars = Math.floor(heat), n = t => cars.filter(c => c.type === t && c.driver === 'police' && c.chase && !c.block).length;
     let c = null;
-    if (stars >= 5 && n('tank') < 1) { c = spawnTraffic('tank', 'police'); if (c) msg('They sent a TANK.', 3); }
+    if (stars >= 9 && n('dozer') < 2) { c = spawnTraffic('dozer', 'police'); if (c) msg('An armoured bulldozer is coming for you.', 2.5); }
+    else if (stars >= 7 && n('apc') < (stars >= 8 ? 3 : 2)) { c = spawnTraffic('apc', 'police'); if (c) msg('An armoured carrier joins the hunt.', 2.5); }
+    else if (stars >= 6 && n('bureau') < 2) { c = spawnTraffic('bureau', 'police'); if (c) msg('A Measurement Bureau van: its detector collapses X and T.', 3); }
+    else if (stars >= 5 && n('tank') < 1) { c = spawnTraffic('tank', 'police'); if (c) msg('They sent a TANK.', 3); }
     else if (stars >= 4 && n('swat') < (stars >= 5 ? 2 : 1)) { c = spawnTraffic('swat', 'police'); if (c) msg('A SWAT van is on its way.', 2.5); }
     else if (n('police') < [0, 1, 2, 3, 3, 3][stars]) c = spawnTraffic('police', 'police');
     if (c) { c.chase = true; c.ai.cruise = 130; }
@@ -5062,6 +5111,526 @@ function drawTrams(v, up) {
     ctx.restore();
   }
 }
+// ============================================================ wanted levels 6 to 10: past the tank, the state itself
+// ★6 the Measurement Bureau: black vans whose detectors collapse superposition and break entanglement near them, a drone
+// that keeps you measured (watched, the police's guess never spreads: the Zeno effect), spike strips. ★7 a state of
+// emergency: the army's checkpoints at bridges and tunnel mouths, armoured carriers, an attack helicopter's rockets; it
+// ends when you lie low for a minute. ★8 the Observer: a measurement sweep every 20 s, no X or T anywhere, jets
+// strafing; the way out is quantum teleportation between the entangled payphones. ★9 demolition: bulldozers through
+// the buildings, wrecking crews that bring down the one you hide behind, burning tankers across the junctions ahead, a
+// wrecking ball; hide in a pedestrian zone. ★10 air assault: kamikaze drone swarms, paratroopers, squads roped down from
+// helicopters, an airship's searchlight; go to ground through two tunnels, unseen at their portals.
+// Each comes when you outlast the one below in plain sight (40 s seen) or raise the stakes; from 7 up a level doesn't
+// fade by itself: only its way out ends it.
+const WL = [null, null, null, null, null, null,
+  { name: 'THE MEASUREMENT BUREAU', col: '#b388ff', sub: 'Detector vans collapse X and T · a drone keeps you measured · spike strips' },
+  { name: 'STATE OF EMERGENCY', col: '#9ccc65', sub: 'Army checkpoints, armoured carriers, rockets · lie low 60 s unseen to end it' },
+  { name: 'THE OBSERVER', col: '#4dd0e1', sub: 'Sweeps every 20 s, jets, no X or T · the entangled payphones (cyan) teleport you out' },
+  { name: 'DEMOLITION', col: '#ffb74d', sub: 'Bulldozers, falling buildings, burning tankers · hide 45 s in a pedestrian zone' },
+  { name: 'AIR ASSAULT', col: '#ef5350', sub: 'Drone swarms, paratroopers, an airship · go to ground: two tunnels, unseen at the portals' }];
+const DRONE_Z = 0.25, KAMI_Z = 0.12, BLIMP_Z = 0.75, JET_Z = 0.55, ROPE_Z = 0.4;
+// (plain data only: the host sends it to a co-op guest as it is)
+function hqNew() { return { lv: 0, det: false, drone: null, droneCd: 0, spikes: [], spikeCd: 6, strikes: [], rocketCd: 4, jet: null, jetCd: 8,
+  sweepT: 12, sweep: 0, low: 0, plaza: 0, hideT: 0, tun: [], tunIn: null, pl: 0, rubble: [], tankerCd: 10, crane: null, craneCd: 14,
+  kami: [], kamiCd: 5, paras: [], paraCd: 8, rope: null, ropeCd: 12, blimp: null, bell: null }; }
+
+// the entangled pair of payphones: at the Atom Array Lab, and at FIT BUT in Brno (or, elsewhere, the booth farthest off)
+function eprPhones() {
+  if (EPR) return EPR;
+  if (!ATOM_LAB) return (EPR = []);
+  const c = ATOM_LAB.con, A = tileCenter(findTileNear(Math.floor(c.x / T) + 1, Math.floor(c.y / T) + 3, WALK));
+  const B = FIT ? tileCenter(findTileNear(Math.floor(FIT.x / T), Math.floor(FIT.y / T) + 4, WALK)) : BOOTHS.reduce((a, b) => d2(a.x, a.y, A.x, A.y) >= d2(b.x, b.y, A.x, A.y) ? a : b);
+  return (EPR = [A, { x: B.x, y: B.y }]);
+}
+// out of sight from above: in a tunnel, under an overpass, under a tree's crown
+function hiddenAbove(P) {
+  const c = player.car;
+  if (c && c.lay === 1) return true;
+  const k = Math.floor(P.y / T) * MW + Math.floor(P.x / T);
+  if (ovT[k] && !(c && (c.lay === 3 || c.lay === 4))) return true;
+  return !!nearTrees(P.x, P.y, 0, t => d2(t.x, t.y, P.x, P.y) < t.r * t.r);
+}
+// a street point ahead of you, just out of sight (where the state's next surprise waits)
+function aheadLanePt(min, max, test) {
+  const P0 = pp(), sp = Math.hypot(P0.vx || 0, P0.vy || 0); if (sp < 50) return null;
+  const dir = Math.atan2(P0.vy, P0.vx), v = viewRect(0), reach = Math.abs(Math.cos(dir)) * (v.x1 - v.x0) / 2 + Math.abs(Math.sin(dir)) * (v.y1 - v.y0) / 2;
+  for (let i = 0; i < 14; i++) {
+    const a = dir + rand(-0.35, 0.35), dist = reach + rand(min, max);
+    const p = nearestLanePt(P0.x + Math.cos(a) * dist, P0.y + Math.sin(a) * dist, null, 140);
+    if (p && !p.L.hw && !p.L.e.over && !p.L.e.tunnel && !onScreen(p.x, p.y, 40) && (!test || test(p))) return p;
+  }
+  return null;
+}
+const kerbToKerb = p => { const nx = -Math.sin(p.h), ny = Math.cos(p.h); return { x: p.x - nx * p.L.off, y: p.y - ny * p.L.off, nx, ny, w: p.L.e.wd }; };
+function soldier(x, y, post) {
+  const p = makePed(x, y, { cop: true, swat: true }); p.army = true; p.shirt = '#556b2f'; p.pants = '#3b4a1f'; if (post) p.post = true; return p;
+}
+// the bridges and tunnel mouths near you: where the army sets its checkpoints
+let BRIDGE_SPOTS = null;
+function checkpointSpots(P0, dir, reach) {
+  if (!BRIDGE_SPOTS) {
+    BRIDGE_SPOTS = []; const seen = new Set();
+    for (const e of EDGES) if (!e.over && !e.tunnel) for (let s = 0; s < e.len; s += 48) {
+      const [x, y] = edgePt(e, s), k = Math.floor(y / T) * MW + Math.floor(x / T), g = Math.floor(x / 300) + Math.floor(y / 300) * 4096;
+      if (bridge[k] && !seen.has(g)) { seen.add(g); BRIDGE_SPOTS.push([x, y]); }
+    }
+    for (const r of RAMPS) BRIDGE_SPOTS.push(r.pts[0]);
+  }
+  const out = [];
+  for (const [x, y] of BRIDGE_SPOTS) {
+    const dx = x - P0.x, dy = y - P0.y, d = Math.hypot(dx, dy);
+    if (d < reach + 60 || d > reach + 800 || Math.abs(wrapA(Math.atan2(dy, dx) - dir)) > 0.6 || onScreen(x, y, 60)) continue;
+    const p = nearestLanePt(x, y, null, 90); if (p && !p.L.hw && !p.L.e.over && !p.L.e.tunnel) out.push(p);
+  }
+  return out.sort(() => Math.random() - 0.5);
+}
+function placeSpikes() {
+  const p = aheadLanePt(80, 420); if (!p) return false;
+  const k = kerbToKerb(p);
+  HQ.spikes.push({ x: k.x, y: k.y, a: p.h, w: k.w, t: 45 });
+  return true;
+}
+function placeTanker() { // jack-knifed across a junction ahead, burning
+  const p = aheadLanePt(60, 520); if (!p) return false;
+  let n = null, bd = 220 * 220;
+  for (const q of NODES) if (q.edges && q.edges.length >= 3 && !q.over) { const d = d2(q.x, q.y, p.x, p.y); if (d < bd && !onScreen(q.x, q.y, 40)) { bd = d; n = q; } }
+  if (!n) return false;
+  const c = makeCar('tanker', n.x, n.y, p.h + 1.1, null);
+  if (carHitsWall(c, c.x, c.y, c.angle)) { cars.splice(cars.indexOf(c), 1); return false; }
+  c.burn = 22; c.jk = -0.9; c.mission = true; tankerCars.push(c);
+  msg('A fuel tanker jack-knifed across the junction ahead. It\'s burning.', 3);
+  return true;
+}
+function placeCrane() { // a wrecking ball swinging over a main junction ahead
+  const P0 = pp(); let n = null, bd = 1e12;
+  for (const q of LIGHT_NODES) { const d = d2(q.x, q.y, P0.x, P0.y); if (d > 260 * 260 && d < 1100 * 1100 && d < bd && !onScreen(q.x, q.y, 20)) { bd = d; n = q; } }
+  if (!n) return false;
+  HQ.crane = { x: n.x, y: n.y, a: rand(TAU), r: 66, t: 80 };
+  HQ.rubble.push({ x: n.x, y: n.y, r: 13, crane: 1, s: 0 }); // (the crane's own tower: in the way)
+  return true;
+}
+// the building you hid behind comes down: rubble across the way, dust, and they know roughly where you are
+function collapseNear(P0) {
+  let wa = null;
+  for (let i = 0; i < 16 && wa === null; i++) { const a = i * TAU / 16; if (solidAt(P0.x + Math.cos(a) * 40, P0.y + Math.sin(a) * 40)) wa = a; }
+  if (wa === null) return;
+  const away = wa + Math.PI;
+  for (let i = 0; i < 7; i++) {
+    const a = away + rand(-1.3, 1.3), d = rand(10, 75), x = P0.x + Math.cos(wa) * 26 + Math.cos(a) * d, y = P0.y + Math.sin(wa) * 26 + Math.sin(a) * d;
+    if (!solidAt(x, y)) HQ.rubble.push({ x, y, r: rand(10, 19), s: (Math.random() * 1e6) | 0 });
+  }
+  if (HQ.rubble.length > 40) HQ.rubble.splice(0, HQ.rubble.length - 40);
+  for (let i = 0; i < 40; i++) { const a = rand(TAU), s = rand(20, 120); addPart(P0.x + Math.cos(wa) * 30, P0.y + Math.sin(wa) * 30, Math.cos(a) * s, Math.sin(a) * s, rand(1.5, 3), rand(8, 16), pick(['#9e9a92', '#8a857c', '#b5b0a6']), 16, true); }
+  shake = 1; if (AC) sfx.boom();
+  if (player.car) damageCar(player.car, 90); else hurtPlayer(18);
+  Object.assign(belief, { x: P0.x, y: P0.y, sig: 90 });
+  msg('The wrecking crew brought the building down on you!', 3);
+}
+function rubbleHit(c, x, y, a) { // (a bulldozer shoves the rubble aside instead)
+  const t = CT[c.type], R = t.l / 2 + 20;
+  for (let i = 0; i < HQ.rubble.length; i++) {
+    const r = HQ.rubble[i]; if (Math.abs(r.x - x) > R + r.r || Math.abs(r.y - y) > R + r.r) continue;
+    for (const [px, py] of carCorners(c, x, y, a)) if (d2(px, py, r.x, r.y) < r.r * r.r) {
+      if (c.type === 'dozer' && !r.crane) { HQ.rubble.splice(i, 1); for (let k = 0; k < 8; k++) addPart(r.x, r.y, rand(-60, 60), rand(-60, 60), 1, 6, '#9e9a92', 8, true); return false; }
+      return true;
+    }
+  }
+  return false;
+}
+function dozerSolid(x, y) { // a bulldozer goes through buildings: only water and rock stop it
+  const tx = Math.floor(x / T), ty = Math.floor(y / T); if (tx < 0 || ty < 0 || tx >= MW || ty >= MH) return true;
+  const k = ty * MW + tx; let t = map[k]; if (t === BUILD) t = GU && GU[k] ? GU[k] - 1 : GRASS; // (only the detailed map keeps the ground under its buildings)
+  return t === WATER || t === ROCK;
+}
+// ★8's way out: the Bell measurement at an entangled payphone (Space as the arrow crosses the window, two of three)
+function startBell(i) {
+  if (player.isGuest) { msg('The payphones are entangled with the host\'s line only.', 2); return; }
+  HQ.bell = { i, t: 0, round: 0, hits: 0, ang: rand(TAU), win: rand(TAU), fw: true };
+  msg('Bell measurement: press Space (●) as the arrow crosses the green window. Two out of three.', 4);
+}
+function updateBell(dt) {
+  const b = HQ.bell; b.t += dt; b.ang = (b.ang + dt * (3.1 + b.round * 0.7)) % TAU; player.moving = false;
+  const press = keys.fire && !b.fw; b.fw = !!keys.fire;
+  if (press) {
+    const ok = Math.abs(wrapA(b.ang - b.win)) < 0.36;
+    if (ok) b.hits++; b.round++; b.win = rand(TAU); ok ? sfx.pickup() : sfx.punch();
+    if (b.hits >= 2) { teleport(b.i); return; }
+    if (b.round - b.hits >= 2) { HQ.bell = null; msg('Decoherence: the pair is spoiled. Try again.', 2.5); sfx.bad(); return; }
+  }
+  if (b.t > 14 || hit('Enter', 'Escape')) { HQ.bell = null; msg('The entanglement decohered.', 2); }
+}
+function teleport(i) {
+  const E = eprPhones(), from = E[i], to = E[1 - i];
+  HQ.bell = null; player.x = to.x; player.y = to.y; player.angle = faceOpen(to.x, to.y);
+  heat = 3.5; lastCrime = time; HQ.lv = 3;
+  Object.assign(belief, { x: from.x, y: from.y, vx: 0, vy: 0, sig: 0, seen: false, seeT: 1 });
+  qburst(from.x, from.y, '#3cf0ff'); qburst(to.x, to.y, '#3cf0ff'); sfx.swap();
+  bigText('TELEPORTED', '#3cf0ff', 3.5, 'They measured the wrong qubit: three stars');
+  note('teleport');
+}
+function updateWanted(dt) {
+  if (lab) return;
+  const P0 = pp(), pc = player.car;
+  // outlast a level in plain sight and the next one comes
+  if (heat >= 5 && heat < 10.99 && belief.seen && !player.down) heat = Math.min(10.99, heat + dt / 40);
+  const stars = Math.floor(heat);
+  if (stars !== HQ.lv) {
+    if (stars > HQ.lv && stars >= 6) { const L = WL[stars]; bigText(`${stars} STARS: ${L.name}`, L.col, 4, L.sub); sfx.bad(); }
+    if (stars >= 8 && HQ.lv < 8) note('teleport');
+    HQ.lv = stars; HQ.low = HQ.plaza = HQ.hideT = 0; HQ.tun = []; HQ.tunIn = null;
+  }
+  const hid = hiddenAbove(P0);
+  // ★6: the detectors, the drone, the spike strips
+  HQ.det = stars >= 6 && cars.some(c => c.type === 'bureau' && c.driver === 'police' && !c.dead && d2(c.x, c.y, P0.x, P0.y) < 260 * 260);
+  if (HQ.det || stars >= 8) {
+    if (Q.branches) collapse(stars >= 8 ? 'the Observer measured you' : 'the Bureau\'s detector measured you');
+    if (Q.link) { unlink(); msg('Your entanglement is broken: they measured your twin.', 2.5); }
+  }
+  HQ.droneCd -= dt;
+  if (stars >= 6 && !HQ.drone && HQ.droneCd <= 0 && !player.down) {
+    const a = rand(TAU); HQ.drone = { x: P0.x + Math.cos(a) * 900, y: P0.y + Math.sin(a) * 900, vx: 0, vy: 0, a: 0, rot: 0, hp: 60, lock: false, fall: 0 };
+    msg('A Bureau drone is on you. Lose it under trees or an overpass, in a tunnel, or shoot it down.', 3.5);
+  }
+  const d = HQ.drone;
+  if (d) {
+    d.rot += dt * 40;
+    if (d.fall) { d.fall += dt; d.x += d.vx * dt; d.y += d.vy * dt; d.vx *= 0.97; d.vy *= 0.97; if (d.fall > 1.1) { explode(d.x, d.y, 26, 'player'); HQ.drone = null; HQ.droneCd = 25; } }
+    else if (stars < 6 || player.down) { d.lock = false; const a = Math.atan2(d.y - P0.y, d.x - P0.x); d.x += Math.cos(a) * 320 * dt; d.y += Math.sin(a) * 320 * dt; if (!onScreen(d.x, d.y, 500)) HQ.drone = null; }
+    else {
+      d.lock = !hid && d2(d.x, d.y, P0.x, P0.y) < 300 * 300;
+      const r = Math.min(belief.sig, 300) * 0.7, tx = d.lock ? P0.x + (P0.vx || 0) * 0.3 : belief.x + Math.cos(time * 0.8) * r, ty = d.lock ? P0.y + (P0.vy || 0) * 0.3 : belief.y + Math.sin(time * 1.1) * r;
+      const dx = tx - d.x, dy = ty - d.y, dd = Math.hypot(dx, dy) || 1, sp = Math.min(d.lock ? 430 : 300, dd * 2.2);
+      d.vx += (dx / dd * sp - d.vx) * Math.min(1, dt * 2.5); d.vy += (dy / dd * sp - d.vy) * Math.min(1, dt * 2.5);
+      d.x += d.vx * dt; d.y += d.vy * dt; if (Math.hypot(d.vx, d.vy) > 30) d.a = Math.atan2(d.vy, d.vx);
+    }
+  }
+  HQ.spikeCd -= dt;
+  if (stars >= 6 && pc && !pc.tram && HQ.spikeCd <= 0) HQ.spikeCd = placeSpikes() ? 16 : 3;
+  for (const s of HQ.spikes) s.t -= dt;
+  HQ.spikes = HQ.spikes.filter(s => s.t > 0 && d2(s.x, s.y, P0.x, P0.y) < 2500 * 2500);
+  for (const c of [pc, NET.guest && NET.guest.player.car]) if (c && !c.spiked && !c.tram && !CT[c.type].bike && Math.abs(c.speed) > 20) for (const s of HQ.spikes) {
+    const dx = c.x - s.x, dy = c.y - s.y, al = dx * Math.cos(s.a) + dy * Math.sin(s.a), ac = -dx * Math.sin(s.a) + dy * Math.cos(s.a);
+    if (Math.abs(al) < CT[c.type].l / 2 && Math.abs(ac) < s.w / 2) { c.spiked = true; sfx.snap(); if (c === pc) msg('Spike strip! Your tyres are shredded: half speed until you swap cars.', 3); break; }
+  }
+  // ★7: lie low a minute, unseen
+  if (stars >= 7 && !belief.seen) HQ.low += dt; else HQ.low = 0;
+  if (stars === 7 && HQ.low >= 60) { heat = 5.5; bigText('EMERGENCY LIFTED', '#9ccc65', 3, 'They lost you: five stars'); sfx.good(); }
+  for (const s of HQ.strikes) { s.t -= dt; if (s.t <= 0 && !s.cancel) explode(s.x, s.y, s.r, 'cop'); }
+  HQ.strikes = HQ.strikes.filter(s => s.t > 0 && !s.cancel);
+  // ★8: the sweeps, and jets from 8 up
+  if (stars === 8) {
+    HQ.sweepT -= dt;
+    if (HQ.sweepT <= 0) { HQ.sweepT = 20; HQ.sweep = 1.6; revealPlayer(); belief.seen = true; belief.seeT = 0.3; msg('MEASUREMENT SWEEP: they know exactly where you are.', 2.5); sfx.collapse(); }
+  } else HQ.sweepT = 12;
+  HQ.sweep = Math.max(0, HQ.sweep - dt);
+  HQ.jetCd -= dt;
+  if (stars >= 8 && !HQ.jet && HQ.jetCd <= 0 && !player.down) {
+    const mv = Math.hypot(P0.vx || 0, P0.vy || 0) > 40, a = mv && Math.random() < 0.6 ? Math.atan2(P0.vy, P0.vx) + pick([0, Math.PI]) + rand(-0.3, 0.3) : rand(TAU);
+    HQ.jet = { tx: P0.x + (P0.vx || 0) * 2.2, ty: P0.y + (P0.vy || 0) * 2.2, a, t: 0, warn: 2.4, done: 0, x: 0, y: 0 };
+    HQ.jetCd = stars >= 9 ? 12 : 15; sfx.siren();
+  }
+  const j = HQ.jet;
+  if (j) {
+    j.t += dt;
+    const along = -1500 + (j.t - j.warn) * 1900, ca = Math.cos(j.a), sa = Math.sin(j.a);
+    j.x = j.tx + ca * along; j.y = j.ty + sa * along;
+    if (j.t > j.warn) {
+      if (!j.snd) { j.snd = 1; sfx.jet(); }
+      while (j.done <= 10 && j.done * 96 - 480 < along) { const s = j.done * 96 - 480; explode(j.tx + ca * s, j.ty + sa * s, 34, 'cop'); j.done++; }
+      if (along > 1500) HQ.jet = null;
+    }
+  }
+  // ★9: wrecking crews, burning tankers, the wrecking ball, and the way out
+  if (stars >= 9) {
+    let wall = false; for (let i = 0; i < 8 && !wall; i++) wall = solidAt(P0.x + Math.cos(i * TAU / 8) * 42, P0.y + Math.sin(i * TAU / 8) * 42);
+    HQ.hideT = !belief.seen && wall ? HQ.hideT + dt : Math.max(Math.min(0, HQ.hideT), HQ.hideT - dt);
+    if (HQ.hideT > 9) { HQ.hideT = -6; collapseNear(P0); }
+    HQ.tankerCd -= dt; if (pc && HQ.tankerCd <= 0) HQ.tankerCd = placeTanker() ? 22 : 3;
+    HQ.craneCd -= dt; if (!HQ.crane && HQ.craneCd <= 0) HQ.craneCd = placeCrane() ? 50 : 5;
+  }
+  if (stars === 9) {
+    if (tileAtP(P0.x, P0.y) === PLAZA && !belief.seen) HQ.plaza += dt; else if (belief.seen) HQ.plaza = 0;
+    if (HQ.plaza >= 45) { heat = 5.5; bigText('DEMOLITION CALLED OFF', '#ffb74d', 3, 'They lost you in the crowd: five stars'); sfx.good(); }
+  }
+  for (const c of tankerCars) {
+    if (c.dead || !cars.includes(c)) { c.gone = true; c.mission = false; continue; }
+    c.burn -= dt;
+    if (Math.random() < 0.8 && onScreen(c.x, c.y, 80)) addPart(c.x + rand(-22, 22), c.y + rand(-22, 22), rand(-15, 15), rand(-40, -10), 0.8, rand(5, 10), pick(['#ff9c2a', '#ffdf6b', '#ff5a1f', '#555']), 10, true);
+    for (const o of cars) if (o !== c && !o.dead && d2(o.x, o.y, c.x, c.y) < 52 * 52) damageCar(o, 40 * dt);
+    if (!player.car && d2(player.x, player.y, c.x, c.y) < 46 * 46) hurtPlayer(30 * dt);
+    if (c.burn <= 0) { c.gone = true; c.mission = false; explodeCar(c); explode(c.x, c.y, 110, null); }
+  }
+  tankerCars = tankerCars.filter(c => !c.gone);
+  const cr = HQ.crane;
+  if (cr) {
+    cr.t -= dt; cr.a += dt * 1.5;
+    const bx = cr.x + Math.cos(cr.a) * cr.r, by = cr.y + Math.sin(cr.a) * cr.r, tx = -Math.sin(cr.a), ty = Math.cos(cr.a);
+    for (const c of cars) if (!c.dead && c.lay !== 1 && c.lay !== 3 && Math.abs(c.x - bx) < 40 && Math.abs(c.y - by) < 40 && d2(c.x, c.y, bx, by) < (14 + CT[c.type].w / 2) ** 2 && !(c.wbT > time)) {
+      c.wbT = time + 0.7; c.vx += tx * 380 + (c.x - bx) * 4; c.vy += ty * 380 + (c.y - by) * 4; c.speed = c.vx * Math.cos(c.angle) + c.vy * Math.sin(c.angle);
+      damageCar(c, 80); if (onScreen(c.x, c.y)) sfx.crash(); if (c === player.car) { shake = 1; hardKnock(); }
+    }
+    if (!player.car && !player.down && d2(player.x, player.y, bx, by) < 18 * 18 && !(HQ.wbP > time)) { HQ.wbP = time + 0.8; hurtPlayer(35); player.x += tx * 30; player.y += ty * 30; }
+    if (cr.t <= 0 || d2(cr.x, cr.y, P0.x, P0.y) > 2200 * 2200) { HQ.crane = null; HQ.rubble = HQ.rubble.filter(r => !r.crane); }
+  }
+  HQ.rubble = HQ.rubble.filter(r => d2(r.x, r.y, P0.x, P0.y) < 3000 * 3000);
+  // ★10: the swarms, the paratroopers, the squads roped down ahead, the airship; and going to ground
+  if (stars >= 10 && !player.down) {
+    if ((HQ.kamiCd -= dt) <= 0) {
+      HQ.kamiCd = 15; const a0 = rand(TAU);
+      for (let i = 0; i < 5; i++) { const a = a0 + rand(-0.45, 0.45), r = rand(850, 1050); HQ.kami.push({ x: P0.x + Math.cos(a) * r, y: P0.y + Math.sin(a) * r, vx: 0, vy: 0, life: 30, dive: 0, w: rand(TAU), hp: 1 }); }
+      msg('Drone swarm incoming! Shoot them down, or get under cover.', 2.5);
+    }
+    if ((HQ.paraCd -= dt) <= 0) {
+      HQ.paraCd = 14;
+      for (let i = 0; i < 4; i++) { const q = randomTile([WALK, PLAZA, GRASS], p => !onScreen(p.x, p.y, -120) || true, { x: P0.x, y: P0.y, min: 140, max: 380 }); if (q) HQ.paras.push({ x: q.x, y: q.y, t: 3 + i * 0.4, dx: rand(-60, 60), dy: rand(-60, 60) }); }
+    }
+    if (!HQ.rope && (HQ.ropeCd -= dt) <= 0) {
+      const p = pc ? aheadLanePt(40, 300) : null;
+      if (p) { const k = kerbToKerb(p), a = rand(TAU); HQ.rope = { x: k.x, y: k.y, nx: k.nx, ny: k.ny, w: k.w, hx: k.x + Math.cos(a) * 1200, hy: k.y + Math.sin(a) * 1200, ph: 0, t: 0, n: 0, a: a + Math.PI }; }
+      HQ.ropeCd = p ? 24 : 3;
+    }
+    if (!HQ.blimp) { const a = rand(TAU); HQ.blimp = { x: P0.x + Math.cos(a) * 900, y: P0.y + Math.sin(a) * 900, lx: P0.x, ly: P0.y, a: 0, hp: 6, see: false, fall: 0 }; msg('An airship with a searchlight is over the city.', 3); }
+  }
+  for (const q of HQ.kami) {
+    q.life -= dt;
+    if (q.dive) { q.dive -= dt; q.x += (q.tx - q.x) * Math.min(1, dt * 4); q.y += (q.ty - q.y) * Math.min(1, dt * 4); if (q.dive <= 0) q.gone = 1; continue; }
+    if (stars < 10) { q.gone = 1; continue; }
+    const lock = !hid, tx = (lock ? P0.x : belief.x) + Math.cos(time * 3 + q.w) * 40, ty = (lock ? P0.y : belief.y) + Math.sin(time * 3 + q.w) * 40;
+    const dx = tx - q.x, dy = ty - q.y, dd = Math.hypot(dx, dy) || 1;
+    q.vx += (dx / dd * 290 - q.vx) * Math.min(1, dt * 2); q.vy += (dy / dd * 290 - q.vy) * Math.min(1, dt * 2); q.x += q.vx * dt; q.y += q.vy * dt;
+    if (lock && d2(q.x, q.y, P0.x, P0.y) < 130 * 130) {
+      q.dive = 0.9; q.tx = P0.x + (P0.vx || 0) * 0.75; q.ty = P0.y + (P0.vy || 0) * 0.75;
+      q.st = { x: q.tx, y: q.ty, t: 0.9, r: 40, k: 'kami' }; HQ.strikes.push(q.st);
+    }
+  }
+  HQ.kami = HQ.kami.filter(q => !q.gone && q.life > 0);
+  for (const q of HQ.paras) { q.t -= dt; if (q.t <= 0) { const x = q.x + q.dx * 0, y = q.y; if (!circleSolid(x, y, 4)) soldier(x, y, false); q.gone = 1; } }
+  HQ.paras = HQ.paras.filter(q => !q.gone);
+  const ro = HQ.rope;
+  if (ro) {
+    ro.t += dt;
+    if (ro.ph === 0) { const dx = ro.x - ro.hx, dy = ro.y - ro.hy, dd = Math.hypot(dx, dy); if (dd < 12) { ro.ph = 1; ro.t = 0; } else { const s = Math.min(dd, 460 * dt); ro.hx += dx / dd * s; ro.hy += dy / dd * s; } }
+    else if (ro.ph === 1) {
+      while (ro.n < 4 && ro.t > 0.5 + ro.n * 0.45) { const o = (ro.n - 1.5) * ro.w / 4.2; soldier(ro.x + ro.nx * o, ro.y + ro.ny * o, true); ro.n++; }
+      if (ro.t > 2.8) { ro.ph = 2; ro.t = 0; }
+    } else { ro.hx += Math.cos(ro.a) * 420 * dt; ro.hy += Math.sin(ro.a) * 420 * dt; if (ro.t > 3) HQ.rope = null; }
+  }
+  const bl = HQ.blimp;
+  if (bl) {
+    if (bl.fall) { bl.fall += dt; if (bl.fall > 2.5) { explode(bl.x, bl.y, 120, 'player'); HQ.blimp = null; } }
+    else if (stars < 10 || player.down) { bl.see = false; const a = Math.atan2(bl.y - P0.y, bl.x - P0.x); bl.x += Math.cos(a) * 120 * dt; bl.y += Math.sin(a) * 120 * dt; if (!onScreen(bl.x, bl.y, 600)) HQ.blimp = null; }
+    else {
+      const tx = belief.seen ? P0.x : belief.x, ty = belief.seen ? P0.y : belief.y, dx = tx - bl.x, dy = ty - bl.y, dd = Math.hypot(dx, dy) || 1, s = Math.min(dd, 85 * dt);
+      bl.x += dx / dd * s; bl.y += dy / dd * s; if (dd > 20) bl.a += wrapA(Math.atan2(dy, dx) - bl.a) * Math.min(1, dt * 0.6);
+      const near = d2(bl.x, bl.y, P0.x, P0.y) < 480 * 480, gx = near ? P0.x : belief.x + Math.cos(time * 0.7) * Math.min(belief.sig, 260), gy = near ? P0.y : belief.y + Math.sin(time * 0.9) * Math.min(belief.sig, 260);
+      const lx = gx - bl.lx, ly = gy - bl.ly, ld = Math.hypot(lx, ly) || 1, st = Math.min(ld, 190 * dt); bl.lx += lx / ld * st; bl.ly += ly / ld * st;
+      bl.see = !hid && d2(bl.lx, bl.ly, P0.x, P0.y) < 140 * 140;
+    }
+  }
+  if (stars >= 10 && TUNNELS.length >= 2) { // through a tunnel from end to end, unseen going in and coming out
+    const L = pc ? pc.lay : 0;
+    if (L === 1 && HQ.pl !== 1) { const id = tE[Math.floor(pc.y / T) * MW + Math.floor(pc.x / T)], e = id >= 0 ? EDGES[id] : null; HQ.tunIn = e ? { name: e.name || 'tunnel ' + id, x: pc.x, y: pc.y, len: e.len || 300, seen: belief.seen } : null; }
+    if (L !== 1 && HQ.pl === 1 && HQ.tunIn) {
+      const ti = HQ.tunIn; HQ.tunIn = null;
+      if (!ti.seen && !belief.seen && Math.hypot(pc.x - ti.x, pc.y - ti.y) > ti.len * 0.55 && !HQ.tun.includes(ti.name)) { HQ.tun.push(ti.name); if (HQ.tun.length < 2) msg(`Through the ${ti.name} unseen. Now another tunnel.`, 3); }
+    }
+    HQ.pl = L;
+    if (HQ.tun.length >= 2) { heat = 5.5; bigText('AIR ASSAULT CALLED OFF', '#ef5350', 3, 'They lost you underground: five stars'); sfx.good(); }
+  } else if (stars >= 10 && HQ.low >= 75) { heat = 5.5; bigText('AIR ASSAULT CALLED OFF', '#ef5350', 3, 'They lost you: five stars'); sfx.good(); }
+}
+// what the HUD says about the level's way out
+function wantedHint() {
+  const s = Math.min(10, Math.floor(heat)), left = n => Math.max(0, Math.ceil(n - HQ.low));
+  if (s === 6) return HQ.drone && !HQ.drone.fall && HQ.drone.lock ? 'The drone sees you: get under trees or an overpass, into a tunnel, or shoot it down' : 'Lose them, and the Bureau stands down';
+  if (s === 7) return belief.seen ? `Lie low 60 s unseen${Q.ent > 0 ? ' · or T on foot at a wall: tunnel through it (ε)' : ''}` : `Lie low unseen: ${left(60)} s to go`;
+  if (s === 8) return `The entangled payphones (cyan on the map): ${touchOn() ? '⇄' : 'Enter'} there to teleport out`;
+  if (s === 9) return `Hide in a pedestrian zone, unseen: ${Math.floor(HQ.plaza)} / 45 s`;
+  return TUNNELS.length >= 2 ? `Two different tunnels end to end, unseen at the portals: ${HQ.tun.length} / 2` : `Lie low unseen: ${left(75)} s to go`;
+}
+function qBlocked() {
+  if (lab) return null;
+  if (heat >= 8) return 'The Observer measures everything: no superposition, no entanglement.';
+  if (HQ.det) return 'A Bureau detector is too close: it would measure you at once.';
+  return null;
+}
+// seven stars, on foot at a wall: spend an ε charge to tunnel through it (a quantum particle can cross a barrier it
+// could never climb), out of their sight, and the emergency is over
+function tunnelJump() {
+  const ca = Math.cos(player.angle), sa = Math.sin(player.angle);
+  let d = 6; while (d < 34 && !solidAt(player.x + ca * d, player.y + sa * d)) d += 2;
+  if (d >= 34) return false;
+  while (d < 280 && solidAt(player.x + ca * d, player.y + sa * d)) d += 3;
+  const x = player.x + ca * (d + 8), y = player.y + sa * (d + 8);
+  if (d >= 280 || circleSolid(x, y, 4)) { msg('Too thick a wall to tunnel through.', 2); return true; }
+  qburst(player.x, player.y, '#3cf0ff'); player.x = x; player.y = y; qburst(x, y, '#3cf0ff'); sfx.quantum(); Q.ent--;
+  heat = 5.5; HQ.lv = 5; Object.assign(belief, { seen: false, seeT: 1, sig: Math.max(belief.sig, 320) });
+  bigText('QUANTUM TUNNELLING', '#3cf0ff', 3, 'Through the wall and out of their sight: five stars');
+  return true;
+}
+// what flies over gets shot at where it appears (like the helicopter)
+function airHit(b) {
+  const at = (o, z) => { const k = 1 + z; return [cam.x + (o.x - cam.x) * k, cam.y + (o.y - cam.y) * k]; };
+  const d = HQ.drone;
+  if (d && !d.fall) { const [x, y] = at(d, DRONE_Z); if (d2(b.x, b.y, x, y) < 13 * 13) { d.hp -= b.rocket ? 99 : b.dmg; if (d.hp <= 0) { d.fall = 0.01; earn(200); addHeat(0.25, true); msg('You shot down the Bureau\'s drone!', 2.5); } return true; } }
+  for (const q of HQ.kami) { const [x, y] = at(q, KAMI_Z); if (d2(b.x, b.y, x, y) < 10 * 10) { q.gone = 1; if (q.st) q.st.cancel = true; for (let k = 0; k < 8; k++) addPart(x, y, rand(-60, 60), rand(-60, 60), 0.4, 3, pick(['#ff9c2a', '#555']), 4, true); earn(40); return true; } }
+  const bl = HQ.blimp;
+  if (bl && !bl.fall) { const [x, y] = at(bl, BLIMP_Z), ca = Math.cos(bl.a), sa = Math.sin(bl.a), lx = (b.x - x) * ca + (b.y - y) * sa, ly = -(b.x - x) * sa + (b.y - y) * ca;
+    if ((lx / 80) ** 2 + (ly / 30) ** 2 < 1) { if (b.rocket) { bl.hp--; if (bl.hp <= 0) { bl.fall = 0.01; earn(2500); addHeat(0.5, true); msg('The airship is going down!', 3); } } return true; } }
+  return false;
+}
+// ---- drawing: on the ground (spike strips, rubble, the crane and its ball, target markers), then what flies
+function drawWantedGround(v) {
+  const vis = (x, y, m) => x > v.x0 - m && x < v.x1 + m && y > v.y0 - m && y < v.y1 + m;
+  for (const s of HQ.spikes) if (vis(s.x, s.y, s.w)) {
+    ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.a);
+    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(-2, -s.w / 2 + 2, 6, s.w);
+    ctx.fillStyle = '#2b2b2b'; ctx.fillRect(-3, -s.w / 2, 6, s.w);
+    ctx.fillStyle = '#c9ccd1'; for (let y = -s.w / 2 + 2; y < s.w / 2 - 1; y += 4) { ctx.fillRect(-4, y, 2, 2); ctx.fillRect(2, y + 2, 2, 2); }
+    ctx.fillStyle = '#e0b100'; ctx.fillRect(-3, -s.w / 2, 6, 3); ctx.fillRect(-3, s.w / 2 - 3, 6, 3);
+    ctx.restore();
+  }
+  for (const r of HQ.rubble) if (vis(r.x, r.y, r.r) && !r.crane) {
+    let h = r.s | 0; const rn = () => ((h = (h * 1103515245 + 12345) >>> 0) % 1000) / 1000;
+    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.arc(r.x + 3, r.y + 4, r.r, 0, TAU); ctx.fill();
+    for (let i = 0; i < 9; i++) { const a = rn() * TAU, d = rn() * r.r * 0.7, s = r.r * (0.3 + rn() * 0.4); ctx.fillStyle = tint(['#8f8a80', '#a29d93', '#7a6f63', '#b0553d', '#6e6a64'][i % 5], 1); ctx.beginPath(); ctx.arc(r.x + Math.cos(a) * d, r.y + Math.sin(a) * d, s, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = tint('#3a3530', 1); for (let i = 0; i < 4; i++) { const a = rn() * TAU, d = rn() * r.r; ctx.fillRect(r.x + Math.cos(a) * d - 3, r.y + Math.sin(a) * d - 1, 7, 2); }
+  }
+  const cr = HQ.crane;
+  if (cr && vis(cr.x, cr.y, 120)) {
+    const bx = cr.x + Math.cos(cr.a) * cr.r, by = cr.y + Math.sin(cr.a) * cr.r;
+    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(cr.x - 11, cr.y - 9, 26, 26); ctx.beginPath(); ctx.arc(bx + 12, by + 14, 12, 0, TAU); ctx.fill();
+    ctx.fillStyle = tint('#e0a800', 1); ctx.fillRect(cr.x - 13, cr.y - 13, 26, 26);
+    ctx.strokeStyle = tint('#7a5c00', 1); ctx.lineWidth = 1.5; ctx.strokeRect(cr.x - 13, cr.y - 13, 26, 26); ctx.beginPath(); ctx.moveTo(cr.x - 13, cr.y - 13); ctx.lineTo(cr.x + 13, cr.y + 13); ctx.moveTo(cr.x + 13, cr.y - 13); ctx.lineTo(cr.x - 13, cr.y + 13); ctx.stroke();
+    ctx.strokeStyle = tint('#e0a800', 1); ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(cr.x, cr.y); ctx.lineTo(cr.x + Math.cos(cr.a - 0.25) * (cr.r + 10), cr.y + Math.sin(cr.a - 0.25) * (cr.r + 10)); ctx.stroke();
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(cr.x + Math.cos(cr.a - 0.25) * (cr.r + 10), cr.y + Math.sin(cr.a - 0.25) * (cr.r + 10)); ctx.lineTo(bx, by); ctx.stroke();
+    const g = ctx.createRadialGradient(bx - 4, by - 4, 2, bx, by, 13); g.addColorStop(0, '#6d7075'); g.addColorStop(1, '#1c1d20');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(bx, by, 12, 0, TAU); ctx.fill();
+  }
+  for (const s of HQ.strikes) if (vis(s.x, s.y, s.r)) { // where something is about to land: a red ring that closes in
+    const f = clamp(s.t / (s.k === 'kami' ? 0.9 : 1.3), 0, 1), on = Math.sin(time * 22) > 0;
+    ctx.strokeStyle = `rgba(255,40,30,${on ? 0.95 : 0.6})`; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r * (0.5 + 0.5 * f), 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(s.x - s.r * 0.35, s.y); ctx.lineTo(s.x + s.r * 0.35, s.y); ctx.moveTo(s.x, s.y - s.r * 0.35); ctx.lineTo(s.x, s.y + s.r * 0.35); ctx.stroke();
+    ctx.fillStyle = `rgba(255,40,30,${0.12 + 0.2 * (1 - f)})`; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, TAU); ctx.fill();
+  }
+  const j = HQ.jet;
+  if (j && j.t < j.warn) { // the jet's run, announced: a dashed red line across where you are
+    const ca = Math.cos(j.a), sa = Math.sin(j.a);
+    ctx.save(); ctx.translate(j.tx, j.ty); ctx.rotate(j.a); // (the strip its bombs will hit, and its line)
+    ctx.fillStyle = `rgba(255,40,30,${0.1 + 0.08 * (Math.sin(time * 14) > 0)})`; ctx.fillRect(-520, -36, 1040, 72);
+    ctx.strokeStyle = 'rgba(255,50,40,.55)'; ctx.lineWidth = 2; ctx.setLineDash([10, 8]); ctx.strokeRect(-520, -36, 1040, 72);
+    ctx.strokeStyle = `rgba(255,50,40,${0.5 + 0.4 * (Math.sin(time * 14) > 0)})`; ctx.lineWidth = 4; ctx.setLineDash([18, 10]);
+    ctx.beginPath(); ctx.moveTo(-760, 0); ctx.lineTo(760, 0); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+    for (const s of [-1, 1]) { const x = j.tx + ca * 520 * s, y = j.ty + sa * 520 * s; ctx.fillStyle = 'rgba(255,50,40,.8)'; ctx.beginPath(); ctx.moveTo(x + ca * 14, y + sa * 14); ctx.lineTo(x - sa * 9, y + ca * 9); ctx.lineTo(x + sa * 9, y - ca * 9); ctx.fill(); }
+  }
+  const ro = HQ.rope;
+  if (ro && ro.ph === 1) { // the ropes down from the hovering helicopter
+    const k = 1 + ROPE_Z, hx = cam.x + (ro.hx - cam.x) * k, hy = cam.y + (ro.hy - cam.y) * k;
+    ctx.strokeStyle = 'rgba(30,30,30,.7)'; ctx.lineWidth = 1.2;
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(hx + ro.nx * 9 * s, hy + ro.ny * 9 * s); ctx.lineTo(ro.x + ro.nx * ro.w * 0.3 * s, ro.y + ro.ny * ro.w * 0.3 * s); ctx.stroke(); }
+  }
+}
+function drawWantedAir() {
+  const P = (o, z) => { const k = 1 + z; return [cam.x + (o.x - cam.x) * k, cam.y + (o.y - cam.y) * k, k]; };
+  const nb = 1 + NIGHT * 1.6, on = Math.sin(time * 9) > 0;
+  const shadow = (o, rx, ry, a) => { if (!SUN.on) return; ctx.fillStyle = `rgba(12,18,40,${0.22 * (1 - NIGHT)})`; ctx.beginPath(); ctx.ellipse(o.x + SUN.sx * 50, o.y + SUN.sy * 50, rx, ry, a || 0, 0, TAU); ctx.fill(); };
+  for (const q of HQ.paras) { // paratroopers: the canopy shrinks as they come down
+    const f = clamp(q.t / 3, 0, 1), x = q.x + q.dx * f, y = q.y + q.dy * f, s = 1 + f * 1.2;
+    if (!onScreen(x, y, 60)) continue;
+    ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.arc(q.x, q.y, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = tint('#6b7a3a', nb); ctx.beginPath(); ctx.arc(x, y - 4 * s, 9 * s, Math.PI, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(40,40,40,.6)'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(x - 9 * s, y - 4 * s); ctx.lineTo(x, y + 2 * s); ctx.lineTo(x + 9 * s, y - 4 * s); ctx.stroke();
+    ctx.fillStyle = tint('#3b4a1f', nb); ctx.beginPath(); ctx.arc(x, y + 2 * s, 2.5 * s, 0, TAU); ctx.fill();
+  }
+  for (const q of HQ.kami) { // kamikaze drones: small, black, a red eye
+    const [x, y] = P(q, KAMI_Z); if (!onScreen(x, y, 30)) continue;
+    const a = Math.atan2(q.vy, q.vx);
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+    ctx.fillStyle = tint('#202226', nb); ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-6, -6); ctx.lineTo(-3, 0); ctx.lineTo(-6, 6); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = on ? '#ff2a1a' : '#7a0c06'; ctx.beginPath(); ctx.arc(3, 0, 1.6, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  const d = HQ.drone;
+  if (d) { // the Bureau's quadcopter
+    const [x, y, k] = P(d, d.fall ? DRONE_Z * Math.max(0, 1 - d.fall) : DRONE_Z);
+    if (onScreen(x, y, 40)) {
+      shadow(d, 9, 9);
+      ctx.save(); ctx.translate(x, y); ctx.rotate(d.a + (d.fall ? d.fall * 9 : 0)); ctx.scale(k * 0.9, k * 0.9);
+      ctx.strokeStyle = tint('#26282e', nb); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-7, -7); ctx.lineTo(7, 7); ctx.moveTo(7, -7); ctx.lineTo(-7, 7); ctx.stroke();
+      for (const [sx, sy] of [[-7, -7], [7, 7], [7, -7], [-7, 7]]) { ctx.fillStyle = 'rgba(40,40,46,.35)'; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, TAU); ctx.fill(); ctx.strokeStyle = 'rgba(30,30,30,.6)'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(sx + Math.cos(d.rot) * 5, sy + Math.sin(d.rot) * 5); ctx.lineTo(sx - Math.cos(d.rot) * 5, sy - Math.sin(d.rot) * 5); ctx.stroke(); }
+      ctx.fillStyle = tint('#1b1d22', nb); rrect(-4, -3.5, 9, 7, 2);
+      ctx.fillStyle = d.lock ? (on ? '#ff3030' : '#ff9a9a') : '#3cf0ff'; ctx.beginPath(); ctx.arc(4, 0, 1.6, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+  }
+  const ro = HQ.rope;
+  if (ro) { // the army's transport helicopter: two rotors
+    const [x, y, k] = P({ x: ro.hx, y: ro.hy }, ROPE_Z);
+    if (onScreen(x, y, 120)) {
+      shadow({ x: ro.hx, y: ro.hy }, 30, 12, ro.a);
+      ctx.save(); ctx.translate(x, y); ctx.rotate(ro.ph === 2 ? ro.a : Math.atan2(ro.y - ro.hy, ro.x - ro.hx) || ro.a); ctx.scale(k * 0.85, k * 0.85);
+      ctx.fillStyle = tint('#4b5320', nb); rrect(-28, -8, 56, 16, 6);
+      ctx.fillStyle = tint('#7fb3d5', nb); ctx.beginPath(); ctx.ellipse(24, 0, 5, 6, 0, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(25,25,25,.6)'; ctx.lineWidth = 3;
+      for (const cx of [-20, 20]) for (let i = 0; i < 3; i++) { const a = time * 38 * (cx > 0 ? 1 : -1) + i * TAU / 3; ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx + Math.cos(a) * 26, Math.sin(a) * 26); ctx.stroke(); }
+      ctx.restore();
+    }
+  }
+  const j = HQ.jet;
+  if (j && j.t > j.warn) { // the jet: fast, high, grey; its shadow streaks over the ground
+    if (SUN.on) { ctx.save(); ctx.translate(j.x + SUN.sx * 120, j.y + SUN.sy * 120); ctx.rotate(j.a); ctx.fillStyle = `rgba(12,18,40,${0.25 * (1 - NIGHT)})`; ctx.beginPath(); ctx.moveTo(24, 0); ctx.lineTo(-16, -20); ctx.lineTo(-10, 0); ctx.lineTo(-16, 20); ctx.closePath(); ctx.fill(); ctx.restore(); }
+    const [x, y, k] = P(j, JET_Z);
+    if (onScreen(x, y, 80)) {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(j.a); ctx.scale(k, k);
+      ctx.fillStyle = tint('#8a9099', nb); ctx.beginPath(); ctx.moveTo(26, 0); ctx.lineTo(-14, -22); ctx.lineTo(-8, 0); ctx.lineTo(-14, 22); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = tint('#5d636b', nb); ctx.fillRect(-18, -3, 30, 6);
+      ctx.fillStyle = 'rgba(255,170,60,.85)'; ctx.beginPath(); ctx.arc(-20, 0, 4, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+  }
+  const bl = HQ.blimp;
+  if (bl) { // the airship and its searchlight
+    const [x, y, k] = P(bl, bl.fall ? BLIMP_Z * Math.max(0, 1 - bl.fall / 2.5) : BLIMP_Z);
+    if (!bl.fall && onScreen(bl.lx, bl.ly, 200)) {
+      const a = Math.atan2(bl.ly - y, bl.lx - x), r = 120;
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(220,235,255,${0.05 + 0.15 * NIGHT})`;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(bl.lx + Math.cos(a + Math.PI / 2) * r, bl.ly + Math.sin(a + Math.PI / 2) * r); ctx.lineTo(bl.lx + Math.cos(a - Math.PI / 2) * r, bl.ly + Math.sin(a - Math.PI / 2) * r); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(bl.lx, bl.ly, 140, 0, TAU); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    if (onScreen(x, y, 200)) {
+      shadow(bl, 70, 26, bl.a);
+      ctx.save(); ctx.translate(x, y); ctx.rotate(bl.a + (bl.fall ? bl.fall * 0.4 : 0)); ctx.scale(k * 0.8, k * 0.8);
+      ctx.fillStyle = tint('#5a6068', nb); for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(-60, 0); ctx.lineTo(-88, s * 26); ctx.lineTo(-74, 0); ctx.fill(); }
+      const g = ctx.createLinearGradient(0, -30, 0, 30); g.addColorStop(0, tint('#c3c8cf', nb)); g.addColorStop(0.5, tint('#9aa1aa', nb)); g.addColorStop(1, tint('#646a72', nb));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, 0, 82, 30, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = tint('#2e3238', nb); rrect(-12, -7, 30, 14, 4);
+      ctx.fillStyle = bl.fall ? '#ff5a1f' : on ? '#ff3030' : '#661010'; ctx.beginPath(); ctx.arc(-80, 0, 3, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+// the sweep (a band of measurement crossing the screen) and the Bell measurement's dial
+function drawWantedHUD() {
+  if (HQ.sweep > 0) {
+    const f = 1 - HQ.sweep / 1.6, x = -120 + f * (W + 240);
+    const g = ctx.createLinearGradient(x - 120, 0, x + 20, 0); g.addColorStop(0, 'rgba(60,240,255,0)'); g.addColorStop(0.85, 'rgba(60,240,255,.35)'); g.addColorStop(1, 'rgba(200,255,255,.8)');
+    ctx.fillStyle = g; ctx.fillRect(x - 120, 0, 140, H);
+    ctx.fillStyle = `rgba(60,240,255,${0.06 * (1 - f)})`; ctx.fillRect(0, 0, W, H);
+  }
+  const b = HQ.bell;
+  if (b) {
+    const cx = W / 2, cy = H / 2 - 40, r = 70;
+    ctx.fillStyle = 'rgba(8,14,24,.85)'; ctx.fillRect(cx - 130, cy - 110, 260, 230);
+    ctx.strokeStyle = '#3cf0ff'; ctx.lineWidth = 2; ctx.strokeRect(cx - 130, cy - 110, 260, 230);
+    txt('BELL MEASUREMENT', cx, cy - 86, 15, '#3cf0ff', 'center', true);
+    ctx.strokeStyle = 'rgba(60,240,255,.35)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = '#2ee88a'; ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(cx, cy, r, b.win - 0.36, b.win + 0.36); ctx.stroke();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(b.ang) * (r + 6), cy + Math.sin(b.ang) * (r + 6)); ctx.stroke();
+    for (let i = 0; i < 3; i++) { ctx.fillStyle = i < b.round ? (i < b.hits + (b.round - b.hits) && i >= b.hits ? '#ff6b6b' : '#2ee88a') : '#334'; ctx.beginPath(); ctx.arc(cx - 24 + i * 24, cy + r + 24, 7, 0, TAU); ctx.fill(); }
+    txt(`${touchOn() ? '●' : 'Space'}: measure as the arrow crosses the window`, cx, cy + r + 50, 11, '#cfe', 'center');
+  }
+}
 function updateWorld(dt) {
   time += dt;
   heatCd -= dt;
@@ -5122,8 +5691,9 @@ function updateWorld(dt) {
     updatePickups(dt);
     updateMissions(dt);
     updateBelief(dt);
+    updateWanted(dt);
     // the wanted level fades once the police have lost track of you
-    if (heat > 0 && time - lastCrime > 5 && !belief.seen && (belief.sig > 250 || heat < 1 || Q.decoyT > 0)) heat = Math.max(0, heat - dt * 0.12);
+    if (heat > 0 && time - lastCrime > 5 && !belief.seen && (belief.sig > 250 || heat < 1 || Q.decoyT > 0)) heat = Math.max(heat >= 7 ? Math.floor(heat) : 0, heat - dt * 0.12); // (from 7 up only the level's way out ends it)
     updateLink(dt);
     const nm = placeName(player.x, player.y);
     if (nm !== curDistrict) { curDistrict = nm; msg(`— ${nm} —`, 2.5); }
@@ -7166,6 +7736,7 @@ function drawMarkers() {
     ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(label, p.x, p.y + 3);
   };
   for (const h of HOSPITALS) mk(h, '#e74c3c', 'ER');
+  if (heat >= 8) for (const e of eprPhones()) mk(e, '#3cf0ff', 'EPR'); // (the entangled payphones)
   for (const h of POLICE_POSTS) mk(h, '#3498db', 'PD');
   for (const s of SPRAYS) mk(s, '#9b59b6', 'SPRAY');
   for (const s of FISH_SPOTS) if (!player.fish || player.fish.s !== s) mk(s, '#29b6f6', 'FISH');
@@ -7175,7 +7746,7 @@ function drawMarkers() {
     ctx.fillStyle = '#fff'; ctx.fillRect(b.x - 3, b.y - 3, 6, 3);
   }
   for (const u of pickups) {
-    if (u.cd > 0) continue;
+    if (u.cd > 0 || (u.k === 'ent' && heat >= 8)) continue;
     const pk = PK[u.k], bob = Math.sin(time * 4 + u.x) * 2;
     ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(u.x - 7, u.y - 4, 14, 12);
     ctx.fillStyle = pk.c; ctx.fillRect(u.x - 8, u.y - 9 + bob, 16, 16);
@@ -7198,7 +7769,7 @@ function drawPed(p, isPlayer) {
   else if (p.cop) { ctx.fillStyle = '#111'; ctx.fillRect(3, 1.5, p.swat ? 9 : 6, p.swat ? 2.6 : 2); }
   ctx.fillStyle = p.skin; ctx.beginPath(); ctx.arc(0.5, 0, 3, 0, TAU); ctx.fill();
   ctx.fillStyle = p.hair; ctx.beginPath(); ctx.arc(-0.5, 0, 3, Math.PI * 0.5, Math.PI * 1.5); ctx.fill();
-  if (p.cop) { ctx.fillStyle = p.swat ? '#121418' : '#0d1b4a'; ctx.beginPath(); ctx.arc(0, 0, p.swat ? 3.6 : 3.2, 0, TAU); ctx.fill(); }
+  if (p.cop) { ctx.fillStyle = p.army ? '#3b4a1f' : p.swat ? '#121418' : '#0d1b4a'; ctx.beginPath(); ctx.arc(0, 0, p.swat ? 3.6 : 3.2, 0, TAU); ctx.fill(); }
   ctx.restore();
 }
 // shading across a car's width: dark sills, a bright highlight along the roof; cached per body size in car space
@@ -7250,6 +7821,36 @@ function drawCar(c) {
     ctx.fillStyle = '#333'; ctx.fillRect(l * 0.1, -4.5, 2.5, 2.5);
     ctx.restore(); return;
   }
+  if (c.type === 'apc') { // eight wheels, sloped armour, a gun turret
+    ctx.fillStyle = '#1a1a1a'; for (let i = 0; i < 4; i++) { const x = -l / 2 + 7 + i * (l - 14) / 3; ctx.fillRect(x - 4, -w / 2 - 1.5, 8, 4); ctx.fillRect(x - 4, w / 2 - 2.5, 8, 4); }
+    ctx.fillStyle = c.color; rrect(-l / 2, -w / 2 + 1, l, w - 2, 4);
+    ctx.fillStyle = shade(c.color, 1.16); ctx.fillRect(-l / 2 + 4, -w / 2 + 5, l - 14, w - 10);
+    ctx.fillStyle = '#20240f'; ctx.fillRect(l / 2 - 8, -w / 2 + 4, 3, w - 8); ctx.fillRect(-l / 2 + 6, -3, 6, 6);
+    ctx.rotate(wrapA((c.turret ?? c.angle) - c.angle));
+    ctx.fillStyle = '#23270f'; ctx.fillRect(0, -1.3, 22, 2.6);
+    ctx.fillStyle = shade(c.color, 0.82); ctx.beginPath(); ctx.arc(-1, 0, 6.5, 0, TAU); ctx.fill();
+    ctx.restore(); return;
+  }
+  if (c.type === 'dozer') { // tracks, an armoured cab, and the blade up front, wider than the rest
+    ctx.fillStyle = '#222'; ctx.fillRect(-l / 2, -w / 2 + 1, l - 9, 7); ctx.fillRect(-l / 2, w / 2 - 8, l - 9, 7);
+    ctx.fillStyle = '#4a4a4a'; for (let x = -l / 2 + 2; x < l / 2 - 10; x += 5) { ctx.fillRect(x, -w / 2 + 1, 2, 7); ctx.fillRect(x, w / 2 - 8, 2, 7); }
+    ctx.fillStyle = c.color; ctx.fillRect(-l / 2 + 2, -w / 2 + 7, l - 12, w - 14);
+    ctx.fillStyle = '#5b5f66'; ctx.fillRect(-l * 0.22, -w / 2 + 7, l * 0.3, w - 14); ctx.fillStyle = '#1b2631'; ctx.fillRect(l * 0.02, -w / 2 + 9, 2.5, w - 18);
+    ctx.fillStyle = '#111'; ctx.fillRect(-l * 0.34, -5, 3.5, 3.5);
+    ctx.fillStyle = '#3c3f44'; ctx.fillRect(l / 2 - 7, -w / 2 - 3, 6, w + 6); ctx.fillStyle = '#7a7f86'; ctx.fillRect(l / 2 - 2, -w / 2 - 3, 2, w + 6);
+    ctx.strokeStyle = '#2b2b2b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(l / 2 - 7, -w / 4); ctx.lineTo(l / 2 - 16, -w / 4); ctx.moveTo(l / 2 - 7, w / 4); ctx.lineTo(l / 2 - 16, w / 4); ctx.stroke();
+    ctx.restore(); return;
+  }
+  if (c.type === 'tanker') { // the tank on its trailer, and the cab jack-knifed off its line
+    const hx = l / 2 - 16;
+    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(-l / 2 + 2, -w / 2 - 1, hx + l / 2 - 2, w + 2);
+    const g = ctx.createLinearGradient(0, -w / 2, 0, w / 2); g.addColorStop(0, '#9da3a9'); g.addColorStop(0.45, '#f4f6f8'); g.addColorStop(1, '#8a9096');
+    ctx.fillStyle = g; rrect(-l / 2, -w / 2 + 1, hx + l / 2 - 2, w - 2, 8);
+    ctx.fillStyle = '#c0392b'; ctx.fillRect(-l / 2 + 4, -1.5, hx + l / 2 - 10, 3);
+    ctx.translate(hx, 0); ctx.rotate(c.jk || 0);
+    ctx.fillStyle = '#c0392b'; rrect(0, -w / 2 + 1, 16, w - 2, 3); ctx.fillStyle = '#1b2631'; ctx.fillRect(10, -w / 2 + 3, 3, w - 6);
+    ctx.restore(); return;
+  }
   if (c.type === 'truck') {
     ctx.fillStyle = shade(c.color, 1.15); ctx.fillRect(-l / 2 + 1, -w / 2 + 1, l * 0.66, w - 2);
     ctx.fillStyle = 'rgba(0,0,0,.25)'; for (let i = 1; i < 5; i++) ctx.fillRect(-l / 2 + i * l * 0.13, -w / 2 + 1, 1, w - 2);
@@ -7274,6 +7875,12 @@ function drawCar(c) {
     if (c.type === 'firetruck') {
       ctx.fillStyle = '#bbb'; ctx.fillRect(-l * 0.45, -4, l * 0.62, 1.5); ctx.fillRect(-l * 0.45, 2.5, l * 0.62, 1.5);
       for (let i = 0; i < 7; i++) ctx.fillRect(-l * 0.45 + i * 4.5, -4, 1, 8);
+    }
+    if (c.type === 'bureau') { // a black van with a detector dish on its roof
+      ctx.fillStyle = '#23262d'; ctx.fillRect(-l / 2 + 3, -w / 2 + 3, l * 0.62, w - 6);
+      ctx.fillStyle = '#e8eaed'; ctx.beginPath(); ctx.arc(-l * 0.16, 0, 5, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#555'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-l * 0.16, 0); ctx.lineTo(-l * 0.16 + Math.cos(time * 4) * 5, Math.sin(time * 4) * 5); ctx.stroke();
+      ctx.fillStyle = c.chase && Math.sin(time * 10) > 0 ? '#3cf0ff' : '#1d6b72'; ctx.fillRect(l * 0.12, -2, 3, 4);
     }
     if (c.type === 'swat') { ctx.fillStyle = '#2b3546'; ctx.fillRect(-l / 2 + 3, -w / 2 + 3, l * 0.62, w - 6); ctx.fillStyle = '#d8d8d8'; ctx.fillRect(-l * 0.32, -w / 2, 2.5, w); ctx.fillRect(-l * 0.02, -w / 2, 2.5, w); }
     const lit = c.type === 'police' || c.type === 'swat' ? c.chase : (c.type === 'ambulance' || c.type === 'firetruck') ? !!c.job : null;
@@ -7459,6 +8066,7 @@ function drawWorld() {
   drawZones(v);
   drawSignals(v);
   drawDecals(v);
+  drawWantedGround(v);
   drawMarkers();
   for (const p of peds) if (p.dead && onScreen(p.x, p.y)) drawPed(p);
   for (const p of peds) if (!p.dead && onScreen(p.x, p.y)) drawPed(p);
@@ -7486,6 +8094,7 @@ function drawWorld() {
   drawParts(true);
   if (flight.on) drawPlane(flight.x, (AIRPORT.ry0 + AIRPORT.ry1) / 2, 0, flight.alt);
   drawHeli();
+  drawWantedAir();
   drawBelief();
   for (const r of RAMPS) if (onScreen(r.pts[r.pts.length - 1][0], r.pts[r.pts.length - 1][1], 80)) { // the portal's lintel, over the cars driving in
     const P = r.pts, n = P.length, [ex, ey] = P[n - 1], [qx, qy] = P[Math.max(0, n - 6)], L = Math.hypot(ex - qx, ey - qy) || 1, ux = (ex - qx) / L, uy = (ey - qy) / L, nx = -uy, ny = ux, k = 1.06;
@@ -7678,7 +8287,13 @@ function drawHUD() {
   txt(`ψ×${Q.psi}  ε×${Q.ent}`, W - 16, 86 * s, 15 * s, '#c9b3ff', 'right');
   const stars = Math.floor(heat), flash = heat >= 1 && belief.seen && Math.sin(time * 8) > 0;
   for (let i = 0; i < 5; i++) star(W / 2 - 60 + i * 30, 26, 11, i < stars, flash ? '#fff' : '#ffd54a');
-  if (heat >= 1) txt(belief.seen ? 'SEEN' : `LOST YOU · Δx ≈ ${Math.round(belief.sig / T)} tiles`, W / 2, 98, 12, belief.seen ? '#ff6b6b' : '#8fb4ff', 'center');
+  const WLv = WL[Math.min(10, stars)];
+  if (WLv) { // six stars and up: a second row, the level's name, and its way out
+    for (let i = 0; i < 5; i++) star(W / 2 - 48 + i * 24, 50, 8, i < stars - 5, flash ? '#fff' : WLv.col);
+    txt(WLv.name, W / 2, 72, 12, WLv.col, 'center', true); txt(wantedHint(), W / 2, 87, 11, '#e6e6e6', 'center');
+  }
+  if (heat >= 1) txt(belief.seen ? 'SEEN' : `LOST YOU · Δx ≈ ${Math.round(belief.sig / T)} tiles`, W / 2, WLv ? 103 : 98, 12, belief.seen ? '#ff6b6b' : '#8fb4ff', 'center');
+  drawWantedHUD();
   if (Q.branches) txt(`SUPERPOSED · ${Math.ceil(Q.supT)}s · X to collapse`, W / 2, 118, 13, '#c9b3ff', 'center');
   if (Q.link) txt(`ε entangled · T: measure and swap places · ${Math.ceil(Q.linkT)} s`, W / 2, H / 2 + 70, 13, '#3cf0ff', 'center');
   else if (Q.decoyT > 0) txt(`the police are chasing your twin · ${Math.ceil(Q.decoyT)} s`, W / 2, H / 2 + 70, 13, '#3cf0ff', 'center');
@@ -7759,6 +8374,8 @@ function drawHUD() {
     }
     if (Q.link) dot(Q.link.x, Q.link.y, '#3cf0ff', 2.5);
     if (heli) dot(heli.x, heli.y, Math.sin(time * 10) > 0 ? '#cfe3ff' : '#f33', 3);
+    if (heat >= 8) for (const e of eprPhones()) dot(e.x, e.y, Math.sin(time * 6) > 0 ? '#3cf0ff' : '#fff', full ? 4.5 : 3.5);
+    if (HQ.drone) dot(HQ.drone.x, HQ.drone.y, '#b388ff', 2); if (HQ.blimp) dot(HQ.blimp.x, HQ.blimp.y, '#ef5350', 3.5);
     if (Q.decoy) dot(Q.decoy.x, Q.decoy.y, '#3cf0ff', 2.5);
     const tg = missionTarget(); if (tg) dot(tg.x, tg.y, '#ffe14d', 3.5);
     const oth = otherPlayer(); if (oth && !oth.hidden) dot(oth.x, oth.y, oth.color, full ? 4 : 3);
@@ -7774,7 +8391,7 @@ function drawHUD() {
   const tg = missionTarget();
   if (tg && !player.down) {
     const a = Math.atan2(tg.y - player.y, tg.x - player.x), d = Math.hypot(tg.x - player.x, tg.y - player.y);
-    const ax = W / 2, ay = 62;
+    const ax = W / 2, ay = heat >= 6 ? 142 : 62; // (below the wanted level's lines, from six stars)
     ctx.save(); ctx.translate(ax, ay); ctx.rotate(a);
     ctx.fillStyle = mission ? '#ffe14d' : '#7dff7a'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-10, -11); ctx.lineTo(-4, 0); ctx.lineTo(-10, 11); ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -8045,6 +8662,7 @@ const HELP = [
   ['T', 'entangle with a car nearby · T again: swap places with it'],
   ['G', 'optical tweezer: pick up the empty car behind yours · G again drops it'],
   ['Wanted', '★ tail you · ★★★ roadblocks · ★★★★ SWAT + helicopter · ★★★★★ tank'],
+  ['Wanted 6–10', 'the Bureau · the army · the Observer · demolition · air assault'],
   ['R · M', 'radio station · minimap, then the whole map'],
   ['P / Esc · H', 'pause (then Q quits to the title) · help (H again for quantum notes)'],
   ['Title screen', '← → start location · ↑ ↓ map (island, Brno, inner Brno) · L Physics Lab · O online co-op'],
@@ -8166,7 +8784,7 @@ function hostSnap() {
   const tg = missionTarget(), ml = missionLine(), gq = g.Q;
   const pk = pickups.map(u => u.cd > 0 ? 0 : 1).join('');
   const snap = { t: 's', time: +time.toFixed(2), dayT: +dayT.toFixed(5), heat: +heat.toFixed(2), bel: [belief.x | 0, belief.y | 0, belief.sig | 0, belief.seen ? 1 : 0],
-    fl: flight.on ? [flight.x | 0, +flight.alt.toFixed(2)] : 0, TR, he: heli ? [heli.x | 0, heli.y | 0, +heli.angle.toFixed(2), +heli.rot.toFixed(2), heli.dead ? 1 : 0, +(heli.fall || 0).toFixed(2)] : 0, C, P, B,
+    fl: flight.on ? [flight.x | 0, +flight.alt.toFixed(2)] : 0, TR, he: heli ? [heli.x | 0, heli.y | 0, +heli.angle.toFixed(2), +heli.rot.toFixed(2), heli.dead ? 1 : 0, +(heli.fall || 0).toFixed(2), heli.army ? 1 : 0] : 0, C, P, B, hq: HQ,
     me: [gp.x | 0, gp.y | 0, +gp.angle.toFixed(2), gp.hp | 0, gp.car ? nid(gp.car) : 0, gp.weapons, gp.weapon, gp.cash | 0, gp.lives, gp.mult, +gp.down.toFixed(2), gp.downKind, gp.moving ? 1 : 0, +gp.anim.toFixed(1), gq.psi, gq.ent, gq.link ? nid(gq.link) : 0, gq.branches ? gq.branches.map(b => [b.x | 0, b.y | 0, +b.angle.toFixed(2), b.tint, +(b.amp || 0).toFixed(2)]) : 0],
     ho: [player.x | 0, player.y | 0, +player.angle.toFixed(2), player.car ? nid(player.car) : 0, player.hidden || (player.down && player.downKind === 'busted') ? 1 : 0, player.moving ? 1 : 0, +player.anim.toFixed(1), player.down && player.downKind === 'wasted' ? 1 : 0],
     mt: tg ? [tg.x | 0, tg.y | 0, mission ? 1 : 0] : 0, ml, rg: ringing ? BOOTHS.indexOf(ringing) : -1, ev: NET.ev };
@@ -8209,7 +8827,8 @@ function guestApply(d) {
   time = d.time; dayT = d.dayT; heat = d.heat;
   [belief.x, belief.y, belief.sig] = d.bel; belief.seen = !!d.bel[3];
   flight.on = !!d.fl; if (d.fl) { flight.x = d.fl[0]; flight.alt = d.fl[1]; }
-  if (d.he) { heli = heli || { vx: 0, vy: 0, hp: 1, snd: 0 }; [heli.x, heli.y, heli.angle, heli.rot] = d.he; heli.dead = !!d.he[4]; heli.fall = d.he[5]; } else heli = null;
+  if (d.he) { heli = heli || { vx: 0, vy: 0, hp: 1, snd: 0 }; [heli.x, heli.y, heli.angle, heli.rot] = d.he; heli.dead = !!d.he[4]; heli.fall = d.he[5]; heli.army = !!d.he[6]; } else heli = null;
+  if (d.hq) HQ = d.hq;
   const seen = new Set(), E = NET.ents;
   const ent = (id, mk) => { seen.add(id); let o = E.get(id); if (!o) { o = mk(); o.nid = id; o.fresh = true; E.set(id, o); } return o; };
   cars = d.C.map(([id, x, y, a, f, hp, tur, spd, type, color]) => {
@@ -8358,7 +8977,7 @@ try { const pj = sessionStorage.getItem('qta.join'); if (pj) { sessionStorage.re
 // ============================================================ game flow
 function resetWorld() {
   cars = []; peds = []; bullets = []; parts = []; decals = []; heli = null;
-  seed = 4242; placeParked(); placePickups(); initTrams();
+  seed = 4242; placeParked(); placePickups(); initTrams(); HQ = hqNew(); tankerCars = [];
 }
 let startSel = 0; // which of STARTS a new game begins in (chosen on the title screen)
 // the maps are generated when the page loads, so switching map reloads it (and remembers the choice)
@@ -8465,7 +9084,7 @@ function frame(nowT) {
 }
 requestAnimationFrame(frame);
 // debug/test hook
-window.__gridlock = { get trams() { return trams; }, TL, TRAM_STOPS, get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
+window.__gridlock = { get HQ() { return HQ; }, eprPhones, teleport, get tankerCars() { return tankerCars; }, get trams() { return trams; }, TL, TRAM_STOPS, get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
   newGame, startLab, setupLesson, makeCar, superpose, collapse, entangle, startMission, bb84, keys, pressed, labFlags: () => labFlags, arcProg: () => arcProg,
   NET, netAttach, faceOpen, TUNNELS, RAMPS, tunT, OVERS, OVRAMPS, ovT, oE, carDeckZ, FISH, FISH_SPOTS, startFishing, castDist, ZONES, CONSOLES, get ATOM_LAB() { return ATOM_LAB; }, grabTow, dropTow, towBase, RB_R, aodOpen, aodToggle, aodShift, aodGo, aodPulse, aodPointer, aodSolved, AOD_LV, get AOD() { return AOD; }, hostSnap, hostNet, joinNet, MAP_ID, geo, LCG, taken, dR, mm, trees, props, FIELDS, STARTS, REG, SITE_PSI, HOSPITALS, POLICE_POSTS, get startSel() { return startSel; }, set startSel(v) { startSel = v; }, get showMap() { return showMap; }, set showMap(v) { showMap = v; } };
 })();
