@@ -2248,10 +2248,12 @@ const TRAM_STOPS = [], TRAM_PORTALS = [];
 for (const R of TL) {
   for (const st of R.stops) {
     const [x, y, h] = tramPt(R, st.s), nx = -Math.sin(h), ny = Math.cos(h); // (the right-hand side: the doors open there)
-    if (TRAM_STOPS.some(o => o.name === st.name && Math.hypot(o.tx - x, o.ty - y) < 40)) continue;
+    const same = TRAM_STOPS.find(o => o.name === st.name && Math.hypot(o.tx - x, o.ty - y) < 40 && Math.cos(o.a - h) > 0.5);
+    if (same) { st.pl = same; continue; }
     let at = null;
     for (let o = 16; o <= 64 && !at; o += 4) { const px = x + nx * o, py = y + ny * o, k = Math.floor(py / T) * MW + Math.floor(px / T); if (px > 0 && py > 0 && px < MW * T && py < MH * T && map[k] === WALK) at = [px, py, k]; }
-    TRAM_STOPS.push({ name: st.name, tx: x, ty: y, x: at ? at[0] : x + nx * 16, y: at ? at[1] : y + ny * 16, a: h });
+    st.pl = { name: st.name, tx: x, ty: y, x: at ? at[0] : x + nx * 16, y: at ? at[1] : y + ny * 16, a: h, R, s: st.s, cap: randi(3, 8), last: -rand(40, 200), spots: null };
+    TRAM_STOPS.push(st.pl);
     if (at) { pedSpot[at[2]] = 2; props.push({ k: 'tramstop', x: at[0], y: at[1], a: h, name: st.name }); }
   }
   for (const [a, b, v] of R.lv) if (v < 0) for (const [s, into] of [[a, 1], [b, -1]]) {
@@ -2317,10 +2319,10 @@ const mm = document.createElement('canvas'); mm.width = MW; mm.height = MH;
 // ============================================================ flow fields (police pathing)
 const fq = new Int32Array(MW * MH);
 // a breadth-first flow field toward (px, py); given the follower's position (cx, cy) it stops a margin past it
-function computeFlowInto(flow, px, py, cx, cy) {
+function computeFlowInto(flow, px, py, cx, cy, water) {
   flow.fill(32767);
   const sx = Math.floor(px / T), sy = Math.floor(py / T);
-  if (solidT(tile(sx, sy))) return;
+  if (water ? tile(sx, sy) !== WATER : solidT(tile(sx, sy))) return;
   let h = 0, t = 0, stop = 32767; const s = sy * MW + sx; flow[s] = 0; fq[t++] = s;
   const ck = cx === undefined ? -1 : Math.floor(cy / T) * MW + Math.floor(cx / T);
   while (h < t) {
@@ -2331,14 +2333,14 @@ function computeFlowInto(flow, px, py, cx, cy) {
       const nx = x + DX[k], ny = y + DY[k];
       if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) continue;
       const j = ny * MW + nx;
-      if (flow[j] > d && !solidT(map[j])) { flow[j] = d; fq[t++] = j; }
+      if (flow[j] > d && (water ? map[j] === WATER : !solidT(map[j]))) { flow[j] = d; fq[t++] = j; }
     }
   }
 }
 const flowAt = (f, tx, ty) => (tx < 0 || ty < 0 || tx >= MW || ty >= MH) ? 32767 : f[ty * MW + tx];
 function los(x0, y0, x1, y1) {
   const d = Math.hypot(x1 - x0, y1 - y0), n = Math.ceil(d / 12);
-  for (let i = 1; i < n; i++) if (solidAt(lerp(x0, x1, i / n), lerp(y0, y1, i / n))) return false;
+  for (let i = 1; i < n; i++) { const x = lerp(x0, x1, i / n), y = lerp(y0, y1, i / n); if (solidAt(x, y) && !seeThrough(x, y)) return false; }
   return true;
 }
 
@@ -2446,6 +2448,7 @@ let keys = { up: 0, down: 0, left: 0, right: 0, fire: 0 }; // (let: in online co
 let pressed = {};
 const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', Space: 'fire' };
 addEventListener('keydown', e => {
+  if (typeof DBG !== 'undefined' && dbgOpen()) return; // (typing into the debug console)
   const k = KEYMAP[e.code];
   if (k) { keys[k] = 1; e.preventDefault(); }
   if (e.code === 'Tab') e.preventDefault();
@@ -2487,6 +2490,10 @@ const CT = {
   dozer:   { label: 'Armoured Bulldozer', w: 28, l: 46, max: 175, acc: 110, turn: 1.6, hp: 2400, mass: 10, colors: ['#d4a017'] },
   tanker:  { label: 'Fuel Tanker',    w: 20, l: 60, max: 200, acc: 90, turn: 1.6, hp: 400, mass: 3.4, colors: ['#e9ecef'] },
   tram:    { label: 'Tram',           w: 16, l: 62, max: 150, acc: 63, turn: 0, hp: 1500, mass: 40, colors: ['#d3202a'] }, // (only the cab you drive: see the trams)
+  speedboat: { label: 'Speedboat',   w: 12, l: 34, max: 330, acc: 150, turn: 2.1, hp: 190, mass: 1.0, colors: ['#f4f4f4', '#1e5aa8', '#c0392b', '#f1c40f', '#1b1b1b'], boat: 'motor' },
+  rowboat: { label: 'Rowing Boat',    w: 9, l: 20, max: 75, acc: 55, turn: 1.9, hp: 80, mass: 0.4, colors: ['#a0522d', '#8b5a2b', '#2e86c1', '#27ae60'], boat: 'row' },
+  sailboat: { label: 'Sailing Dinghy', w: 11, l: 26, max: 150, acc: 50, turn: 1.7, hp: 110, mass: 0.6, colors: ['#f4f4f4', '#e8e0d0', '#1e5aa8'], boat: 'sail' },
+  policeboat: { label: 'Police Boat', w: 14, l: 38, max: 340, acc: 170, turn: 2.1, hp: 360, mass: 1.5, colors: ['#f2f2f2'], boat: 'motor' },
   tractor: { label: 'Tractor',        w: 17, l: 27, max: 150, acc: 120, turn: 2.6, hp: 340, mass: 2.0, colors: ['#2e7d32', '#c62828', '#1565c0', '#e0a800'], offroad: true },
 };
 const CIV_RURAL = ['compact', 'sedan', 'sedan', 'truck', 'truck', 'tractor', 'bike', 'sports', 'taxi'];
@@ -2501,7 +2508,7 @@ const SHIRTS = ['#c0392b', '#2980b9', '#27ae60', '#8e44ad', '#f39c12', '#16a085'
 const SKINS = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
 
 let cars = [], peds = [], bullets = [], parts = [], decals = [], pickups = [];
-let trams = [], tramId = 1; // (inner Brno's trams, see updateTrams)
+let trams = [], tramsFar = [], tramId = 1; // (inner Brno's trams, see updateTrams: near you in full, further off only along their lines)
 let HQ = hqNew(), tankerCars = [], EPR = null; // (wanted levels 6 to 10, see updateWanted)
 let player = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, hp: 100, car: null, weapons: {}, weapon: null, cash: 0, lives: 5, mult: 1,
   anim: 0, moving: false, shootCd: 0, bust: 0, down: 0, downKind: null, hidden: true,
@@ -2612,6 +2619,7 @@ function note(k) {
 // ============================================================ car physics
 function applyControls(c, throttle, steer, hand, dt) {
   const t = CT[c.type];
+  if (t.boat) { boatControls(c, throttle, steer, hand, dt); return; }
   if (c.dead) { throttle = 0; steer = 0; hand = true; }
   // acceleration tapers off toward top speed, so cars build up speed progressively
   if (throttle > 0) c.speed += t.acc * dt * throttle * (c.speed < 0 ? 2.2 : 1 - 0.7 * clamp(c.speed / t.max, 0, 1));
@@ -2651,6 +2659,7 @@ function carCorners(c, x, y, a, pad = 1) {
   return [[hl, hw], [hl, -hw], [-hl, hw], [-hl, -hw], [0, hw], [0, -hw]].map(([lx, ly]) => [x + ca * lx - sa * ly, y + sa * lx + ca * ly]);
 }
 function carHitsWall(c, x, y, a) {
+  if (CT[c.type].boat) return boatHits(c, x, y, a);
   const dz = c.type === 'dozer' && !c.lay && !c.ghost; // (an armoured bulldozer goes through buildings)
   for (const [px, py] of carCorners(c, x, y, a)) if (c.lay ? layerSolid(c, px, py) : dz ? dozerSolid(px, py) : solidAt(px, py)) return true;
   if (c.lay === 1 || c.lay === 3) return false; // (no trees in a tunnel, or up on a deck)
@@ -2714,7 +2723,7 @@ function wallMove(c, dt) {
 }
 function moveCar(c, dt) {
   const impact = wallMove(c, dt);
-  if (TUNNELS.length || OVERS.length) { // the layer the car is on: 0 the street, 1 a tunnel (only down a ramp, 2), 3 an overpass (only up a ramp, 4)
+  if ((TUNNELS.length || OVERS.length) && !CT[c.type].boat) { // the layer the car is on: 0 the street, 1 a tunnel (only down a ramp, 2), 3 an overpass (only up a ramp, 4)
     const k = Math.floor(c.y / T) * MW + Math.floor(c.x / T), tz = tunT[k] || 0, oz = ovT[k] || 0, L0 = c.lay;
     if (tz && !(oz && (L0 === 3 || L0 === 4))) c.lay = L0 === undefined ? (tz === 1 && c.ln && c.ln.L.e.tunnel ? 1 : tz === 2 && rampAligned(c) ? 2 : 0)
       : tz === 2 ? (L0 === 1 || L0 === 2 || rampAligned(c) ? 2 : L0 === 3 || L0 === 4 ? L0 : 0) : L0 === 1 || L0 === 2 ? 1 : L0 === 3 || L0 === 4 ? L0 : 0; // (down a ramp only along it)
@@ -2757,7 +2766,7 @@ function damageCar(c, amt, src) {
   c.hp -= c.driver === 'player' ? amt * 0.7 : amt; // a car you drive holds out longer (about 40% more health)
   if (src === 'player' && c !== player.car) {
     c.lastHit = 'player';
-    if (c.type === 'police' && heatCd <= 0) { addHeat(0.5); heatCd = 1.5; }
+    if ((c.type === 'police' || c.type === 'policeboat') && heatCd <= 0) { addHeat(0.5); heatCd = 1.5; }
   }
   if (c.hp <= 0 && !c.fire) { c.fire = 2.6; ejectDriver(c, true); }
   // entangled twin takes the same hit
@@ -2791,9 +2800,9 @@ function sideSpot(c, k = 0) {
 function explodeCar(c) {
   c.dead = true; c.fire = 0; c.hp = 0; c.speed = 0; c.chase = false; c.job = null; c.block = false;
   if (c.lastHit === 'player') {
-    earn(c.type === 'police' ? 250 : 100);
+    earn(c.type === 'police' || c.type === 'policeboat' ? 250 : 100);
     const heavy = c.type === 'tank' || c.type === 'apc' || c.type === 'dozer' || c.type === 'bureau';
-    addHeat(c.type === 'police' ? 1 : heavy ? 0.6 : 0.35, heavy);
+    addHeat(c.type === 'police' || c.type === 'policeboat' ? 1 : heavy ? 0.6 : 0.35, heavy);
     if (mission && mission.type === 'wreck') { mission.count++; if (mission.count >= mission.need) completeMission(); else msg(`${mission.need - mission.count} more to go.`, 2); }
   }
   if (mission && mission.type === 'steal' && mission.car === c) failMission('The car got torched.');
@@ -2981,6 +2990,7 @@ function navTo(c, gx, gy, sp, dt) {
 // 2 stars, the radio calls in nearby cars and they ram. 3 stars, roadblocks and armed officers.
 // 4 stars, SWAT vans and the helicopter. 5 stars, the tank.
 function aiPolice(c, dt) {
+  if (CT[c.type].boat) { aiBoatCop(c, dt); return; }
   if (c.lay === 1 || c.lay === 3) { aiTraffic(c, dt); return; } // (in a tunnel, or up on an overpass, a cruiser can only drive on through)
   const stars = Math.floor(heat);
   if (c.block) { // part of a roadblock: stay put until the alert is over
@@ -3018,6 +3028,12 @@ function aiPolice(c, dt) {
     }
     else if (stars >= 4 && !swat && !heavy && d < 260 && c.shootCd <= 0) { c.shootCd = 1.3; enemyShot(c.x, c.y, P0.x, P0.y, 9, 0.12); }
   }
+  if (boatOf(tp.car)) { // you're out on the water: to the bank nearest you, and watch (and shoot) from there
+    if (!c.bank || d2(c.bankFor[0], c.bankFor[1], P0.x, P0.y) > 160 * 160) { c.bank = nearOf(P0.x, P0.y, false, 16); c.bankFor = [P0.x, P0.y]; }
+    if (!c.bank) { applyControls(c, 0, 0, true, dt); return; }
+    if (d2(c.x, c.y, c.bank.x, c.bank.y) < 60 * 60) { applyControls(c, 0, 0, true, dt); return; }
+    navTo(c, c.bank.x, c.bank.y, 260, dt); return;
+  }
   if (see && d < 170) {
     if (stars < 2 && tp.car) { // one star: tail you rather than ram you, and pull up behind when you stop
       const pc = tp.car, ps = Math.hypot(pc.vx, pc.vy), ha = ps > 20 ? Math.atan2(pc.vy, pc.vx) : pc.angle;
@@ -3039,6 +3055,7 @@ function aiPolice(c, dt) {
 // roadblock: two cruisers parked across the road ahead of you, with officers holding position behind them
 function placeRoadblock() {
   const P0 = pp(), sp = Math.hypot(P0.vx || 0, P0.vy || 0);
+  if (boatOf(player.car)) return false; // (no roadblocks on the water)
   if (sp < 60) return false;
   const dir = Math.atan2(P0.vy, P0.vx), v = viewRect(0);
   const reach = Math.abs(Math.cos(dir)) * (v.x1 - v.x0) / 2 + Math.abs(Math.sin(dir)) * (v.y1 - v.y0) / 2; // just beyond the screen edge ahead
@@ -3243,7 +3260,8 @@ function updatePed(p, dt) {
     }
   }
   const fleeing = p.flee > 0;
-  if (fleeing) { p.flee -= dt; p.path = null; p.idle = 0; p.wait = null; }
+  if (fleeing) { p.flee -= dt; p.path = null; p.idle = 0; p.wait = null; p.tp = null; }
+  else if (p.tp && platPed(p, dt)) return;
   else if (pedPurpose(p, dt)) return;
   if (p.tx < 0 || Math.abs((p.tx + 0.5) * T - p.x) > T * 1.5 || Math.abs((p.ty + 0.5) * T - p.y) > T * 1.5) {
     p.tx = Math.floor(p.x / T); p.ty = Math.floor(p.y / T);
@@ -3336,7 +3354,9 @@ function pedPurpose(p, dt) {
         const tx = Math.floor(p.x / T), ty = Math.floor(p.y / T);
         for (let d = 0; d < 4; d++) if (tile(tx + DX[d], ty + DY[d]) === BUILD) { p.angle = d * Math.PI / 2; p.entering = 0.7; return true; }
       }
-      if (k === 2) { p.wait = 'bus'; p.idle = 6 + Math.random() * 8; p.angle = -Math.PI / 2; return true; }
+      if (k === 3 && p.tp) { p.tp.k = 'walk'; p.tp.T = 0; return true; } // (at the platform: to a spot on it)
+      if (k === 2) { const pl = TRAM_STOPS.length && !p.cop && !p.target ? platNear(p.x, p.y) : null; if (pl) { p.tp = Object.assign(platSpot(p, pl), { k: 'walk', pl, T: 0 }); return true; }
+        p.wait = 'bus'; p.idle = 6 + Math.random() * 8; p.angle = -Math.PI / 2; return true; }
       p.idle = 1.5 + Math.random() * 4;
       p.chatWith = null;
       for (const o of peds) if (o !== p && !o.dead && !o.cop && d2(o.x, o.y, p.x, p.y) < 40 * 40 && !(o.idle > 0) && !o.vip) {
@@ -3395,7 +3415,7 @@ function copTarget(o) {
 }
 function copNear(x, y, r) {
   for (const p of peds) if (p.cop && !p.dead && d2(p.x, p.y, x, y) < r * r) return true;
-  for (const c of cars) if ((c.type === 'police' || c.type === 'tank' || c.type === 'swat') && c.driver === 'police' && d2(c.x, c.y, x, y) < r * r) return true;
+  for (const c of cars) if ((c.type === 'police' || c.type === 'policeboat' || c.type === 'tank' || c.type === 'swat') && c.driver === 'police' && d2(c.x, c.y, x, y) < r * r) return true;
   return false;
 }
 // does any cop currently have eyes on point (x, y)?
@@ -3403,7 +3423,7 @@ function copSees(x, y) {
   if (player.car && player.car.lay === 1 && d2(player.car.x, player.car.y, x, y) < 40 * 40) return false; // (nobody sees you in a tunnel)
   for (const p of peds) if (p.cop && !p.dead) { const dd = d2(p.x, p.y, x, y); if (dd < 70 * 70 || (dd < 260 * 260 && los(p.x, p.y, x, y))) return true; }
   if (HQ.sweep > 0 || (HQ.drone && HQ.drone.lock && !HQ.drone.fall) || (HQ.blimp && HQ.blimp.see)) return true; // (the sweep, the Bureau's drone, the airship's light)
-  for (const c of cars) if ((c.type === 'police' || c.type === 'tank' || c.type === 'swat' || c.type === 'bureau' || c.type === 'apc' || c.type === 'dozer') && c.driver === 'police') { const dd = d2(c.x, c.y, x, y); if (dd < 70 * 70 || (dd < 300 * 300 && los(c.x, c.y, x, y))) return true; }
+  for (const c of cars) if ((c.type === 'police' || c.type === 'policeboat' || c.type === 'tank' || c.type === 'swat' || c.type === 'bureau' || c.type === 'apc' || c.type === 'dozer') && c.driver === 'police') { const dd = d2(c.x, c.y, x, y); if (dd < 70 * 70 || (dd < 300 * 300 && los(c.x, c.y, x, y))) return true; }
   if (heli && !heli.dead && d2(heli.lx, heli.ly, x, y) < 120 * 120) return true; // the helicopter sees everything under its searchlight
   return false;
 }
@@ -3420,7 +3440,7 @@ function qburst(x, y, color, n = 24) {
 function explode(x, y, r, src) {
   if (NET.guest) NET.ev.push(['boom', x | 0, y | 0, r]);
   if (onScreen(x, y, 200)) { sfx.boom(); shake = 1; }
-  addDecal({ k: 'scorch', x, y, r: r * 0.55 });
+  if (!seeThrough(x, y)) addDecal({ k: 'scorch', x, y, r: r * 0.55 });
   for (let i = 0; i < 30; i++) { const a = rand(TAU), s = rand(30, 220); addPart(x, y, Math.cos(a) * s, Math.sin(a) * s, rand(0.3, 0.8), rand(4, 9), pick(['#ffdf6b', '#ff9c2a', '#ff5a1f', '#fff3b0']), 18); }
   for (let i = 0; i < 16; i++) { const a = rand(TAU), s = rand(10, 70); addPart(x, y, Math.cos(a) * s, Math.sin(a) * s, rand(1.2, 2.4), rand(6, 12), pick(['#444', '#555', '#333']), 14, true); }
   for (const c of cars) {
@@ -3530,11 +3550,12 @@ function entangle() {
   if (!player.car && Math.floor(heat) === 7 && Q.ent > 0 && !lab && tunnelJump()) return;
   const qb = qBlocked(); if (qb) { msg(qb, 2.5); return; }
   const L = Q.link;
-  if (L && !L.dead && cars.includes(L)) { swapWith(L); return; }
+  if (L && !L.dead && cars.includes(L)) { if (boatOf(L) !== boatOf(player.car)) { msg(boatOf(L) ? 'Your twin is a boat: only from a boat can you swap with it.' : 'Your twin is on land: only from a car can you swap with it.', 2.5); return; } swapWith(L); return; }
   if (Q.ent <= 0) { msg('No ε charges. Find an ε pickup.', 2); return; }
   const o = pp(); let c = null, bd = 130 * 130;
-  for (const q of cars) { if (q === player.car || q.dead || q.ghost) continue; const d = d2(q.x, q.y, o.x, o.y); if (d < bd) { bd = d; c = q; } }
-  if (!c) { msg('Get close to a car to entangle with it.', 1.5); return; }
+  const wet = boatOf(player.car); // (a boat swaps places only with a boat, a car or you only with a car)
+  for (const q of cars) { if (q === player.car || q.dead || q.ghost || boatOf(q) !== wet) continue; const d = d2(q.x, q.y, o.x, o.y); if (d < bd) { bd = d; c = q; } }
+  if (!c) { msg(wet ? 'Get close to another boat to entangle with it.' : 'Get close to a car to entangle with it.', 1.5); return; }
   Q.ent--; Q.link = c; Q.linkT = 60; c.linked = true;
   if (c.labGo) { c.driver = 'ai'; c.ln = null; c.labGo = false; }
   qburst(c.x, c.y, '#3cf0ff'); qburst(o.x, o.y, '#3cf0ff'); sfx.quantum();
@@ -3632,6 +3653,18 @@ function fire() {
 function enterExit() {
   if (player.car) {
     const c = player.car;
+    if (boatOf(c)) {
+      if (Math.abs(c.speed) > 45) { msg('Slow down first.', 1.5); return; }
+      const s = boatShore(c);
+      if (!s) { // out on the water: climb across into another boat alongside, if there is one
+        const o = cars.find(q => q !== c && boatOf(q) && !q.dead && !q.fire && !q.driver && d2(q.x, q.y, c.x, c.y) < (CT[q.type].l / 2 + CT[c.type].l / 2 + 14) ** 2);
+        if (o) { c.driver = null; player.car = null; getIn(o, false, true); return; }
+        msg('Steer up to a bank to get out.', 1.5); return;
+      }
+      if (player.tow) dropTow('');
+      player.x = s.x; player.y = s.y; player.angle = Math.atan2(s.y - c.y, s.x - c.x); player.car = null; c.driver = null;
+      boatLanded(); return;
+    }
     if (Math.abs(c.speed) > 90 || (c.tram && Math.abs(c.speed) > 25)) { msg(c.tram ? 'Stop the tram first.' : 'Slow down to bail out!', 1.5); return; }
     if (c.lay === 1) { msg('Not in the tunnel: drive out first.', 1.5); return; }
     if (c.lay === 3) { msg('Not up on the overpass: drive off it first.', 1.5); return; }
@@ -3646,7 +3679,8 @@ function enterExit() {
   let bestC = null, bd = 42 * 42;
   for (const c of cars) {
     if (c.dead || c.fire > 0 || c.lay === 1 || c.lay === 3 || c.heldBy) continue;
-    const d = d2(c.x, c.y, player.x, player.y);
+    const bt = boatOf(c); if (bt && c.driver) continue; // (a boat is boarded from the bank, empty)
+    const d = d2(c.x, c.y, player.x, player.y) - (bt ? 900 : 0); // (it lies off the bank: a longer reach)
     if (d < bd) { bd = d; bestC = c; }
   }
   const tc = trams.length ? tramCabNear(player.x, player.y) : null; // (or a tram's cab, up at its front)
@@ -3655,7 +3689,7 @@ function enterExit() {
   const c = bestC, t = CT[c.type];
   // getting in takes a moment: walk round to the driver's door (or the other one, if that side is blocked), open it, drag
   // out whoever is at the wheel, climb in. Bikes, tanks and tractors are open: straight on
-  const side = t.bike || c.type === 'tank' || c.type === 'tractor' || c.twin ? 0 : [-1, 1].find(sd => { const ca = Math.cos(c.angle), sa = Math.sin(c.angle), ly = sd * (t.w / 2 + 8);
+  const side = t.bike || t.boat || c.type === 'tank' || c.type === 'tractor' || c.twin ? 0 : [-1, 1].find(sd => { const ca = Math.cos(c.angle), sa = Math.sin(c.angle), ly = sd * (t.w / 2 + 8);
     return !circleSolid(c.x + ca * t.l * 0.02 - sa * ly, c.y + sa * t.l * 0.02 + ca * ly, 5); }) || 0;
   if (!side) { getIn(c); return; }
   player.jack = { c, side, ph: 'walk', t: 0 }; c.jackHold = true; // (a driver at the wheel brakes and waits)
@@ -3706,14 +3740,19 @@ function pullOut(c, x, y) {
   return p;
 }
 // in the driver's seat at last (jacked: its driver was dragged out already)
-function getIn(c, jacked) {
+function getIn(c, jacked, across) {
+  if (CT[c.type].boat) { // (from the bank: remember where you put out; climbing across from another boat it stays)
+    if (!across) player.putOut = { x: player.x, y: player.y };
+    if (!c.toldBoat) msg(c.type === 'sailboat' ? `A dinghy: the wind drives it (the red pennant shows where to), never straight into it. ${touchOn() ? '⇄' : 'Enter'} at a bank gets you out.` : `${CT[c.type].label}: ${touchOn() ? '▲ ▼' : '↑ ↓'} throttle and reverse. ${touchOn() ? '⇄' : 'Enter'} at a bank gets you out.`, 4);
+    c.toldBoat = true;
+  }
   if (c.driver && c.driver !== 'player') {
     const wasCop = c.driver === 'police';
     const p = ejectDriver(c, false);
     if (p && !wasCop) { p.flee = 6; p.fx = player.x; p.fy = player.y; }
     if (copNear(c.x, c.y, 380) || wasCop) addHeat(wasCop ? 1.2 : 0.6);
     msg(wasCop ? 'You jacked a cop car. Bold.' : `Carjacked a ${CT[c.type].label}!`, 2);
-  } else if (c.type === 'police' && !jacked) addHeat(1);
+  } else if ((c.type === 'police' || c.type === 'policeboat') && !jacked) addHeat(1);
   c.driver = 'player'; player.car = c; c.parked = false; c.job = null; c.chase = false; c.block = false; c.recall = false; c.ln = null; // (its last driver's lane is no longer its)
   if (c.type === 'ambulance' && player.hp < 100) { player.hp = 100; msg('Ambulance first-aid kit: health restored.', 2); }
   if (c.type === 'tank') msg('TANK! Space fires the cannon.', 3);
@@ -3979,7 +4018,7 @@ function faceOpen(x, y) {
 function respawn() {
   if (lab) { player.down = 0; setupLesson(lab.i); return; }
   const where = nearestOf(player.downKind === 'busted' ? POLICE_POSTS : HOSPITALS, player.x, player.y);
-  player.down = 0; player.hp = 100; player.bust = 0; player.car = null; player.fish = null; HQ = hqNew(); tankerCars = [];
+  player.down = 0; player.hp = 100; player.bust = 0; player.car = null; player.fish = null; player.putOut = null; HQ = hqNew(); tankerCars = [];
   player.x = where.x; player.y = where.y; player.angle = faceOpen(where.x, where.y);
   heat = 0; player.mult = Math.max(1, player.mult - 1);
   if (player.lives <= 0) { if (player.isGuest) { player.lives = 5; player.cash = Math.floor(player.cash / 2); msg('Out of lives: half your cash for five more.', 4); } else { state = 'over'; saveBest(); } }
@@ -4015,6 +4054,7 @@ function updatePlayer(dt) {
   }
   if (hit('KeyQ', 'Tab')) { cycleWeapon(); msg(player.weapon ? WEAPONS[player.weapon].name : 'Fists', 1.2); }
   if (player.car && player.car.tram) { if (hit('KeyX') || hit('KeyT') || hit('KeyG')) msg('A tram keeps to its rails: no quantum tricks aboard, and no tweezer.', 2); }
+  else if (boatOf(player.car)) { if (hit('KeyX') || hit('KeyG')) msg('Out on the water the waves keep measuring you: no superposition, and no tweezer. (T still entangles you with another boat.)', 3); if (hit('KeyT')) entangle(); }
   else {
     if (hit('KeyX')) superpose();
     if (hit('KeyT')) entangle();
@@ -4043,9 +4083,9 @@ function updatePlayer(dt) {
   }
   if (heat >= 1) {
     if (!player.car) {
-      for (const c of cars) if (c.type === 'police' && c.driver === 'police' && Math.abs(c.speed) < 40 && d2(c.x, c.y, player.x, player.y) < 30 * 30) player.bust += dt;
+      for (const c of cars) if ((c.type === 'police' || c.type === 'policeboat') && c.driver === 'police' && Math.abs(c.speed) < 40 && d2(c.x, c.y, player.x, player.y) < 30 * 30) player.bust += dt;
     } else if (Math.abs(player.car.speed) < 25) {
-      for (const c of cars) if (c.type === 'police' && c.driver === 'police' && d2(c.x, c.y, player.x, player.y) < 42 * 42) player.bust += dt * 0.6;
+      for (const c of cars) if ((c.type === 'police' || c.type === 'policeboat') && c.driver === 'police' && d2(c.x, c.y, player.x, player.y) < 42 * 42) player.bust += dt * 0.6;
     }
   }
   player.bust = Math.max(0, player.bust - dt * 0.5);
@@ -4140,7 +4180,7 @@ function updateBullets(dt) {
     for (let s = 0; s < 3 && !done; s++) {
       b.x += b.vx * dt / 3; b.y += b.vy * dt / 3;
       if (b.rocket && Math.random() < 0.5) addPart(b.x, b.y, rand(-15, 15), rand(-15, 15), 0.6, 3, '#aaa', 8, true);
-      if (solidAt(b.x, b.y)) { done = true; if (!b.rocket) for (let k = 0; k < 3; k++) addPart(b.x, b.y, rand(-60, 60), rand(-60, 60), 0.2, 1.5, '#ffe08a'); break; }
+      if (solidAt(b.x, b.y) && !seeThrough(b.x, b.y)) { done = true; if (!b.rocket) for (let k = 0; k < 3; k++) addPart(b.x, b.y, rand(-60, 60), rand(-60, 60), 0.2, 1.5, '#ffe08a'); break; }
       for (const c of cars) {
         if ((c.dead && !b.rocket) || c.lay === 1) continue;
         if ((b.owner === 'player' && c === player.car) || b.shooter === c) continue;
@@ -4600,7 +4640,7 @@ function manageSpawns(dt) {
     const cop = Math.random() < (city ? 0.07 : 0.04);
     spawnTraffic(cop ? 'police' : pick(city ? CIV : CIV_RURAL), cop ? 'police' : 'ai');
   }
-  if (peds.filter(p => !p.dead).length < (city ? 55 : town ? 34 : 6)) {
+  if (peds.filter(p => !p.dead && !p.tp).length < (city ? 55 : town ? 34 : 6)) {
     let p = null;
     if (Math.random() < 0.35) { // someone comes out of a building
       for (let i = 0; i < 20 && !p; i++) {
@@ -4614,7 +4654,9 @@ function manageSpawns(dt) {
   if (heat >= 1 && policeCd <= 0 && !player.down) {
     const stars = Math.floor(heat), n = t => cars.filter(c => c.type === t && c.driver === 'police' && c.chase && !c.block).length;
     let c = null;
-    if (stars >= 9 && n('dozer') < 2) { c = spawnTraffic('dozer', 'police'); if (c) msg('An armoured bulldozer is coming for you.', 2.5); }
+    if (boatOf(player.car) && n('policeboat') < (stars >= 4 ? 3 : 2)) { c = spawnBoat('policeboat', 'police'); if (c) msg('A police boat is coming for you.', 2); }
+    else if (boatOf(player.car)) c = null;
+    else if (stars >= 9 && n('dozer') < 2) { c = spawnTraffic('dozer', 'police'); if (c) msg('An armoured bulldozer is coming for you.', 2.5); }
     else if (stars >= 7 && n('apc') < (stars >= 8 ? 3 : 2)) { c = spawnTraffic('apc', 'police'); if (c) msg('An armoured carrier joins the hunt.', 2.5); }
     else if (stars >= 6 && n('bureau') < 2) { c = spawnTraffic('bureau', 'police'); if (c) msg('A Measurement Bureau van: its detector collapses X and T.', 3); }
     else if (stars >= 5 && n('tank') < 1) { c = spawnTraffic('tank', 'police'); if (c) msg('They sent a TANK.', 3); }
@@ -4623,6 +4665,7 @@ function manageSpawns(dt) {
     if (c) { c.chase = true; c.ai.cruise = 130; }
     policeCd = stars >= 3 ? 2.2 : 3.5;
   }
+  if (cars.filter(c => c.driver === 'boat').length < 3 && Math.random() < 0.2) { const b = spawnBoat(pick(['speedboat', 'sailboat', 'sailboat', 'rowboat']), 'boat'); if (b) b.ai.cruise = rand(110, 160); }
   // roadblocks ahead of you from three stars
   rbCd -= 0.25;
   if (heat >= 3 && player.car && !player.down && rbCd <= 0 && cars.filter(c => c.block).length < (heat >= 4 ? 4 : 2)) rbCd = placeRoadblock() ? (heat >= 4 ? 9 : 13) : 2;
@@ -4631,17 +4674,19 @@ function manageSpawns(dt) {
 // and are tidied away again once you are far off and nobody has touched them
 function placeParked() {
   for (const s of parkSpots) { s.c = null; s.tried = false; }
+  for (const s of BOAT_SPOTS) { s.c = null; s.tried = false; }
   for (const f of fixedParked) { const c = makeCar(f.type, f.x, f.y, f.a, null); c.parked = true; }
 }
 function fillSpots(force) {
   const near = viewRect(900), vis = viewRect(60), farS = viewRect(1300);
   const inR = (o, r) => o.x > r.x0 && o.x < r.x1 && o.y > r.y0 && o.y < r.y1;
-  for (const sp of parkSpots) {
+  for (const spots of [parkSpots, BOAT_SPOTS]) for (const sp of spots) {
     if (sp.c) { if (!inR(sp, farS) && (sp.c.moved || sp.c.dead || sp.c.driver !== null || !cars.includes(sp.c))) { sp.c = null; sp.tried = false; } continue; }
     if (sp.tried || !inR(sp, near) || (!force && inR(sp, vis))) continue;
     sp.tried = true;
-    if (Math.random() < 0.55 && !cars.some(c => d2(c.x, c.y, sp.x, sp.y) < 20 * 20)) {
-      const c = makeCar(pick(['compact', 'sedan', 'sedan', 'sports', 'taxi']), sp.x, sp.y, sp.a, null);
+    if (Math.random() < (sp.boat ? 0.8 : 0.55) && !cars.some(c => d2(c.x, c.y, sp.x, sp.y) < 20 * 20)) {
+      const c = makeCar(sp.type || pick(['compact', 'sedan', 'sedan', 'sports', 'taxi']), sp.x, sp.y, sp.a, null);
+      if (sp.color) c.color = sp.color;
       c.parked = true; c.spot = sp; sp.c = c;
     }
   }
@@ -4776,14 +4821,53 @@ function tramClear(R, s0, s1) {
   return true;
 }
 function initTrams() {
-  trams = [];
+  trams = []; tramsFar = [];
   for (const R of TL) {
     R.spawnT = rand(0, TRAM_GAP / 70);
-    for (let s = 230 + rand(0, TRAM_GAP); s < R.len - 30; s += TRAM_GAP * rand(0.8, 1.2)) {
-      const t = newTram(R, s);
-      if (tramClear(R, s - t.len - 20, s + 20)) trams.push(t);
+    for (let s = 230 + rand(0, TRAM_GAP); s < R.len - 30; s += TRAM_GAP * rand(0.8, 1.2)) tramsFar.push(newTram(R, s));
+  }
+}
+// Only the trams in your sector (round your view, and your friend's) are simulated in full: lights, stops, whatever
+// is on the track. The others run on along their lines at a tram's average pace (stops and lights included) and are
+// put on the track in full as they come into the sector, where it is clear.
+const TRAM_VAVG = 58; // px/s (what the full simulation averages round the centre)
+const TRAM_IN = 900, TRAM_OUT = 1250; // px round the view: into the full simulation, and out of it again
+function tramSectors(m) { return allCams().map(c => viewRect(m, c)); }
+const inRects = (rs, x, y) => rs.some(v => x > v.x0 && x < v.x1 && y > v.y0 && y < v.y1);
+// is a tram's track free of the trams already simulated, where it would stand?
+function tramFree(t) {
+  for (const o of trams) {
+    if (Math.abs(o.x - t.x) > 420 || Math.abs(o.y - t.y) > 420) continue;
+    for (const S of t.sec) for (const Q of o.sec) {
+      if ((S.lv < 0) !== (Q.lv < 0)) continue;
+      const ca = Math.cos(S.a) * S.l / 2, sa = Math.sin(S.a) * S.l / 2, cb = Math.cos(Q.a) * Q.l / 2, sb = Math.sin(Q.a) * Q.l / 2;
+      if (segSegD([S.x + ca, S.y + sa], [S.x - ca, S.y - sa], [Q.x + cb, Q.y + sb], [Q.x - cb, Q.y - sb]) < TRAM_W + 2) return false;
     }
   }
+  return true;
+}
+function updateFarTrams(dt) {
+  const into = tramSectors(TRAM_IN), seen = tramSectors(40);
+  for (const t of tramsFar) {
+    const R = t.R;
+    if (!t.hold) t.s += TRAM_VAVG * dt;
+    if (t.s > R.len) {
+      if (R.next.length) { t.prev = R; t.R = TL[pick(R.next)]; t.s -= R.len; }
+      else { t.gone = true; continue; } // (out over the map's edge, or into the depot at the terminus)
+    }
+    if (t.prev && t.s > t.len + 10) t.prev = null;
+    if ((t.chk = (t.chk || 0) - dt) > 0) continue;
+    t.chk = 0.25;
+    const [x, y] = tramAt(t, t.s - 30); t.x = x; t.y = y;
+    if (!inRects(into, x, y)) { t.hold = false; continue; }
+    placeTram(t);
+    if (!tramFree(t)) { if (t.hold && inRects(seen, x, y)) t.gone = true; else t.hold = true; continue; } // (wait out of sight for the track to clear)
+    tramIdx(t); t.hold = false; t.dwell = 0; t.wait = 0; t.blockBy = null; t.endT = 0; t.pax = null;
+    const k = Math.round(t.s / 8); t.v = Math.min(TRAM_V * 0.75, k >= 0 && k < R.vmax.length ? R.vmax[k] : TRAM_V);
+    t.real = true; trams.push(t);
+  }
+  tramsFar = tramsFar.filter(t => !t.gone && !t.real);
+  for (const t of trams) t.real = false;
 }
 // the capsules (axis and radius) of what might be on a tram's track, for its look ahead and for the cars' look ahead
 function capsOf(o) {
@@ -4832,8 +4916,11 @@ function updateTrams(dt, active) {
     if (!R.edgeIn && onScreen(x, y, 300)) { R.spawnT = 4; continue; }
     const t = newTram(R, 0);
     t.s = t.len + 2; tramIdx(t); placeTram(t);
-    if (tramClear(R, 0, t.len + 60)) { trams.push(t); R.spawnT = TRAM_GAP / 70 * rand(0.8, 1.2); } else R.spawnT = 5;
+    if (!inRects(tramSectors(TRAM_IN), x, y)) { tramsFar.push(t); R.spawnT = TRAM_GAP / 70 * rand(0.8, 1.2); }
+    else if (tramClear(R, 0, t.len + 60)) { trams.push(t); R.spawnT = TRAM_GAP / 70 * rand(0.8, 1.2); } else R.spawnT = 5;
   }
+  updateFarTrams(dt);
+  const outer = tramSectors(TRAM_OUT);
   const vs = allCams().map(c => viewRect(700, c)), near = o => vs.some(v => o.x > v.x0 && o.x < v.x1 && o.y > v.y0 && o.y < v.y1);
   const caps = []; // what is on the street near you: the cars, the people, you
   for (const c of active) if (c.lay !== 1 && c.lay !== 3) caps.push(...capsOf(c));
@@ -4867,13 +4954,10 @@ function updateTrams(dt, active) {
         if (t.dwell > 0) {
           t.dwell -= dt; target = 0; t.v = 0;
           t.doors = t.dwell > 0.8 ? Math.min(1, t.doors + dt * 2) : Math.max(0, t.doors - dt * 1.5);
-          if (isNear && t.dwell > 1.5 && Math.random() < dt * 1.5) for (const p of peds) if (p.wait === 'bus' && !p.gone && d2(p.x, p.y, t.x, t.y) < 130 * 130) { p.gone = true; break; }
-          if (isNear && t.dwell > 2 && Math.random() < dt * 0.4 && peds.length < 90) { // (someone gets off)
-            const S = pick(t.sec), nx = -Math.sin(S.a), ny = Math.cos(S.a), x = S.x + nx * (TRAM_W / 2 + 7), y = S.y + ny * (TRAM_W / 2 + 7);
-            if (!circleSolid(x, y, 4)) { const p = makePed(x, y); p.angle = Math.atan2(ny, nx); }
-          }
-          if (t.dwell <= 0) { t.si++; tramBell(t); t.wait = 0; }
-        } else if (d < 3 && t.v < 12) { t.dwell = rand(6, 11); t.v = 0; target = 0; }
+          t.dT = (t.dT || 0) + dt;
+          if (isNear) tramPax(t, st, dt);
+          if (t.dwell <= 0) { t.si++; tramBell(t); t.wait = 0; t.pax = null; if (st.pl) st.pl.last = time; }
+        } else if (d < 3 && t.v < 12) { t.dwell = rand(4.5, 7); t.dT = 0; t.v = 0; target = 0; }
         else if (d < -12) t.si++;
         else target = Math.min(target, Math.sqrt(2 * TRAM_BRK * Math.max(0, d - 1)));
       }
@@ -4923,8 +5007,11 @@ function updateTrams(dt, active) {
     if (!t.cab && (t.left || t.dead || (!R.next.length && !R.edgeOut && t.s >= R.len - 4))) { t.endT += dt; if (t.endT > 12 && !near(t) && !t.fire) t.gone = true; }
     placeTram(t);
     if (isNear) tramCollide(t, active, dt);
+    if (!t.cab && !inRects(outer, t.x, t.y)) { t.gone = true; if (!t.dead && !t.left && !t.fire) { t.chk = 0; t.hold = false; t.dwell = 0; tramsFar.push(t); } }
   }
   trams = trams.filter(t => !t.gone);
+  for (const t of tramsFar) t.gone = false;
+  updatePlatforms(dt);
 }
 // what a tram runs into is pushed out of its way: cars bounce off (and get dented), people are knocked down
 function tramCollide(t, active, dt) {
@@ -4963,12 +5050,12 @@ function tramCollide(t, active, dt) {
       const dx = p.x - S.x, dy = p.y - S.y; if (dx * dx + dy * dy > (hl + 8) ** 2) return;
       const lx = dx * ca + dy * sa, ly = -dx * sa + dy * ca; if (Math.abs(lx) > hl + 3 || Math.abs(ly) > hw + 4) return;
       const fast = Math.abs(t.v) > 45;
-      if (fast && !isPlayer) { killPed(p, src); if (onScreen(p.x, p.y)) sfx.splat(); }
+      if (fast && !isPlayer) { if (Math.abs(ly) < hw + 1.5) { killPed(p, src); if (onScreen(p.x, p.y)) sfx.splat(); } } // (only whom it really hits: those beside it are pushed aside)
       else if (fast) hurtPlayer(Math.abs(t.v) * 0.3);
       const side = Math.sign(ly) || 1, nx = p.x - sa * side * (hw + 5 - Math.abs(ly)) * 1, ny = p.y + ca * side * (hw + 5 - Math.abs(ly));
       if (!circleSolid(nx, ny, 3)) { p.x = nx; p.y = ny; }
     };
-    for (const p of peds) if (!p.dead && !p.held) knock(p, false);
+    for (const p of peds) if (!p.dead && !p.held && !(p.tp && (p.tp.k === 'board' || p.tp.k === 'off') && Math.abs(t.v) < 5)) knock(p, false); // (not those at its doors)
     if (!player.car && !player.hidden && !player.down) knock(player, true);
   }
   if (t.cab) for (const o of trams) { // (you can ram another tram, too)
@@ -5036,6 +5123,114 @@ function boardTram(t) {
 }
 // ---- drawing: each section's roof seen from above, its sides' windows, the joints' bellows, a pantograph on the
 // middle section, the line's number up front; the doors on the right open at the stops
+// the doors on a stopped tram's right-hand side: [x, y, outward x, outward y] (as drawn: two on a long section, one on a short)
+function tramDoors(t) {
+  const D = [];
+  for (const S of t.sec) {
+    if (S.lv) continue;
+    const ca = Math.cos(S.a), sa = Math.sin(S.a), nd = S.l >= 60 ? 2 : 1;
+    for (let i = 0; i < nd; i++) { const dx = nd === 1 ? 0 : (i ? S.l * 0.24 : -S.l * 0.24); D.push([S.x + ca * dx - sa * (TRAM_W / 2 + 3), S.y + sa * dx + ca * (TRAM_W / 2 + 3), -sa, ca]); }
+  }
+  return D;
+}
+function tramPax(t, st, dt) {
+  const pl = st.pl; if (!pl || t.cab) return;
+  if (!t.pax || t.pax.st !== st) t.pax = { st, off: Math.random() < 0.3 ? 0 : randi(1, Math.min(6, pl.cap)), offT: 0.3, on: false };
+  const X = t.pax; if (t.doors < 0.9) return; // (the doors open first)
+  const D = tramDoors(t); if (!D.length) return;
+  X.offT -= dt;
+  if (X.off > 0 && X.offT <= 0) { // someone steps off and onto the platform
+    X.off--; X.offT = rand(0.25, 0.7);
+    const [x, y, ox, oy] = pick(D);
+    if (peds.length < 140 && !circleSolid(x + ox * 6, y + oy * 6, 3)) { const p = makePed(x, y); p.angle = Math.atan2(oy, ox); p.tp = { k: 'off', pl, x: x + ox * rand(16, 26) + oy * rand(-8, 8), y: y + oy * rand(16, 26) - ox * rand(-8, 8), T: 0 }; }
+  }
+  if (!X.on && (X.off <= 0 || t.dT > 3)) { // and those waiting get on, each at the door nearest them
+    X.on = true;
+    for (const p of peds) if (p.tp && p.tp.pl === pl && (p.tp.k === 'wait' || p.tp.k === 'walk') && !p.dead && !p.gone) {
+      let bi = -1, bd = 220 * 220; D.forEach((q, i) => { const dd = d2(q[0], q[1], p.x, p.y); if (dd < bd) { bd = dd; bi = i; } });
+      if (bi >= 0) Object.assign(p.tp, { k: 'board', t, door: bi, T: 0 });
+    }
+  }
+  const busy = X.off > 0 || peds.some(p => p.tp && p.tp.k === 'board' && p.tp.t === t && !p.gone && !p.dead);
+  if (busy && t.dT < 25) t.dwell = Math.max(t.dwell, 1.2);
+}
+// the people on a platform: where they stand (along where the tram will stop, on the pavement beside the track)
+function platSpots(pl) {
+  pl.spots = [];
+  for (let s = pl.s - 130; s <= pl.s - 4; s += 9) {
+    const [x, y, h] = tramPt(pl.R, s), nx = -Math.sin(h), ny = Math.cos(h);
+    for (let o = 22; o <= 50; o += 3) { // (clear of the tram's side, by a step)
+      const px = x + nx * o, py = y + ny * o, tt = tileAtP(px, py);
+      if ((tt === WALK || tt === PLAZA) && !circleSolid(px, py, 4)) { pl.spots.push({ x: px, y: py, a: Math.atan2(-ny, -nx) }); break; }
+    }
+  }
+}
+const platNear = (x, y) => TRAM_STOPS.find(pl => d2(pl.x, pl.y, x, y) < 60 * 60);
+function platSpot(p, pl) { if (!pl.spots) platSpots(pl); const s = pl.spots.length ? pick(pl.spots) : { x: pl.x, y: pl.y, a: pl.a + Math.PI / 2 }, j = rand(-4, 4); return { x: s.x - Math.sin(s.a) * j, y: s.y + Math.cos(s.a) * j, a: s.a }; } // (spread along the platform, not toward the track)
+// keep each platform near you peopled: more the longer since the last tram (up to what the stop gets), newcomers out of
+// sight standing there already, in sight walking up from the street
+let platT = 0;
+function updatePlatforms(dt) {
+  if ((platT -= dt) > 0 || !TRAM_STOPS.length) return;
+  platT = 0.5;
+  const near = tramSectors(450), vis = tramSectors(30);
+  let n = peds.length;
+  for (const pl of TRAM_STOPS) {
+    if (!inRects(near, pl.x, pl.y)) continue;
+    if (!pl.spots) platSpots(pl);
+    if (!pl.spots.length) continue;
+    let w = 0; for (const p of peds) if (p.tp && p.tp.pl === pl && !p.dead && !p.gone && p.tp.k !== 'off') w++;
+    if (w >= Math.min(pl.cap, 1 + Math.floor((time - pl.last) / 12)) || n > 130) continue;
+    const s = platSpot(null, pl);
+    if (!inRects(vis, s.x, s.y)) { const p = makePed(s.x, s.y); p.angle = s.a; p.tp = { k: 'wait', pl, x: s.x, y: s.y, a: s.a }; n++; continue; }
+    if (Math.random() > 0.35) continue;
+    let q = null, qd = 320 * 320; // (someone in the street nearby heads for the stop)
+    for (const p of peds) if (!p.dead && !p.cop && !p.target && !p.vip && !p.tp && !p.car && !p.held && !(p.flee > 0) && !(p.idle > 0)) { const dd = d2(p.x, p.y, s.x, s.y); if (dd < qd) { qd = dd; q = p; } }
+    if (q && pedGo(q, s.x, s.y)) q.tp = { k: 'go', pl, x: s.x, y: s.y, a: s.a };
+  }
+}
+// a path over the pavements and crossings to the tile of (x, y), or false
+function pedGo(p, x, y) {
+  const sx = Math.floor(p.x / T), sy = Math.floor(p.y / T), g = Math.floor(y / T) * MW + Math.floor(x / T);
+  if (!pedWalk(sx, sy)) return false;
+  const st = ++bfsStamp, s0 = sy * MW + sx; let h = 0, tl = 0; bfsQ[tl++] = s0; bfsSeen[s0] = st; bfsPrev[s0] = -1; bfsD[s0] = 0;
+  while (h < tl && bfsSeen[g] !== st) {
+    const i = bfsQ[h++], d = bfsD[i]; if (d >= 45) continue;
+    const cx = i % MW, cy = (i / MW) | 0;
+    for (let k = 0; k < 4; k++) { const nx = cx + DX[k], ny = cy + DY[k], j = ny * MW + nx; if (nx < 0 || ny < 0 || nx >= MW || ny >= MH || bfsSeen[j] === st || !(pedWalk(nx, ny) || j === g)) continue; bfsSeen[j] = st; bfsPrev[j] = i; bfsD[j] = d + 1; bfsQ[tl++] = j; }
+  }
+  if (bfsSeen[g] !== st) return false;
+  const path = []; for (let i = g; i !== s0 && i >= 0; i = bfsPrev[i]) path.push(i);
+  path.reverse(); p.path = path; p.pi = 0; p.goalKind = 3; p.idle = 0; p.wait = null; p.chatWith = null;
+  return true;
+}
+// a passenger: walking to a spot on the platform, waiting there (facing the track), to a door and in, or off and away
+function platPed(p, dt) {
+  const tp = p.tp;
+  if (tp.k === 'go') return false; // (on the way there: the path does it)
+  if (tp.k === 'wait') { p.moving = false; p.angle += wrapA(tp.a - p.angle) * Math.min(1, dt * 3); if (Math.random() < dt / 300) p.tp = null; return true; }
+  let gx = tp.x, gy = tp.y;
+  if (tp.k === 'board') {
+    const t = tp.t, D = t && !t.dead && t.dwell > 0 && trams.includes(t) ? tramDoors(t) : null;
+    if (!D || !D[tp.door]) { Object.assign(tp, platSpot(p, tp.pl), { k: 'walk', T: 0 }); return true; } // (missed it: back to wait for the next)
+    gx = D[tp.door][0]; gy = D[tp.door][1];
+  }
+  const dx = gx - p.x, dy = gy - p.y, d = Math.hypot(dx, dy);
+  if (d < 3) {
+    if (tp.k === 'board') p.gone = true; // (aboard)
+    else if (tp.k === 'off') { p.tp = null; p.path = null; p.planCd = 0; p.tx = -1; } // (and off about their business)
+    else { tp.k = 'wait'; if (tp.a === undefined) tp.a = p.angle; }
+    return true;
+  }
+  const sp = p.speed * (tp.k === 'board' ? 1.7 : 1.2), m = Math.min(d, sp * dt);
+  const px = p.x, py = p.y; moveFree(p, dx / d * m / dt, dy / d * m / dt, dt, 3);
+  p.angle = Math.atan2(dy, dx); p.moving = true; p.anim += dt * 10;
+  tp.T = (tp.T || 0) + dt;
+  if (tp.T > 9 || (Math.abs(p.x - px) + Math.abs(p.y - py) < 0.01 && tp.T > 2)) { // (stuck: give up)
+    if (tp.k === 'board') p.gone = true; else if (tp.k === 'walk') { tp.k = 'wait'; tp.a = tp.a ?? p.angle; } else p.tp = null;
+  }
+  return true;
+}
 function drawTramSec(t, S, k) {
   const m = t.m, l = S.l, w = TRAM_W, n = t.sec.length, end = k === 0 || k === n - 1;
   // where it runs into a tunnel, only the part still outside shows
@@ -5111,6 +5306,264 @@ function drawTrams(v, up) {
     ctx.restore();
   }
 }
+// ============================================================ boats
+// On the reservoir, and on the island's sea, lakes and river. The boats moored along the banks, and those anchored out
+// on the water, can be taken like any car (Enter by one, from the bank); Enter at a bank gets you out, and out on the
+// water Enter by another boat climbs across. A boat glides and drifts, a dinghy goes by the wind (never straight into
+// it), and only water carries a boat. The police come after you in boats of their own, from the banks they shoot
+// across the water, and at ★7 crossing the water to land unseen, far from where you put out, loses the army.
+const BOAT_D = 2400; // px from where you put out to where you land, for the ★7 way out across the water
+const BIG_WATER = 300; // tiles: a body of water this big has boats on it
+let WIND = rand(TAU); // where the wind blows to (it veers slowly)
+const boatOf = c => !!(c && CT[c.type] && CT[c.type].boat);
+const seeThrough = (x, y) => tileAtP(x, y) === WATER; // (water hides nothing: looks and shots carry across it)
+// each tile's body of water (0: dry land) and each body's size (not on the map's very edge: a boat can't leave the map,
+// and the detailed map's outermost row is water where its land runs out)
+const WB = new Uint16Array(MW * MH), WBN = [0];
+for (let k0 = 0; k0 < MW * MH && WBN.length < 65000; k0++) {
+  if (map[k0] !== WATER || WB[k0] || k0 < MW || k0 >= MW * (MH - 1) || k0 % MW === 0 || k0 % MW === MW - 1) continue;
+  const id = WBN.length, st = [k0]; WB[k0] = id; let n = 0;
+  while (st.length) {
+    const i = st.pop(), x = i % MW, y = (i / MW) | 0; n++;
+    for (let d = 0; d < 4; d++) { const nx = x + DX[d], ny = y + DY[d], j = ny * MW + nx; if (nx > 0 && ny > 0 && nx < MW - 1 && ny < MH - 1 && map[j] === WATER && !WB[j]) { WB[j] = id; st.push(j); } }
+  }
+  WBN.push(n);
+}
+const wbAt = (x, y) => { const tx = Math.floor(x / T), ty = Math.floor(y / T); return tx < 0 || ty < 0 || tx >= MW || ty >= MH ? 0 : WB[ty * MW + tx]; };
+// the jetties stand out over the water: a boat goes round them
+const JETTIES = [];
+for (const p of props) {
+  if (p.k !== 'jetty') continue;
+  if (p.w) JETTIES.push({ x0: p.x - 3, y0: p.y - 3, x1: p.x + p.w * T + 3, y1: p.y + p.h * T + 3 });
+  else { const ax = p.x + Math.cos(p.a) * 4, ay = p.y + Math.sin(p.a) * 4, bx = p.x + Math.cos(p.a) * 44, by = p.y + Math.sin(p.a) * 44; JETTIES.push({ ax, ay, bx, by, x0: Math.min(ax, bx) - 12, y0: Math.min(ay, by) - 12, x1: Math.max(ax, bx) + 12, y1: Math.max(ay, by) + 12 }); }
+}
+const boatSolid = (x, y) => {
+  if (!wbAt(x, y)) return true;
+  for (const j of JETTIES) if (x > j.x0 && x < j.x1 && y > j.y0 && y < j.y1 && (j.ax === undefined || segPtD(x, y, j.ax, j.ay, j.bx, j.by) < 10)) return true;
+  return false;
+};
+function boatHits(c, x, y, a) { for (const [px, py] of carCorners(c, x, y, a)) if (boatSolid(px, py)) return true; return false; }
+// where the boats are: the ones that were drawn out on the water, and more moored along the banks (thicker by the
+// harbours and the fishing jetties); each is put there when you come near, like the cars in the parking bays
+const BOAT_SPOTS = [];
+{
+  const fits = (type, x, y, a) => boatHits({ type }, x, y, a) ? null : { x, y, a, type, boat: true };
+  for (let i = props.length - 1; i >= 0; i--) {
+    const p = props[i]; if (p.k !== 'boat') continue;
+    props.splice(i, 1);
+    const s = fits(p.row ? 'rowboat' : srnd() < 0.3 ? 'sailboat' : 'speedboat', p.x, p.y, p.a);
+    if (s) { s.color = p.row ? null : p.c; BOAT_SPOTS.push(s); }
+  }
+  const open = openTiles(), busy = BRNO ? [HARBOUR, ...FISH_SPOTS.filter(f => f.w === 'l').map(f => [f.x / T, f.y / T])] : [[87.4, 117], ...FISH_SPOTS.filter(f => f.w !== 'r').map(f => [f.x / T, f.y / T])];
+  const used = new Set(BOAT_SPOTS.map(s => Math.floor(s.x / T / 3) + Math.floor(s.y / T / 3) * 4096));
+  for (let k = 0; k < MW * MH; k++) {
+    const id = WB[k]; if (!id || WBN[id] < BIG_WATER) continue;
+    const tx = k % MW, ty = (k / MW) | 0;
+    let d = 0; for (; d < 4; d++) { const j = (ty + DY[d]) * MW + tx + DX[d]; if (tx + DX[d] >= 0 && ty + DY[d] >= 0 && tx + DX[d] < MW && ty + DY[d] < MH && open[j] && !bridge[j] && map[j] !== WATER) break; }
+    if (d === 4) continue; // (a bank you can walk to)
+    const hb = busy.some(([bx, by]) => Math.abs(bx - tx) < 14 && Math.abs(by - ty) < 14);
+    if (srnd() > (hb ? 0.3 : 0.022)) continue;
+    const g = Math.floor(tx / 3) + Math.floor(ty / 3) * 4096; if (used.has(g) || used.has(g + 1) || used.has(g - 1) || used.has(g + 4096) || used.has(g - 4096)) continue;
+    const type = srnd() < 0.35 ? 'rowboat' : srnd() < 0.3 ? 'sailboat' : 'speedboat', l = CT[type].l, cx = (tx + 0.5) * T, cy = (ty + 0.5) * T;
+    const s = fits(type, cx - DX[d] * 4, cy - DY[d] * 4, Math.atan2(DX[d], -DY[d]) + (srnd() < 0.5 ? Math.PI : 0)) // (alongside the bank)
+      || fits(type, cx - DX[d] * (l / 2 - 12), cy - DY[d] * (l / 2 - 12), Math.atan2(-DY[d], -DX[d])); // (or bow out)
+    if (s) { BOAT_SPOTS.push(s); used.add(g); }
+  }
+}
+// ---- handling: thrust (the wind's, for a dinghy), the water's drag, a rudder that needs way on, and little grip
+function boatControls(c, throttle, steer, hand, dt) {
+  const t = CT[c.type], sail = t.boat === 'sail';
+  if (c.dead) { throttle = 0; steer = 0; }
+  let top = t.max * (c.hp < t.hp * 0.3 ? 0.6 : 1);
+  if (sail) { const rel = Math.abs(wrapA(c.angle - WIND)); top *= rel > 2.4 ? 0.08 : 0.55 + 0.45 * Math.sin(Math.min(rel, 2.4) * 0.75 + 0.2); } // (a run, a reach, close-hauled; head to wind it stalls)
+  if (throttle > 0) c.speed += t.acc * dt * throttle * (c.speed < 0 ? 2 : 1 - 0.85 * clamp(c.speed / top, 0, 1.2));
+  else if (throttle < 0) c.speed -= (c.speed > 0 ? t.acc * 1.1 : t.acc * 0.5) * dt;
+  c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), (18 + Math.abs(c.speed) * (throttle ? 0.12 : 0.45)) * dt); // (the water's drag)
+  if (c.speed > top) c.speed -= (c.speed - top) * Math.min(1, 1.5 * dt);
+  c.speed = clamp(c.speed, -t.max * 0.3, t.max);
+  c.brk = throttle < 0 && c.speed > 0;
+  const pa = c.angle, way = clamp(Math.abs(c.speed) / 60, 0.25, 1) * (c.speed >= -2 ? 1 : -1); // (a rudder needs water flowing past it)
+  c.angle += steer * t.turn * way * (c.driver === 'player' ? 1 / (1 + Math.max(0, c.speed) / 500) : 1) * dt;
+  if (boatHits(c, c.x, c.y, c.angle)) c.angle = pa;
+  const hx = Math.cos(c.angle), hy = Math.sin(c.angle), k = Math.min(1, 1.9 * dt); // (it drifts on through a turn)
+  c.vx += (hx * c.speed - c.vx) * k; c.vy += (hy * c.speed - c.vy) * k;
+  c.bob = (c.bob || rand(TAU)) + dt * (1.2 + Math.abs(c.speed) / 120);
+  if (Math.abs(c.speed) > 70 && Math.random() < 0.4 && onScreen(c.x, c.y, 60)) { // spray off the bow
+    const s = Math.random() < 0.5 ? 1 : -1;
+    addPart(c.x + hx * t.l * 0.3 - hy * t.w * 0.5 * s, c.y + hy * t.l * 0.3 + hx * t.w * 0.5 * s, -hy * s * 30 + rand(-10, 10), hx * s * 30 + rand(-10, 10), 0.35, rand(0.8, 1.6), 'rgba(245,250,255,.75)', 1.5);
+  }
+}
+// the nearest spot on a bank by a boat (to get out there), or null
+function boatShore(c) {
+  const t = CT[c.type]; let best = null, bd = 1e9;
+  for (let i = 0; i < 16; i++) {
+    const a = c.angle + i / 16 * TAU, ca = Math.cos(a), sa = Math.sin(a), e = Math.abs(Math.cos(i / 16 * TAU)) * t.l / 2 + Math.abs(Math.sin(i / 16 * TAU)) * t.w / 2;
+    for (let r = e + 6; r < e + 40; r += 5) {
+      const x = c.x + ca * r, y = c.y + sa * r;
+      if (seeThrough(x, y)) continue;
+      if (!circleSolid(x, y, 5) && r < bd) { bd = r; best = { x, y }; }
+      break;
+    }
+  }
+  return best;
+}
+// a spot on the water near (x, y), or on land near it (for whoever comes after you across the other element)
+function nearOf(x, y, water, R = 14) {
+  const tx0 = Math.floor(x / T), ty0 = Math.floor(y / T), open = water ? null : openTiles();
+  for (let r = 0; r <= R; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    const tx = tx0 + dx, ty = ty0 + dy; if (tx < 1 || ty < 1 || tx >= MW - 1 || ty >= MH - 1) continue;
+    const k = ty * MW + tx;
+    if (water ? WB[k] && WBN[WB[k]] >= 20 : open[k]) return { x: (tx + 0.5) * T, y: (ty + 0.5) * T };
+  }
+  return null;
+}
+// a boat on the water out of sight round you: on the body of water you're on, or on any big one near
+function spawnBoat(type, driver) {
+  const v = viewRect(48), o = viewRect(520), me = boatOf(player.car) ? wbAt(player.car.x, player.car.y) : 0;
+  for (let i = 0; i < 30; i++) {
+    const x = rand(o.x0, o.x1), y = rand(o.y0, o.y1);
+    if (x > v.x0 && x < v.x1 && y > v.y0 && y < v.y1) continue;
+    const id = wbAt(x, y); if (!id || WBN[id] < BIG_WATER || (me && id !== me)) continue;
+    const a = rand(TAU); if (boatHits({ type }, x, y, a) || cars.some(c => d2(c.x, c.y, x, y) < 60 * 60)) continue;
+    const c = makeCar(type, x, y, a, driver); c.speed = 30; return c;
+  }
+  return null;
+}
+// is the water clear on a straight line from the boat to (x, y)? (with room for its beam)
+function waterLine(c, x, y) {
+  const d = Math.hypot(x - c.x, y - c.y), n = Math.ceil(d / 14), w = CT[c.type].w / 2 + 6, ux = (x - c.x) / (d || 1), uy = (y - c.y) / (d || 1);
+  for (let i = 1; i <= n; i++) { const px = c.x + ux * d * i / n, py = c.y + uy * d * i / n; if (boatSolid(px, py) || boatSolid(px - uy * w, py + ux * w) || boatSolid(px + uy * w, py - ux * w)) return false; }
+  return true;
+}
+// steer for (x, y), feeling ahead for the bank: turn away from whichever side is shoaling first
+function boatSteer(c, x, y, sp, dt) {
+  const look = 34 + Math.abs(c.speed) * 0.7, h = c.angle;
+  const free = a => { for (let r = 16; r <= look; r += 12) if (boatSolid(c.x + Math.cos(a) * r, c.y + Math.sin(a) * r)) return r; return 1e9; };
+  const f0 = free(h);
+  if (f0 < look) {
+    const fl = free(h - 0.6), fr = free(h + 0.6);
+    const tx = c.x + Math.cos(h + (fr >= fl ? 1.1 : -1.1)) * 60, ty = c.y + Math.sin(h + (fr >= fl ? 1.1 : -1.1)) * 60;
+    driveToward(c, tx, ty, Math.min(sp, f0 < 40 ? 30 : sp * 0.6), dt); return;
+  }
+  driveToward(c, x, y, sp, dt);
+}
+// ---- the boats out on the water: cruise from one clear stretch to another
+function aiBoat(c, dt) {
+  const a = c.ai, t = CT[c.type];
+  a.wt = (a.wt || 0) - dt;
+  if (a.gx === undefined || a.wt <= 0 || d2(c.x, c.y, a.gx, a.gy) < 60 * 60) {
+    a.wt = 25; a.gx = c.x - Math.cos(c.angle) * 200; a.gy = c.y - Math.sin(c.angle) * 200; // (nowhere to go: come about)
+    for (let i = 0; i < 12; i++) {
+      const g = c.angle + rand(-1.6, 1.6), r = rand(250, 800), x = c.x + Math.cos(g) * r, y = c.y + Math.sin(g) * r;
+      if (wbAt(x, y) === wbAt(c.x, c.y) && waterLine(c, x, y)) { a.gx = x; a.gy = y; break; }
+    }
+  }
+  boatSteer(c, a.gx, a.gy, t.boat === 'motor' ? Math.min(a.cruise * 1.3, 200) : t.boat === 'row' ? 40 : 80, dt);
+}
+// ---- police boats: they come for you across the water by the shortest way round (one flow field for them all), ram
+// you from two stars, shoot from three; when you're ashore they wait off the bank nearest you
+const boatFlow = { f: null, gx: 0, gy: 0, t: 0 };
+function aiBoatCop(c, dt) {
+  const stars = Math.floor(heat);
+  if (heat < 1 || player.down || player.hidden) { c.chase = false; aiBoat(c, dt); return; }
+  c.chase = true;
+  const P0 = copTarget(c), tp = P0 === pp() ? player : NET.guest.player, onW = boatOf(tp.car), d = Math.hypot(P0.x - c.x, P0.y - c.y);
+  const see = !Q.branches && d < 380 && los(c.x, c.y, P0.x, P0.y);
+  c.shootCd -= dt;
+  if (see && stars >= 3 && d < 300 && c.shootCd <= 0) { c.burst = (c.burst || 0) + 1; c.shootCd = stars >= 7 ? (c.burst % 5 ? 0.14 : 1.4) : rand(0.9, 1.4); enemyShot(c.x, c.y, P0.x, P0.y, 8, 0.12); }
+  if (onW && see && waterLine(c, P0.x, P0.y)) {
+    if (stars < 2) { const pc = tp.car, ha = Math.atan2(pc.vy, pc.vx) || pc.angle, tx = pc.x - Math.cos(ha) * 80, ty = pc.y - Math.sin(ha) * 80; boatSteer(c, tx, ty, clamp(Math.hypot(pc.vx, pc.vy) + Math.hypot(tx - c.x, ty - c.y) - 20, 0, 260), dt); return; }
+    const pc = tp.car; boatSteer(c, P0.x + pc.vx * 0.35, P0.y + pc.vy * 0.35, 340, dt); return; // (ram)
+  }
+  // the goal on the water: you, or the water off the bank nearest you
+  let g = onW ? P0 : (c.wg && d2(c.wgFor[0], c.wgFor[1], P0.x, P0.y) < 80 * 80 ? c.wg : null);
+  if (!g) { g = nearOf(P0.x, P0.y, true, 12); c.wg = g; c.wgFor = [P0.x, P0.y]; }
+  if (!g) { aiBoat(c, dt); return; }
+  if (!onW && d2(c.x, c.y, g.x, g.y) < 50 * 50) { applyControls(c, c.speed > 5 ? -1 : 0, 0, false, dt); return; } // (wait off the bank)
+  if (waterLine(c, g.x, g.y)) { boatSteer(c, g.x, g.y, onW ? 320 : 220, dt); return; }
+  const B = boatFlow;
+  if (!B.f) B.f = new Int16Array(MW * MH);
+  if (time - B.t > 1 || d2(B.gx, B.gy, g.x, g.y) > 64 * 64) { computeFlowInto(B.f, g.x, g.y, undefined, undefined, true); B.gx = g.x; B.gy = g.y; B.t = time; }
+  let bx = Math.floor(c.x / T), by = Math.floor(c.y / T);
+  for (let s = 0; s < 3; s++) { let bv = flowAt(B.f, bx, by), nb = -1; for (let k = 0; k < 4; k++) { const v = flowAt(B.f, bx + DX[k], by + DY[k]); if (v < bv) { bv = v; nb = k; } } if (nb < 0) break; bx += DX[nb]; by += DY[nb]; }
+  boatSteer(c, (bx + 0.5) * T, (by + 0.5) * T, onW ? 300 : 220, dt);
+}
+// ---- landing: at ★7, ashore unseen and far enough from where you put out, the army has lost you
+function boatLanded() {
+  const s = player.putOut; player.putOut = null;
+  if (Math.floor(heat) !== 7 || !s || lab) return;
+  const d = Math.hypot(player.x - s.x, player.y - s.y);
+  if (d < BOAT_D) { msg(`Too close to where you put out: they'll look here (${Math.round(d / BOAT_D * 100)}% of the way).`, 2.5); return; }
+  if (belief.seen || copSees(player.x, player.y)) { msg('They saw you come ashore.', 2.5); return; }
+  heat = 5.5; HQ.lv = 5; Object.assign(belief, { seen: false, seeT: 1, sig: Math.max(belief.sig, 320) });
+  bigText('ACROSS THE WATER', '#9ccc65', 3, 'Ashore unseen, far from where they lost you: five stars'); sfx.good();
+}
+// ---- drawing: the wake behind it, the hull rocking on the water, and what each kind carries
+function drawBoat(c) {
+  const t = CT[c.type], l = t.l, w = t.w, k = t.boat, al = clamp(1 - (c.sink || 0) / 6, 0, 1);
+  if (al <= 0) return;
+  // the wake: where the stern has been, two arms of foam spreading out from it and churned water between them, fading
+  const tr = c.trail || (c.trail = []), last = tr[tr.length - 1], ca = Math.cos(c.angle), sa = Math.sin(c.angle), sx = c.x - ca * l * 0.45, sy = c.y - sa * l * 0.45;
+  if (!last || d2(last[0], last[1], sx, sy) > 18 * 18 || time - last[2] > 0.5) { tr.push([sx, sy, time, Math.abs(c.speed), c.angle]); if (tr.length > 40) tr.shift(); }
+  const pts = tr.concat([[sx, sy, time, Math.abs(c.speed), c.angle]]);
+  ctx.lineCap = 'round';
+  for (let i = pts.length - 1; i > 0; i--) {
+    const [x0, y0, t0, , a0] = pts[i - 1], [x1, y1, t1, sp, a1] = pts[i], age = time - t0, f = 1 - age / 2.8;
+    if (f <= 0) break;
+    if (sp < 20 || Math.hypot(x1 - x0, y1 - y0) > 60) continue;
+    const s = Math.min(1, sp / 200), r0 = w * 0.45 + age * 20 * s, r1 = w * 0.45 + (time - t1) * 20 * s;
+    ctx.strokeStyle = `rgba(232,244,252,${0.2 * f * s})`; ctx.lineWidth = w * 0.8 + age * 14 * s;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.strokeStyle = `rgba(245,250,255,${0.6 * f * s})`; ctx.lineWidth = 1.4 + age * 1.6;
+    for (const sd of [-1, 1]) { ctx.beginPath(); ctx.moveTo(x0 - Math.sin(a0) * r0 * sd, y0 + Math.cos(a0) * r0 * sd); ctx.lineTo(x1 - Math.sin(a1) * r1 * sd, y1 + Math.cos(a1) * r1 * sd); ctx.stroke(); }
+  }
+  ctx.lineCap = 'butt';
+  const bob = c.bob || 0, dead = c.dead;
+  ctx.save(); ctx.globalAlpha = al; ctx.translate(c.x, c.y + Math.sin(bob) * 0.8); ctx.rotate(c.angle + Math.sin(bob * 0.8) * 0.035);
+  ctx.fillStyle = 'rgba(0,20,40,.28)'; ctx.beginPath(); ctx.ellipse(2.5, 3.5, l / 2 + 1, w / 2 + 1.5, 0, 0, TAU); ctx.fill();
+  const hull = () => { ctx.beginPath(); ctx.moveTo(l / 2, 0); ctx.quadraticCurveTo(l / 5, -w / 2 - 0.5, -l / 2, -w / 2 + 1); ctx.lineTo(-l / 2, w / 2 - 1); ctx.quadraticCurveTo(l / 5, w / 2 + 0.5, l / 2, 0); };
+  const col = dead ? '#2b2b2b' : k === 'row' ? (c.color || '#a0522d') : c.color;
+  ctx.fillStyle = col; hull(); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 0.8; ctx.stroke();
+  if (!dead) {
+    if (k === 'row') {
+      ctx.fillStyle = '#8a6a44'; ctx.beginPath(); ctx.ellipse(-1, 0, l * 0.36, w * 0.3, 0, 0, TAU); ctx.fill(); // (inside the hull)
+      ctx.fillStyle = '#6a4e30'; for (const x of [-l * 0.22, l * 0.08]) ctx.fillRect(x - 1, -w / 2 + 1.5, 2, w - 3); // (the thwarts)
+      if (c.driver) { // the oars, pulling
+        const sw = Math.abs(c.speed) > 4 ? Math.sin(time * 5.5) * 0.55 : 0.25;
+        ctx.strokeStyle = '#d9c09a'; ctx.lineWidth = 1.2;
+        for (const sd of [-1, 1]) { ctx.beginPath(); ctx.moveTo(-l * 0.05, sd * w * 0.35); ctx.lineTo(-l * 0.05 - Math.sin(sw) * 9, sd * (w / 2 + 8)); ctx.stroke(); }
+      }
+    } else if (k === 'sail') {
+      ctx.fillStyle = '#e9e2d0'; ctx.beginPath(); ctx.ellipse(-1, 0, l * 0.34, w * 0.28, 0, 0, TAU); ctx.fill();
+    } else {
+      ctx.fillStyle = c.type === 'policeboat' ? '#dfe6ee' : '#e8e0d0'; ctx.fillRect(-l / 2 + 3, -w / 2 + 2.5, l * 0.62, w - 5); // (the deck)
+      if (c.type === 'policeboat') { ctx.fillStyle = '#1f3a93'; ctx.fillRect(-l / 2 + 1, -w / 2 + 0.6, l * 0.8, 1.3); ctx.fillRect(-l / 2 + 1, w / 2 - 1.9, l * 0.8, 1.3); }
+      ctx.fillStyle = '#5a6a78'; ctx.fillRect(-l * 0.06, -w / 2 + 2.5, l * 0.2, w - 5); // (the windscreen and the cockpit)
+      ctx.fillStyle = '#2b2f36'; ctx.fillRect(-l / 2 - 3, -2, 4, 4); // (the outboard)
+      if (c.type === 'policeboat' && c.chase) { const on = Math.sin(time * 14) > 0; ctx.fillStyle = on ? '#ff2a2a' : '#2a6bff'; ctx.fillRect(l * 0.02, -3.5, 2.5, 3); ctx.fillStyle = on ? '#2a6bff' : '#ff2a2a'; ctx.fillRect(l * 0.02, 0.5, 2.5, 3); }
+    }
+    if (c.driver) { // whoever is at the helm
+      const hx = k === 'row' ? -l * 0.05 : k === 'sail' ? -l * 0.3 : -l * 0.2;
+      ctx.fillStyle = c.driver === 'player' ? player.shirt : c.type === 'policeboat' ? '#1f3a93' : '#445'; ctx.beginPath(); ctx.ellipse(hx, 0, 3, 4.2, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = c.driver === 'player' ? '#222' : '#e0c8a8'; ctx.beginPath(); ctx.arc(hx + 0.5, 0, 2.6, 0, TAU); ctx.fill();
+    }
+    if (k === 'sail') { // the mast, the boom swung out to leeward, and the sail filling
+      const rel = wrapA(WIND - c.angle), boom = -Math.sign(Math.sin(rel) || 1) * clamp((Math.PI - Math.abs(rel)) * 0.5, 0.15, 1.3), bl = l * 0.55, mx = l * 0.12;
+      ctx.save(); ctx.translate(mx, 0); ctx.rotate(Math.PI + boom);
+      ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.moveTo(3, 4); ctx.quadraticCurveTo(bl * 0.5 + 3, 4 + Math.sign(boom) * 7, bl + 3, 4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = dead ? '#555' : '#fbfaf4'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(bl * 0.5, -Math.sign(boom || 1) * 7, bl, 0); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#7a6a55'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(bl, 0); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#5a4a38'; ctx.beginPath(); ctx.arc(mx, 0, 1.6, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#e53935'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx + Math.cos(rel) * 7, Math.sin(rel) * 7); ctx.stroke(); // (the masthead pennant shows the wind)
+    }
+    ctx.fillStyle = carGloss(l, w); hull(); ctx.fill();
+  }
+  ctx.restore();
+  if (dead && c.sink > 0 && Math.random() < 0.3) addPart(c.x + rand(-l / 3, l / 3), c.y + rand(-w / 3, w / 3), 0, 0, 0.6, rand(1.5, 3), 'rgba(220,235,245,.6)', 2); // (bubbles)
+}
 // ============================================================ wanted levels 6 to 10: past the tank, the state itself
 // ★6 the Measurement Bureau: black vans whose detectors collapse superposition and break entanglement near them, a drone
 // that keeps you measured (watched, the police's guess never spreads: the Zeno effect), spike strips. ★7 a state of
@@ -5124,7 +5577,7 @@ function drawTrams(v, up) {
 // fade by itself: only its way out ends it.
 const WL = [null, null, null, null, null, null,
   { name: 'THE MEASUREMENT BUREAU', col: '#b388ff', sub: 'Detector vans collapse X and T · a drone keeps you measured · spike strips' },
-  { name: 'STATE OF EMERGENCY', col: '#9ccc65', sub: 'Army checkpoints, armoured carriers, rockets · lie low 60 s unseen to end it' },
+  { name: 'STATE OF EMERGENCY', col: '#9ccc65', sub: 'Army checkpoints, armoured carriers, rockets · lie low 60 s unseen, or land unseen across the water' },
   { name: 'THE OBSERVER', col: '#4dd0e1', sub: 'Sweeps every 20 s, jets, no X or T · the entangled payphones (cyan) teleport you out' },
   { name: 'DEMOLITION', col: '#ffb74d', sub: 'Bulldozers, falling buildings, burning tankers · hide 45 s in a pedestrian zone' },
   { name: 'AIR ASSAULT', col: '#ef5350', sub: 'Drone swarms, paratroopers, an airship · go to ground: two tunnels, unseen at the portals' }];
@@ -5308,7 +5761,7 @@ function updateWanted(dt) {
   if (stars >= 6 && pc && !pc.tram && HQ.spikeCd <= 0) HQ.spikeCd = placeSpikes() ? 16 : 3;
   for (const s of HQ.spikes) s.t -= dt;
   HQ.spikes = HQ.spikes.filter(s => s.t > 0 && d2(s.x, s.y, P0.x, P0.y) < 2500 * 2500);
-  for (const c of [pc, NET.guest && NET.guest.player.car]) if (c && !c.spiked && !c.tram && !CT[c.type].bike && Math.abs(c.speed) > 20) for (const s of HQ.spikes) {
+  for (const c of [pc, NET.guest && NET.guest.player.car]) if (c && !c.spiked && !c.tram && !CT[c.type].bike && !CT[c.type].boat && Math.abs(c.speed) > 20) for (const s of HQ.spikes) {
     const dx = c.x - s.x, dy = c.y - s.y, al = dx * Math.cos(s.a) + dy * Math.sin(s.a), ac = -dx * Math.sin(s.a) + dy * Math.cos(s.a);
     if (Math.abs(al) < CT[c.type].l / 2 && Math.abs(ac) < s.w / 2) { c.spiked = true; sfx.snap(); if (c === pc) msg('Spike strip! Your tyres are shredded: half speed until you swap cars.', 3); break; }
   }
@@ -5442,7 +5895,8 @@ function updateWanted(dt) {
 function wantedHint() {
   const s = Math.min(10, Math.floor(heat)), left = n => Math.max(0, Math.ceil(n - HQ.low));
   if (s === 6) return HQ.drone && !HQ.drone.fall && HQ.drone.lock ? 'The drone sees you: get under trees or an overpass, into a tunnel, or shoot it down' : 'Lose them, and the Bureau stands down';
-  if (s === 7) return belief.seen ? `Lie low 60 s unseen${Q.ent > 0 ? ' · or T on foot at a wall: tunnel through it (ε)' : ''}` : `Lie low unseen: ${left(60)} s to go`;
+  if (s === 7 && boatOf(player.car) && player.putOut) { const d = Math.hypot(player.x - player.putOut.x, player.y - player.putOut.y); return d < BOAT_D ? `Across the water: ${Math.round(d / BOAT_D * 100)}% of the way, then land unseen` : 'Far enough: get out at a bank, unseen'; }
+  if (s === 7) return belief.seen ? `Lie low 60 s unseen${Q.ent > 0 ? ' · or T on foot at a wall: tunnel through it (ε)' : ''} · or take a boat across the water` : `Lie low unseen: ${left(60)} s to go`;
   if (s === 8) return `The entangled payphones (cyan on the map): ${touchOn() ? '⇄' : 'Enter'} there to teleport out`;
   if (s === 9) return `Hide in a pedestrian zone, unseen: ${Math.floor(HQ.plaza)} / 45 s`;
   return TUNNELS.length >= 2 ? `Two different tunnels end to end, unseen at the portals: ${HQ.tun.length} / 2` : `Lie low unseen: ${left(75)} s to go`;
@@ -5658,10 +6112,14 @@ function updateWorld(dt) {
     else if (c.driver === 'police') aiPolice(c, dt);
     else if (c.driver === 'eve') aiEve(c, dt);
     else if (c.driver === 'service') aiService(c, dt);
+    else if (c.driver === 'boat') aiBoat(c, dt);
     else if (c.driver !== 'player') applyControls(c, 0, 0, true, dt);
     moveCar(c, dt);
     if (c.parked && (Math.abs(c.x - px) > 0.5 || Math.abs(c.y - py) > 0.5)) c.moved = true;
   }
+  WIND += Math.sin(time * 0.05) * dt * 0.01; // (the wind veers a little)
+  for (const c of cars) if (c.dead && CT[c.type].boat) c.sink = (c.sink || 0) + dt; // (a wrecked boat goes down)
+  if (cars.some(c => c.sink > 7 && c !== player.car)) cars = cars.filter(c => !(c.sink > 7) || c === player.car);
   for (const c of cars) { // fires burn everywhere (entangled twins can be far away)
     if (c.fire > 0) {
       c.fire -= dt;
@@ -7787,6 +8245,7 @@ function carGloss(l, w) {
 }
 function drawCar(c) {
   const t = CT[c.type], l = t.l, w = t.w;
+  if (t.boat) { drawBoat(c); return; }
   ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.angle);
   if (!c.ghost) { ctx.fillStyle = 'rgba(0,0,0,.35)'; rrect(-l / 2 + 2, -w / 2 + 3, l, w, t.bike ? 3 : 4); }
   if (t.bike) {
@@ -8351,7 +8810,7 @@ function drawHUD() {
     for (const h of POLICE_POSTS) dot(h.x, h.y, '#3498db', 2);
     for (const sp of SPRAYS) dot(sp.x, sp.y, '#c27cf0', 2);
     for (const sp of FISH_SPOTS) dot(sp.x, sp.y, '#4fc3f7', 2);
-    for (const t of trams) if (!t.dead) dot(t.x, t.y, t.R.col, full ? 1.6 : 1.8); // (the trams, in their lines' colours)
+    for (const L of [trams, tramsFar]) for (const t of L) if (!t.dead) dot(t.x, t.y, t.R.col, full ? 1.6 : 1.8); // (the trams, in their lines' colours)
     if (Q.branches) for (const g of Q.branches) dot(g.x, g.y, g.tint, 2);
     // BUT's other faculties: a small diamond each in the faculty's colour
     for (const f of FACS) {
@@ -8655,7 +9114,7 @@ function drawAOD() {
 const HELP = [
   ['Arrows / WASD', 'drive · walk (up = forward, left/right = turn)'],
   ['Space', 'shoot on foot · handbrake in a car'],
-  ['Enter / F / E', 'get in or out of cars (occupied ones too) · a tram, at its front · fish at a jetty'],
+  ['Enter / F / E', 'get in or out of cars (occupied ones too) · a tram, at its front · a boat, from the bank · fish at a jetty'],
   ['Q / Tab', 'switch weapon'],
   ['X', 'superposition: split your car into 3 branches'],
   ['V', 'slow motion + amplitude arrows (while superposed)'],
@@ -9019,9 +9478,144 @@ function showVersionPicker() {
   const el = document.getElementById('ver'), show = state === 'title';
   if (el && el.dataset.on !== String(show)) { el.dataset.on = show; el.style.display = show ? 'flex' : 'none'; }
 }
+
+// ============================================================ the debug console (hidden)
+// Type "debug" while playing (or paused): a command line opens at the top of the screen. "help" lists the commands:
+// tp <place> or tp <x> <y> teleports you (tiles; on the Brno maps also latitude and longitude), wanted, car, god...
+// Esc closes it. Not in a co-op game you joined.
+const DBG = { buf: '', box: null, inp: null, out: null, god: false, stats: false, ft: 0, places: null, hist: [], hi: 0 };
+const dbgOpen = () => !!(DBG.box && DBG.box.style.display !== 'none');
+const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+function dbgSay(s) { DBG.out.textContent = (DBG.out.textContent + '\n' + s).split('\n').slice(-14).join('\n').replace(/^\n/, ''); }
+function dbgShow(on) {
+  if (!DBG.box) {
+    const b = DBG.box = document.createElement('div');
+    b.style.cssText = 'position:fixed;left:8px;right:8px;top:8px;z-index:20;background:rgba(10,12,18,.88);border:1px solid #3cf0ff;border-radius:6px;padding:8px 10px;font:13px/1.35 ui-monospace,Menlo,Consolas,monospace;color:#d8f6ff;max-width:760px';
+    const o = DBG.out = document.createElement('pre'); o.style.cssText = 'margin:0 0 6px;white-space:pre-wrap;max-height:40vh;overflow:auto';
+    const i = DBG.inp = document.createElement('input'); i.style.cssText = 'width:100%;box-sizing:border-box;background:#05070b;color:#fff;border:1px solid #2a4a55;border-radius:4px;padding:5px 7px;font:inherit;outline:none';
+    i.setAttribute('autocomplete', 'off'); i.setAttribute('spellcheck', 'false'); i.placeholder = 'help · tp <place> · tp <x> <y> · wanted <n> · car <type> · god · stats · Esc closes';
+    i.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Escape') { dbgShow(false); return; }
+      if (e.key === 'ArrowUp' && DBG.hist.length) { DBG.hi = Math.max(0, DBG.hi - 1); i.value = DBG.hist[DBG.hi]; e.preventDefault(); return; }
+      if (e.key === 'ArrowDown' && DBG.hist.length) { DBG.hi = Math.min(DBG.hist.length, DBG.hi + 1); i.value = DBG.hist[DBG.hi] || ''; e.preventDefault(); return; }
+      if (e.key !== 'Enter') return;
+      const line = i.value.trim(); i.value = ''; if (!line) return;
+      DBG.hist.push(line); DBG.hi = DBG.hist.length; dbgSay('> ' + line);
+      try { const r = dbgRun(line); if (r) dbgSay(r); } catch (err) { dbgSay('error: ' + err.message); }
+    });
+    i.addEventListener('keyup', e => e.stopPropagation());
+    b.append(o, i); document.body.appendChild(b);
+    dbgSay('QTA debug console. "help" for the commands.');
+  }
+  DBG.box.style.display = on ? 'block' : 'none';
+  for (const k in keys) keys[k] = 0;
+  if (on) setTimeout(() => DBG.inp.focus(), 0); else { DBG.inp.blur(); cv.focus && cv.focus(); }
+}
+addEventListener('keydown', e => {
+  if (dbgOpen() || !e.key || e.key.length !== 1) return;
+  DBG.buf = (DBG.buf + e.key.toLowerCase()).slice(-5);
+  if (DBG.buf === 'debug' && (state === 'play' || state === 'pause') && NET.role !== 'guest') { DBG.buf = ''; dbgShow(true); }
+});
+// every place with a name: where you start, sites and landmarks, districts, streets, tram stops, faculties and more
+function dbgPlaces() {
+  if (DBG.places) return DBG.places;
+  const L = [], add = (name, x, y) => { if (name && isFinite(x) && isFinite(y)) L.push({ name, f: fold(name), x, y }); };
+  for (const s of STARTS) add(s.name, s.p.x, s.p.y);
+  for (const s of SITES) add(s.name, (s.x0 + s.x1 + 1) / 2 * T, (s.y0 + s.y1 + 1) / 2 * T);
+  const sx = new Float64Array(DISTRICTS.length), sy = new Float64Array(DISTRICTS.length), n = new Float64Array(DISTRICTS.length);
+  for (let k = 0; k < MW * MH; k += 3) { const r = REG[k]; if (r === undefined || r >= DISTRICTS.length || solidT(map[k])) continue; sx[r] += k % MW; sy[r] += (k / MW) | 0; n[r]++; }
+  DISTRICTS.forEach((d, i) => { if (n[i]) add(d.name, (sx[i] / n[i] + 0.5) * T, (sy[i] / n[i] + 0.5) * T); });
+  for (const p of TRAM_STOPS) add(p.name, p.x, p.y);
+  const seenE = new Set();
+  for (const e of EDGES) if (e.name && !seenE.has(e.name)) { seenE.add(e.name); const q = e.pts[e.pts.length >> 1]; add(e.name, q[0], q[1]); }
+  if (BRNO) { for (const f of FACULTIES) { const [x, y] = geo(f[3], f[4]); add(f[0], x * T, y * T); } add('harbour', HARBOUR[0] * T, HARBOUR[1] * T); add('reservoir', HARBOUR[0] * T, HARBOUR[1] * T); }
+  HOSPITALS.forEach((h, i) => add(i ? 'clinic ' + i : 'hospital', h.x, h.y)); POLICE_POSTS.forEach((h, i) => add(i ? 'police post ' + i : 'police', h.x, h.y));
+  SPRAYS.forEach((h, i) => add('spray shop ' + (i + 1), h.x, h.y)); FISH_SPOTS.forEach((h, i) => add('jetty ' + (i + 1), h.x, h.y));
+  if (ATOM_LAB) add('atom array lab', ATOM_LAB.con.x, ATOM_LAB.con.y);
+  try { eprPhones().forEach((e, i) => add('payphone ' + (i + 1), e.x, e.y)); } catch (e) { /* (none on this map) */ }
+  return (DBG.places = L);
+}
+function dbgFind(q) {
+  const f = fold(q), P = dbgPlaces();
+  const ex = P.filter(p => p.f === f), pre = P.filter(p => p.f.startsWith(f)), sub = P.filter(p => p.f.includes(f));
+  return ex.length ? ex : pre.length ? pre : sub;
+}
+function dbgTeleport(x, y) {
+  const s = nearOf(x, y, false, 40) || { x, y };
+  if (player.jack) endJack();
+  if (player.tow) dropTow('');
+  if (Q.branches) collapse('you teleported');
+  if (player.car) { player.car.driver = null; player.car = null; }
+  player.fish = null; player.x = s.x; player.y = s.y; player.angle = faceOpen(s.x, s.y);
+  updateCamera(0, true); fillSpots(true); for (let i = 0; i < 20; i++) manageSpawns(1);
+  return s;
+}
+function dbgRun(line) {
+  const [cmd, ...a] = line.split(/\s+/), rest = a.join(' '), num = a.map(Number);
+  switch (cmd.toLowerCase()) {
+    case 'help': case '?': return [
+      'tp <place>        teleport (a start, site, district, street, tram stop, faculty, hospital, police, jetty 1, payphone 1, harbour...)',
+      'tp <x> <y>        teleport to tile x, y' + (BRNO ? ' (or: tp <lat> <lon>, e.g. tp 49.1951 16.6080)' : ''),
+      'where             your position: tiles' + (BRNO ? ', latitude and longitude' : '') + ', the place',
+      'find <text>       the places whose name has it',
+      'wanted <0-10>     set the wanted level',
+      'car <type>        a vehicle by you, and you in it (car list: the types)',
+      'god               toggle: no damage, no arrest',
+      'stats             toggle: frame time and what is simulated',
+      'cash <n> · time <hour> · charges (refill ψ and ε) · wind <deg> · close'].join('\n');
+    case 'close': case 'exit': dbgShow(false); return '';
+    case 'tp': case 'teleport': case 'goto': {
+      if (!a.length) return 'tp <place> or tp <x> <y>';
+      if (a.length === 2 && num.every(isFinite)) {
+        let [x, y] = num;
+        if (BRNO && x > 40 && x < 60 && y > 10 && y < 20) [x, y] = geo(x, y); // (latitude, longitude)
+        if (x < 0 || y < 0 || x >= MW || y >= MH) return `off the map (it is ${MW} x ${MH} tiles)`;
+        const s = dbgTeleport((x + 0.5) * T, (y + 0.5) * T); return `teleported to ${(s.x / T).toFixed(1)}, ${(s.y / T).toFixed(1)} · ${placeName(s.x, s.y)}`;
+      }
+      const m = dbgFind(rest); if (!m.length) return `no place called "${rest}" (try: find ${a[0]})`;
+      const s = dbgTeleport(m[0].x, m[0].y);
+      return `teleported to ${m[0].name} (${(s.x / T).toFixed(0)}, ${(s.y / T).toFixed(0)})` + (() => { const o = [...new Set(m.map(p => p.name))].filter(n => n !== m[0].name); return o.length ? `\n  also: ${o.slice(0, 5).join(' · ')}${o.length > 5 ? ' …' : ''}` : ''; })();
+    }
+    case 'find': case 'list': { const m = dbgFind(rest); return m.length ? m.slice(0, 30).map(p => `${p.name} (${(p.x / T) | 0}, ${(p.y / T) | 0})`).join('\n') + (m.length > 30 ? `\n… ${m.length - 30} more` : '') : 'nothing'; }
+    case 'where': { const P0 = pp(), tx = P0.x / T, ty = P0.y / T; let s = `tile ${tx.toFixed(1)}, ${ty.toFixed(1)} · ${placeName(P0.x, P0.y)}`;
+      if (BRNO) s += ` · ${(GEO[3] - ty / MH * (GEO[3] - GEO[2])).toFixed(5)}, ${(GEO[0] + tx / MW * (GEO[1] - GEO[0])).toFixed(5)}`; return s; }
+    case 'wanted': case 'heat': { const v = clamp(num[0] || 0, 0, 10); heat = v ? Math.min(10.99, v + 0.01) : 0; if (!v) { HQ = hqNew(); belief.sig = 1e4; } lastCrime = time; return `wanted level ${Math.floor(heat)}`; }
+    case 'car': case 'spawn': {
+      const t = (a[0] || '').toLowerCase();
+      if (!CT[t] || t === 'tram') return 'types: ' + Object.keys(CT).filter(k => k !== 'tram').join(' ');
+      const P0 = pp();
+      let at;
+      if (CT[t].boat) { at = nearOf(P0.x, P0.y, true, 40); if (!at) return 'no water near here'; at.a = rand(TAU); for (let i = 0; i < 12 && boatHits({ type: t }, at.x, at.y, at.a); i++) at.a += 0.5; }
+      else { const lp = nearestLanePt(P0.x, P0.y, null, 400); if (!lp) return 'no road near here'; at = { x: lp.x, y: lp.y, a: lp.h }; }
+      if (player.car) { player.car.driver = null; player.car = null; }
+      const c = makeCar(t, at.x, at.y, at.a, null); getIn(c, false, false);
+      player.x = c.x; player.y = c.y; updateCamera(0, true);
+      return `you are in a ${CT[t].label}`;
+    }
+    case 'god': DBG.god = !DBG.god; return 'god mode ' + (DBG.god ? 'on' : 'off');
+    case 'stats': DBG.stats = !DBG.stats; return 'stats ' + (DBG.stats ? 'on' : 'off');
+    case 'cash': player.cash = num[0] || 0; return `cash $${player.cash}`;
+    case 'time': dayT = ((num[0] || 0) % 24) / 24; return `time ${num[0] || 0}:00`;
+    case 'charges': Q.psi = 9; Q.ent = 9; return 'ψ 9 · ε 9';
+    case 'wind': WIND = (num[0] || 0) * Math.PI / 180; return `the wind blows to ${num[0] || 0}° (0 east, 90 south)`;
+    default: return `unknown: ${cmd} ("help" lists the commands)`;
+  }
+}
+// god mode, and the stats line
+function dbgTick() {
+  if (!DBG.god) return;
+  player.hp = 100; player.bust = 0; if (player.car && !player.car.tram) { player.car.hp = CT[player.car.type].hp; player.car.fire = 0; }
+}
+function dbgDraw() {
+  if (!DBG.stats) return;
+  const s = `${DBG.ft.toFixed(1)} ms · cars ${cars.length} (boats ${cars.filter(boatOf).length}) · people ${peds.length} (on platforms ${peds.filter(p => p.tp).length}) · trams ${trams.length} in full, ${tramsFar.length} further off`;
+  ctx.font = '12px ui-monospace,Menlo,monospace'; const w = ctx.measureText(s).width;
+  ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.fillRect(W / 2 - w / 2 - 6, H - 52, w + 12, 18); ctx.fillStyle = '#7dffd8'; ctx.textAlign = 'center'; ctx.fillText(s, W / 2, H - 39); ctx.textAlign = 'left';
+}
 function frame(nowT) {
   showVersionPicker();
-  const dt = Math.min(0.05, Math.max(0.001, (nowT - last) / 1000)); last = nowT;
+  const dt = Math.min(0.05, Math.max(0.001, (nowT - last) / 1000)); last = nowT; const ft0 = performance.now();
   if (state === 'title') {
     const pick2 = d => { startSel = (startSel + d + STARTS.length) % STARTS.length; titleLook(true); };
     if (hit('ArrowRight', 'KeyD')) pick2(1); else if (hit('ArrowLeft', 'KeyA')) pick2(-1);
@@ -9040,7 +9634,7 @@ function frame(nowT) {
     if (hit('KeyR')) { radio = (radio + 1) % STATIONS.length; msg(radio ? `♪ ${STATIONS[radio].name}` : 'Radio off', 2); }
     if (hit('KeyV')) { Q.slow = !Q.slow; msg(Q.slow ? 'Slow motion + amplitude arrows ON (V)' : 'Slow motion OFF', 2); }
     const sdt = Q.slow && !NET.guest ? dt * 0.3 : dt; // (no slow motion while a friend is playing too)
-    if (!helpPage || NET.guest) { updateWorld(sdt); updateCamera(sdt); }
+    if (!helpPage || NET.guest) { updateWorld(sdt); updateCamera(sdt); dbgTick(); }
     else if (hit('Tap')) helpPage = (helpPage + 1) % 3;
     if (NET.guest) { NET.snapT -= dt; if (NET.snapT <= 0) { NET.snapT = 1 / 15; hostSnap(); } }
   } else if (state === 'guest') {
@@ -9078,13 +9672,14 @@ function frame(nowT) {
     if (state === 'over') drawOver();
     if (state === 'aod') drawAOD();
   }
+  dbgDraw(); DBG.ft += (performance.now() - ft0 - DBG.ft) * 0.05;
   for (const k in pressed) delete pressed[k];
   tapAt = null;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 // debug/test hook
-window.__gridlock = { get HQ() { return HQ; }, eprPhones, teleport, get tankerCars() { return tankerCars; }, get trams() { return trams; }, TL, TRAM_STOPS, get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
+window.__gridlock = { BOAT_SPOTS, WBN, boatShore, spawnBoat, enterExit, updateWorld, updateCamera, get WIND() { return WIND; }, set WIND(v) { WIND = v; }, get HQ() { return HQ; }, eprPhones, teleport, get tankerCars() { return tankerCars; }, get trams() { return trams; }, dbgRun, dbgShow, DBG, get tramsFar() { return tramsFar; }, TL, TRAM_STOPS, get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
   newGame, startLab, setupLesson, makeCar, superpose, collapse, entangle, startMission, bb84, keys, pressed, labFlags: () => labFlags, arcProg: () => arcProg,
   NET, netAttach, faceOpen, TUNNELS, RAMPS, tunT, OVERS, OVRAMPS, ovT, oE, carDeckZ, FISH, FISH_SPOTS, startFishing, castDist, ZONES, CONSOLES, get ATOM_LAB() { return ATOM_LAB; }, grabTow, dropTow, towBase, RB_R, aodOpen, aodToggle, aodShift, aodGo, aodPulse, aodPointer, aodSolved, AOD_LV, get AOD() { return AOD; }, hostSnap, hostNet, joinNet, MAP_ID, geo, LCG, taken, dR, mm, trees, props, FIELDS, STARTS, REG, SITE_PSI, HOSPITALS, POLICE_POSTS, get startSel() { return startSel; }, set startSel(v) { startSel = v; }, get showMap() { return showMap; }, set showMap(v) { showMap = v; } };
 })();

@@ -37,7 +37,7 @@ To release, tag the commit (`git tag -a v7 -m "what changed"`) and push the tag 
 | --- | --- |
 | Arrows / WASD | drive · walk (up = forward, left/right = turn) |
 | Space | shoot on foot · handbrake in a car |
-| Enter / F / E | get in or out of cars (occupied ones too: you walk to the driver's door, open it, drag the driver out and climb in) · at a jetty: go **fishing** |
+| Enter / F / E | get in or out of cars (occupied ones too: you walk to the driver's door, open it, drag the driver out and climb in) · into a moored **boat** from the bank, out at a bank · at a jetty: go **fishing** |
 | Q / Tab | switch weapon |
 | **X** | **superposition**: split your car into 3 branches (press again to collapse) |
 | **T** | **entangle** with a car nearby · T again: measure the pair and **swap places** with it |
@@ -53,7 +53,21 @@ To release, tag the commit (`git tag -a v7 -m "what changed"`) and push the tag 
 On phones and tablets, touch buttons appear automatically. On the title screen, tap the left half to play
 and the right half for the Physics Lab.
 
+For testing there is a hidden **debug console**: type `debug` while playing (best while paused, since E and G also
+act in play). `tp <place>` teleports you to a start, site, district, street, tram stop, faculty and so on (`tp <x> <y>`
+to a tile, and on the Brno maps `tp <lat> <lon>`), `find <text>` lists the places, `where` tells you where you are,
+`wanted <n>` sets the wanted level, `car <type>` puts you in any vehicle (boats on the nearest water), `god` stops
+damage and arrests, and `stats` shows the frame time and how much is being simulated. `help` lists the rest, Esc
+closes it.
+
 Goal: reach **$100,000**. Ringing payphones give jobs, and each finished job raises your cash multiplier.
+**Boats** lie moored along the banks of the reservoir (in Brno) and of the island's sea, lakes and river, and more
+are anchored out on the water: walk up to one on the bank and press Enter. Speedboats, rowing boats and sailing
+dinghies (the wind drives a dinghy, and it can't sail straight into it: the red pennant at its masthead shows which
+way it blows) glide and drift, and only water carries them. Press Enter at a bank to get out, or, out on the water,
+by another empty boat to climb across. Police boats come after you on the water, and police on the banks shoot
+across it. No superposition or tweezer on the water, and T entangles a boat only with another boat.
+
 Spray shops ($500) clear your wanted level (up to five stars). If you are wasted or busted you come back at the nearest hospital or
 police station, facing the street. Ramming a police car gets you at least one star, and that cruiser gives chase.
 The car you drive has a health bar over it (and in the corner of the screen), and it holds out longer than the
@@ -81,7 +95,7 @@ and its way out show under the first. From seven stars up a level doesn't fade b
 | Stars | Who comes, and the way out |
 | --- | --- |
 | 6 · The Measurement Bureau | Black vans with a detector dish: near one, your superposition collapses, your entanglement breaks, and X and T don't work. The Bureau's drone keeps you measured, so the police never lose you (the quantum Zeno effect). Lose it under trees or an overpass or in a tunnel, or shoot it down. Spike strips ahead of you halve your top speed until you swap cars. Lose them as at five stars. |
-| 7 · State of emergency | The army: checkpoints of armoured carriers and soldiers on the bridges and at the tunnel mouths ahead, carriers with mounted guns, and an attack helicopter whose rockets land where a red ring marks the street. Way out: lie low for 60 s unseen, or on foot face a wall and press T to spend an ε charge tunnelling through the building, out of their sight. Either takes you back to five stars. |
+| 7 · State of emergency | The army: checkpoints of armoured carriers and soldiers on the bridges and at the tunnel mouths ahead, carriers with mounted guns, and an attack helicopter whose rockets land where a red ring marks the street. Way out: lie low for 60 s unseen, or on foot face a wall and press T to spend an ε charge tunnelling through the building, out of their sight, or take a boat across the water and get out on a bank unseen, far from where you put out (about 75 tiles; lose the Bureau's drone first). Either takes you back to five stars. |
 | 8 · The Observer | A measurement sweep every 20 s: wherever you are, they know. No superposition or entanglement at all, no ε pickups. Jets strafe your street (a red strip marks their run). Way out: one of the entangled payphones, cyan on the map (at the Atom Array Lab and, in Brno, at FIT BUT). A Bell measurement there (press Space as the arrow crosses the window, two out of three) teleports you to the other one, and you are down to three stars. |
 | 9 · Demolition | Armoured bulldozers come straight through the buildings. Hide behind one and a wrecking crew brings it down on you, leaving rubble across the street. Fuel tankers lie jack-knifed and burning in the junctions ahead, and a crane swings a wrecking ball over a main junction. Way out: 45 s unseen in a pedestrian zone or square, back to five stars. |
 | 10 · Air assault | Swarms of kamikaze drones (a red ring marks where each dives; shoot them down), paratroopers, squads roped down from helicopters onto the street ahead, and an airship whose searchlight finds you. Way out: go to ground, through two different tunnels from end to end, unseen going in and coming out, back to five stars. On the island, with no tunnels, lie low 75 s unseen. |
@@ -195,12 +209,16 @@ scale a car, a street and a building are their real size.
   apart, is signalled as one.
 - **Trams** on all eleven lines (1 to 12: Brno has no 11), each along its own track as OpenStreetMap maps its route,
   in both directions and every variant: Škoda 13Ts, KT8D5s, VarioLFs and pairs of old T3s, red and cream, with the
-  line's number up front in its colour. They stop at every stop (each with its sign and name), where the doors open
-  and people get on and off. Along a street they wait at its red lights, and they ring the bell at whatever is on the
+  line's number up front in its colour. They stop at every stop (each with its sign and name, one for each
+  direction), where people wait on the platform, more the longer since the last tram. The doors open, those getting
+  off step out first, then those waiting walk to the nearest door and get on, and the tram waits until they're
+  aboard. Along a street they wait at its red lights, and they ring the bell at whatever is on the
   track. They go down into the tram tunnels (the line to Bohunice under Jihlavská) and up over the bridges. Cars give
   way to them and wait behind one at its stop, as the rules say, and whatever a 40-tonne tram hits gets out of its
   way. Walk up to a tram's front and press Enter to take it over: ↑ to go, ↓ to brake (and back up), Space rings the
-  bell.
+  bell. Only the trams in your part of the city (round what you see) are simulated in full; the rest run on along
+  their lines at a tram's average pace and are put on the track in full as they come near. The cars and people are
+  only ever simulated round you, too.
 - **The real buildings**: 51,972 outlines from OpenStreetMap (multi-part ones with their courtyards included), each
   at its real angle and in its real shape: a rectangle at any angle, an L, U or T in its own turned frame, or any
   polygon, with walls along every edge and collisions that follow them exactly. Each keeps its number of floors where
