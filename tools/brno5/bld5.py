@@ -173,10 +173,10 @@ if __name__ == '__main__':
     for i, b in enumerate(B):
         small = [B[j]['g'] for j in tree.query(b['g']) if j > i and B[j]['g'].intersects(b['g'])]
         if small: b['g'] = b['g'].difference(unary_union(small))
-    # off the streets: nothing on a carriageway (half its width, 32 px a tile, and a bit either side of its centre line); a
+    # off the streets: nothing on a carriageway (half its width, 32 px a tile, and a third of a tile either side); a
     # tunnel runs under the city, but its ramps down to the portals (the game's last 4 tiles of it at each end) are open
     net = [w for w in json.load(open('net5.json')) if len(w['pts']) > 1]
-    half = lambda w: w.get('wd', 64) / 64 + 0.1
+    half = lambda w: w.get('wd', 64) / 64 + 0.35  # (and a little more: the game's line is the exported one, simplified, and cars are wide)
     ends = [LineString(w['pts']).buffer(half(w)) for w in net if not w.get('tunnel')]
     for w in net:
         if not w.get('tunnel'): continue

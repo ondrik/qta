@@ -102,7 +102,7 @@ const solidAt = (x, y) => {
     const tx = Math.floor(x / T), ty = Math.floor(y / T);
     if (tx >= 0 && ty >= 0 && tx < MW && ty < MH) {
       const k = ty * MW + tx, j = PE[k];
-      if (j >= 0) { for (const p of PEL[j]) if (inRings(PIECES[p].wr, x, y)) return true; const t = map[k]; return solidT(t === BUILD ? GU[k] : t); }
+      if (j >= 0) { for (const p of PEL[j]) if (inRings(PIECES[p].wr, x, y)) return true; const t = map[k]; return solidT(t === BUILD ? (GU[k] ? GU[k] - 1 : BUILD) : t); } // (outside the outlines: the ground the tile keeps, GU - 1)
     }
   }
   return solidT(tileAtP(x, y));
@@ -492,8 +492,9 @@ function buildNet() {
     for (const [x, y] of p.pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
     p.bb = [x0 - 60, y0 - 60, x1 + 60, y1 + 60];
   }
-  // 1. open ends that stop on another road become T-junctions
-  for (const p of polys) if (!p.closed) for (const end of [0, p.pts.length - 1]) {
+  // 1. open ends that stop on another road become T-junctions (inner Brno's network is OpenStreetMap's own graph: what
+  // meets there shares a point already, and an end near a road it does not meet is a dead end)
+  for (const p of B5 ? [] : polys) if (!p.closed) for (const end of [0, p.pts.length - 1]) {
     const e = p.pts[end]; let best = null;
     for (const q of polys) {
       if (q === p || (q.tunnel && !p.tunnel) || (q.over && !p.over)) continue; // (a street that ends above a tunnel, or under an overpass, does not meet it)
@@ -535,7 +536,7 @@ function buildNet() {
   }
   // 4. nodes and edges
   const nodeAt = (x, y) => {
-    for (const n of NODES) if (Math.hypot(n.x - x, n.y - y) < 22) return n;
+    for (const n of NODES) if (Math.hypot(n.x - x, n.y - y) < (B5 ? 6 : 22)) return n;
     const n = { id: NODES.length, x, y, edges: [] }; NODES.push(n); return n;
   };
   for (const pc of pieces) {
@@ -556,6 +557,24 @@ function buildNet() {
     for (const e of EDGES) if (e.oneway && !e.ring && e.a !== e.b && comp[e.a] !== comp[e.b]) { e.oneway = false; e.lb = Math.max(1, e.lf >> 1); e.lf = Math.max(1, e.lf - e.lb); changed = true; }
     if (!changed) break;
   }
+  // inner Brno: a junction of dual carriageways (or with slip roads) is several nodes a few metres apart joined by short
+  // pieces; such a cluster is signalled as one, by the roads coming into it (cl: each node's cluster)
+  const cl = NODES.map((_, i) => i);
+  if (B5) {
+    const find = i => { while (cl[i] !== i) i = cl[i] = cl[cl[i]]; return i; };
+    for (const e of EDGES) if (e.len < 80 && e.a !== e.b && !e.over && !e.tunnel && NODES[e.a].edges.length >= 3 && NODES[e.b].edges.length >= 3) cl[find(e.a)] = find(e.b);
+    for (let i = 0; i < cl.length; i++) cl[i] = find(i);
+  }
+  const inner = e => cl[e.a] === cl[e.b]; // (a piece within a cluster)
+  const clusters = new Map(), sigC = new Set();
+  if (B5 && BRNO_DATA.sig) { // each signal OpenStreetMap maps (at a junction, or at the stop line up to 30 m before it) lights its nearest junction
+    const SG = BRNO_DATA.sig;
+    for (let i = 0; i < SG.length; i += 2) {
+      let best = null, bd = 6 * T;
+      for (const n of NODES) if (n.edges.length >= 3) { const d = Math.hypot(SG[i] * T - n.x, SG[i + 1] * T - n.y); if (d < bd) { bd = d; best = n; } }
+      if (best) sigC.add(cl[best.id]);
+    }
+  }
   // direction of an edge leaving a node
   for (const n of NODES) {
     n.dirs = new Map();
@@ -566,12 +585,32 @@ function buildNet() {
       n.dirs.set(e.id, [dx / l, dy / l]);
     }
     n.hw = n.edges.some(e => e.hw); n.ring = n.edges.some(e => e.ring);
-    n.light = n.edges.length >= 3 && !n.ring && (B5 ? n.edges.filter(e => e.rank <= 4).length >= 2 && n.edges.every(e => e.len > 160) && !n.edges.some(e => e.over || e.tunnel) // (inner Brno: where main roads meet)
+  }
+  for (const n of NODES) { // (signals and clearances, once every node knows its directions: a cluster needs its neighbours')
+    n.light = n.edges.length >= 3 && !n.ring && (B5 ? false // (inner Brno: by clusters, below)
       : BRNO ? !n.edges.some(e => e.over) && n.edges.every(e => e.len > 200) && (n.hw || !!townAt(Math.floor(n.x / T), Math.floor(n.y / T))) // Brno: the city's crossings, the ring road's too
       : !n.hw && !n.edges.some(e => e.rural)); // the island: no signals on the expressway or out in the country
+    if (B5) { // a cluster is signalled where main roads come into it from clearly different directions
+      let C = clusters.get(cl[n.id]);
+      if (!C) {
+        const mem = NODES.filter(m => cl[m.id] === cl[n.id]), ext = [];
+        for (const m of mem) for (const e of m.edges) if (!inner(e) && m.dirs.has(e.id)) ext.push([e, m]);
+        const ax = ([e, m]) => { const [dx, dy] = m.dirs.get(e.id); return ((Math.atan2(dy, dx) % Math.PI) + Math.PI) % Math.PI; };
+        const ad = (a, b) => { const d = Math.abs(a - b) % Math.PI; return Math.min(d, Math.PI - d); };
+        const main = ext.filter(([e]) => e.rank <= 4).map(ax);
+        const signal = BRNO_DATA.sig ? sigC.has(cl[n.id]) // (traffic signals as mapped; without them, where main roads meet)
+          : main.some(a => main.some(b => ad(a, b) > 0.5)) && ext.every(([e]) => e.len > 100);
+        const light = ext.length >= 3 && signal && !mem.some(m => m.edges.some(e => e.over || e.tunnel) || m.ring);
+        const axs = ext.map(ax); let s1 = 0; for (let i = 1; i < axs.length; i++) if (ad(axs[i], axs[0]) > ad(axs[s1], axs[0])) s1 = i;
+        C = { light, grp: new Map(ext.map(([e], i) => [e.id, ad(axs[i], axs[0]) <= ad(axs[i], axs[s1]) ? 0 : 1])), off: (cl[n.id] * 7) % 9 * 2 };
+        clusters.set(cl[n.id], C);
+      }
+      n.light = C.light && n.edges.some(e => !inner(e));
+      if (n.light) { n.grp = new Map(n.edges.filter(e => !inner(e)).map(e => [e.id, C.grp.get(e.id)])); n.off = C.off; LIGHT_NODES.push(n); }
+    }
     const mw = Math.max(...n.edges.map(e => e.wd)) / 2; // (lanes stop short of the widest street's kerb, crosswalks beyond it)
     n.clr = n.light ? Math.max(72, mw + 40) : n.edges.length >= 3 ? Math.max(B5 ? 0 : 40, mw + 8) : 0;
-    if (n.light) {
+    if (n.light && !B5) {
       // two signal groups: the approaches closest to each of the two most different axes
       const ax = n.edges.map(e => { const [dx, dy] = n.dirs.get(e.id); return ((Math.atan2(dy, dx) % Math.PI) + Math.PI) % Math.PI; });
       const ad = (a, b) => { const d = Math.abs(a - b) % Math.PI; return Math.min(d, Math.PI - d); };
@@ -608,7 +647,7 @@ function buildNet() {
     for (let s = s0; s < s1; s += LSTEP) sample(s);
     sample(s1);
     L.n = L.x.length; L.len = (L.n - 2) * LSTEP + Math.hypot(L.x[L.n - 1] - L.x[L.n - 2], L.y[L.n - 1] - L.y[L.n - 2]);
-    L.light = to.light ? to : null; L.grp = to.light ? to.grp.get(e.id) : 0;
+    L.light = to.light && to.grp.has(e.id) ? to : null; L.grp = L.light ? to.grp.get(e.id) : 0; // (not on a piece within a cluster)
     LANES.push(L); OUT[from.id].push(L);
   }
   for (const L of LANES) {
@@ -694,11 +733,23 @@ function carDeckZ(c) {
 }
 // is the car heading along the overpass here (so going up its ramp, not crossing under it)?
 function deckAligned(c, k) {
-  if (c.ln) return !!c.ln.L.e.over; // (a car on a lane is wherever its lane is)
-  const id = oE[k]; if (id < 0) return false;
-  const P = EDGES[id].pts; let best = 1e9, h = 0;
-  for (let i = 0; i < P.length - 1; i++) { const r = closestOnSeg([c.x, c.y], P[i], P[i + 1]); if (r.d < best) { best = r.d; h = Math.atan2(P[i + 1][1] - P[i][1], P[i + 1][0] - P[i][0]); } }
-  return best < 40 && Math.abs(Math.cos(h - c.angle)) > 0.75;
+  if (c.ln && c.driver !== 'player') return !!c.ln.L.e.over; // (a car on a lane is wherever its lane is; yours, wherever you steer it)
+  for (const e of OVERS) { // (any deck here that the car is on and heading along: at an interchange they lie close together)
+    const b = e.obb; if (c.x < b[0] || c.x > b[2] || c.y < b[1] || c.y > b[3]) continue;
+    const P = e.pts, r = e.wd / 2 + 8;
+    for (let i = 0; i < P.length - 1; i++) { const q = closestOnSeg([c.x, c.y], P[i], P[i + 1]); if (q.d < r && Math.abs(Math.cos(Math.atan2(P[i + 1][1] - P[i][1], P[i + 1][0] - P[i][0]) - c.angle)) > 0.75) return true; }
+  }
+  return false;
+}
+// is car c going down (or up) one of the tunnels' ramps: on it, heading along it? (else it is on a street beside the portal)
+function rampAligned(c) {
+  if (c.ln && c.driver !== 'player') return !!c.ln.L.e.tunnel;
+  for (const r of RAMPS) {
+    const b = r.bb; if (c.x < b[0] || c.x > b[2] || c.y < b[1] || c.y > b[3]) continue;
+    const P = r.pts, w = r.e.wd / 2 + 8;
+    for (let i = 0; i < P.length - 1; i++) { const q = closestOnSeg([c.x, c.y], P[i], P[i + 1]); if (q.d < w && Math.abs(Math.cos(Math.atan2(P[i + 1][1] - P[i][1], P[i + 1][0] - P[i][0]) - c.angle)) > 0.75) return true; }
+  }
+  return false;
 }
 function tunnelPrep() {
   const bbOf = (pts, m) => { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } return [x0 - m, y0 - m, x1 + m, y1 + m]; };
@@ -900,7 +951,7 @@ function genMap() {
   const dry = (tx, ty) => fieldAt('sb', tx, ty) > 0 || fieldAt('sd', tx, ty) > 0 ? SAND : GRASS;
   for (let k = 0; k < MW * MH; k++) {
     const e = eR[k] >= 0 ? EDGES[eR[k]] : null, tx = k % MW, ty = (k / MW) | 0, town = townAt(tx, ty);
-    if (dR[k] < 32) { if (map[k] === WATER) bridge[k] = 1; map[k] = ROAD; hwT[k] = e.hw ? 1 : 0; }
+    if (dR[k] < 32 || (B5 && map[k] === WATER && dR[k] < 56)) { if (map[k] === WATER) bridge[k] = 1; map[k] = ROAD; hwT[k] = e.hw ? 1 : 0; } // (a bridge reaches past the tiles its carriageway's middle is in)
     else if (map[k] === WATER) continue;
     else if (dR[k] < 72 && !(B5 && bmask[k])) { if (e.rural) { if (map[k] === ROCK) map[k] = dry(tx, ty); } else map[k] = e.hw ? GRASS : WALK; }
     else if (!B5 && (inCity(tx, ty) || (town && map[k] !== ROCK && !(town.beach && ty > palmY(tx) - 1)))) free[k] = 1; // (the detailed map's blocks are its real buildings)
@@ -924,7 +975,7 @@ function genMap() {
   if (!BRNO) for (let ty = RB.y - 4; ty <= RB.y + 4; ty++) for (let tx = RB.x - 4; tx <= RB.x + 4; tx++)
     if (Math.hypot(tx + 0.5 - RB.x, ty + 0.5 - RB.y) < RB.r - 2.3) { map[ty * MW + tx] = GRASS; free[ty * MW + tx] = 0; }
   // crosswalks at signalised junctions
-  for (const n of LIGHT_NODES) for (const e of n.edges) {
+  for (const n of LIGHT_NODES) for (const e of n.edges) if (n.grp.has(e.id)) {
     const [ux, uy] = n.dirs.get(e.id);
     const R = Math.ceil((n.clr + e.wd / 2) / T) + 1;
     for (let ty = Math.floor(n.y / T) - R; ty <= Math.floor(n.y / T) + R; ty++) for (let tx = Math.floor(n.x / T) - R; tx <= Math.floor(n.x / T) + R; tx++) {
@@ -1893,9 +1944,11 @@ function genMap() {
         prop('boat', tx + 0.5, ty + 0.5, { a: srnd() * TAU, row: srnd() < 0.4, c: spick(['#f4f4f4', '#1e5aa8', '#c0392b', '#f4f4f4']) });
     }
     const TS = B5 ? 1.6 : 1; // (trees are bigger next to 5 m tiles)
+    // how far (x, y) is outside the kerb of street id: a street tree's trunk stands on the pavement, not in a lane
+    const offKerb = (x, y, id) => { if (id < 0) return 1e9; const e = EDGES[id], P = e.pts; let d = 1e9; for (let i = 0; i < P.length - 1; i++) d = Math.min(d, closestOnSeg([x, y], P[i], P[i + 1]).d); return d - e.wd / 2; };
     if (B5) { // the trees OpenStreetMap knows, on the streets and in the parks
       const r = BRNO_DATA.trees; let x = 0, y = 0;
-      for (let i = 0; i < r.length;) { const a = vlq(r, i); i = a[1]; const b = vlq(r, i); i = b[1]; x += a[0]; y += b[0]; const k = (y >> 2) * MW + (x >> 2); if (map[k] !== BUILD && map[k] !== ROAD && map[k] !== WATER && dR[k] > 40 && tunT[k] !== 2 && ovT[k] !== 2 && !solidAt(x / 4 * T, y / 4 * T)) { tree(x / 4, y / 4, (10 + srnd() * 6) * TS, srnd() * 6 | 0); taken[k] = 1; } }
+      for (let i = 0; i < r.length;) { const a = vlq(r, i); i = a[1]; const b = vlq(r, i); i = b[1]; x += a[0]; y += b[0]; const k = (y >> 2) * MW + (x >> 2); if (map[k] !== BUILD && map[k] !== ROAD && map[k] !== WATER && dR[k] > 40 && tunT[k] !== 2 && ovT[k] !== 2 && !solidAt(x / 4 * T, y / 4 * T) && offKerb(x / 4 * T, y / 4 * T, eR[k]) > 10) { tree(x / 4, y / 4, (10 + srnd() * 6) * TS, srnd() * 6 | 0); taken[k] = 1; } }
     }
     // crop fields: inner Brno's are its real farmland, drawn as polygons (the tiles only slow you down); elsewhere,
     // rectangles fitted into the farmland
@@ -1945,7 +1998,8 @@ function genMap() {
       if (!tw || DISTRICTS[tw.reg].style === 'old' || DISTRICTS[tw.reg].style === 'industrial') continue;
       for (let s0 = 110; s0 < e.len - 110; s0 += B5 ? 170 : 110) {
         const [x, y, h] = edgePt(e, s0), nx = -Math.sin(h), ny = Math.cos(h);
-        for (const sd of [-1, 1]) { const px = x + nx * 58 * sd, py = y + ny * 58 * sd; if (tileAtP(px, py) === WALK && !taken[Math.floor(py / T) * MW + Math.floor(px / T)]) tree(px / T, py / T, (9 + srnd() * 3) * TS); }
+        // (on the pavement: not in the median of a dual carriageway, nor in its other half)
+        for (const sd of [-1, 1]) { const o = e.wd / 2 + 26, px = x + nx * o * sd, py = y + ny * o * sd, k = Math.floor(py / T) * MW + Math.floor(px / T); if (tileAtP(px, py) === WALK && !taken[k] && offKerb(px, py, eR[k]) > 10) tree(px / T, py / T, (9 + srnd() * 3) * TS); }
       }
     }
   }
@@ -2127,6 +2181,87 @@ for (const e of EDGES) {
   BUS_STOPS.push({ x: sx, y: sy, L, s });
   props.push({ k: 'busstop', x: sx, y: sy, a: h });
 }
+// ---- trams (inner Brno at 5 m a tile): OpenStreetMap's tram routes, each along its own track, with its stops. A tram
+// keeps its line's spacing, stops at every stop and, where it runs along a street, at the street's red lights; it
+// brakes for whatever is on the track, and what it hits is pushed aside (some 40 t of tram). Traffic waits behind it.
+const TRAM_W = 16; // (2.5 m: on double track two trams pass with a hand's breadth between them)
+const TRAM_MODELS = [ // Brno's fleet: section lengths (px, 6.4 to the metre), the gap at each joint, livery, cabs at both ends
+  { name: 'KT8D5', secs: [62, 62, 62], gap: 4, body: '#d3202a', roof: '#ece5d2', two: true, p: 0.35 },
+  { name: '13T', secs: [44, 28, 44, 28, 44], gap: 3, body: '#d3202a', roof: '#d9dcdf', two: true, p: 0.3 },
+  { name: 'T3', secs: [94, 94], gap: 8, body: '#ece3c6', roof: '#e9e2cc', band: '#c8202a', two: false, p: 0.2 },
+  { name: 'VarioLF', secs: [82, 82], gap: 4, body: '#d3202a', roof: '#e7e2d4', two: false, p: 0.15 },
+];
+const TRAM_V = 105, TRAM_ACC = 45, TRAM_BRK = 70, TRAM_EBRK = 170; // px/s, px/s² (cruising at about 60 km/h)
+const TRAM_GAP = 12500; // px of route between one tram of a route and the next (about 2 km)
+const TL = B5 && BRNO_DATA.tl ? BRNO_DATA.tl.map(([ref, col, dest, f, st, lv, next, fl], i) => {
+  const pts = [], cs = [0];
+  for (let k = 0; k < f.length; k += 2) pts.push([f[k] * T, f[k + 1] * T]);
+  for (let k = 1; k < pts.length; k++) cs.push(cs[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+  const stops = []; for (let k = 0; k < st.length; k += 2) stops.push({ s: st[k] * T, name: BRNO_DATA.tsn[st[k + 1]] });
+  const lvs = []; for (let k = 0; k < lv.length; k += 3) lvs.push([lv[k] * T, lv[k + 1] * T, lv[k + 2]]);
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  return { i, ref, col, dest, pts, cs, len: cs[cs.length - 1], stops, lv: lvs, next, edgeIn: !!(fl & 1), edgeOut: !!(fl & 2), fed: !!(fl & 4), lights: [], bb: [x0, y0, x1, y1], spawnT: 0 };
+}) : [];
+// a point on a route at arc length s, and the heading there (straight on beyond either end)
+function tramPt(R, s) {
+  const cs = R.cs, P = R.pts, n = P.length;
+  if (s <= 0 || s >= R.len) {
+    const [a, b] = s <= 0 ? [P[0], P[1]] : [P[n - 2], P[n - 1]], h = Math.atan2(b[1] - a[1], b[0] - a[0]), e = s <= 0 ? s : s - R.len, o = s <= 0 ? a : b;
+    return [o[0] + Math.cos(h) * e, o[1] + Math.sin(h) * e, h];
+  }
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cs[m] <= s) lo = m; else hi = m; }
+  const a = P[lo], b = P[hi], f = (s - cs[lo]) / ((cs[hi] - cs[lo]) || 1);
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, Math.atan2(b[1] - a[1], b[0] - a[0])];
+}
+const tramLv = (R, s) => { for (const [a, b, v] of R.lv) if (s >= a && s <= b) return v; return 0; };
+for (const R of TL) {
+  // the fastest a tram takes each bit of its route (every 8 px): gently round the bends
+  R.vmax = new Float32Array(Math.ceil(R.len / 8) + 1);
+  for (let k = 0; k < R.vmax.length; k++) {
+    const k0 = tramPt(R, k * 8 - 24)[2], k1 = tramPt(R, k * 8 + 24)[2], kap = Math.abs(wrapA(k1 - k0)) / 48;
+    R.vmax[k] = kap > 1e-4 ? Math.min(TRAM_V, Math.max(28, Math.sqrt(38 / kap))) : TRAM_V;
+  }
+  // red lights: where the route comes into a signalised junction along one of its streets, the tram waits at the stop
+  // line with that street's traffic (crossing a junction on its own track, it has its own signal: it goes)
+  for (const n of LIGHT_NODES) {
+    if (n.x < R.bb[0] - 80 || n.x > R.bb[2] + 80 || n.y < R.bb[1] - 80 || n.y > R.bb[3] + 80) continue;
+    let s = 0;
+    while (s < R.len) {
+      const [x, y] = tramPt(R, s), d = Math.hypot(x - n.x, y - n.y);
+      if (d > 300) { s += Math.max(8, d - 300); continue; }
+      if (d >= 40) { s += 8; continue; }
+      let sm = s, dm = d; // (the nearest it comes)
+      for (let q = s; q < Math.min(R.len, s + 120); q += 4) { const [qx, qy] = tramPt(R, q), dq = Math.hypot(qx - n.x, qy - n.y); if (dq < dm) { dm = dq; sm = q; } }
+      let sa = sm; while (sa > 0) { const [ax, ay] = tramPt(R, sa); if (Math.hypot(ax - n.x, ay - n.y) >= n.clr) break; sa -= 4; }
+      const [ax, ay, ah] = tramPt(R, sa), ux = (ax - n.x) / (Math.hypot(ax - n.x, ay - n.y) || 1), uy = (ay - n.y) / (Math.hypot(ax - n.x, ay - n.y) || 1);
+      let be = null, bd = 0.85;
+      for (const e of n.edges) if (n.grp.has(e.id)) { const [dx, dy] = n.dirs.get(e.id), dt = dx * ux + dy * uy; if (dt > bd && Math.cos(ah) * dx + Math.sin(ah) * dy < -0.7) { bd = dt; be = e; } }
+      if (be && sa > 0) R.lights.push({ s: sa - 2, n, g: n.grp.get(be.id) });
+      s = sm + 200;
+    }
+  }
+  R.lights.sort((a, b) => a.s - b.s);
+}
+// the stops: a sign on the pavement beside each (people wait there), and the tunnels' portals
+const TRAM_STOPS = [], TRAM_PORTALS = [];
+for (const R of TL) {
+  for (const st of R.stops) {
+    const [x, y, h] = tramPt(R, st.s), nx = -Math.sin(h), ny = Math.cos(h); // (the right-hand side: the doors open there)
+    if (TRAM_STOPS.some(o => o.name === st.name && Math.hypot(o.tx - x, o.ty - y) < 40)) continue;
+    let at = null;
+    for (let o = 16; o <= 64 && !at; o += 4) { const px = x + nx * o, py = y + ny * o, k = Math.floor(py / T) * MW + Math.floor(px / T); if (px > 0 && py > 0 && px < MW * T && py < MH * T && map[k] === WALK) at = [px, py, k]; }
+    TRAM_STOPS.push({ name: st.name, tx: x, ty: y, x: at ? at[0] : x + nx * 16, y: at ? at[1] : y + ny * 16, a: h });
+    if (at) { pedSpot[at[2]] = 2; props.push({ k: 'tramstop', x: at[0], y: at[1], a: h, name: st.name }); }
+  }
+  for (const [a, b, v] of R.lv) if (v < 0) for (const [s, into] of [[a, 1], [b, -1]]) {
+    if (s < 2 || s > R.len - 2) continue;
+    const [x, y, h] = tramPt(R, s);
+    TRAM_PORTALS.push({ x, y, a: into > 0 ? h : h + Math.PI });
+  }
+}
+// (no car parked on a tram track)
+if (TL.length) for (const arr of [parkSpots, fixedParked]) for (let i = arr.length - 1; i >= 0; i--) { const o = arr[i]; if (TL.some(R => o.x > R.bb[0] - 20 && o.x < R.bb[2] + 20 && o.y > R.bb[1] - 20 && o.y < R.bb[3] + 20 && R.pts.some((q, k) => k && segPtD(o.x, o.y, R.pts[k - 1][0], R.pts[k - 1][1], q[0], q[1]) < 18))) arr.splice(i, 1); }
 for (const d of DOORS) if (!pedSpot[d.ty * MW + d.tx]) pedSpot[d.ty * MW + d.tx] = 1;
 const LANDMARKS = [
   ...(BRNO ? [] : [{ name: AIRPORT.name, x0: 76, y0: 76, x1: 96, y1: 96 }]),
@@ -2265,6 +2400,7 @@ const sfx = {
   bite: () => { tone(300, 0.1, 'sine', 0.18, 90); noise(0.2, 700, 'lowpass', 0.3); tone(1400, 0.06, 'square', 0.05, 0, now() + 0.05); },
   drag: () => noise(0.35, 4200, 'bandpass', 0.12, 6),
   snap: () => { noise(0.07, 3000, 'highpass', 0.5); tone(1900, 0.1, 'triangle', 0.08, 600); },
+  tram: () => [0, 0.2].forEach(w => { tone(2150, 0.18, 'triangle', 0.06, 0, now() + w); tone(3230, 0.12, 'sine', 0.025, 0, now() + w); }), // (the bell: ding-ding)
 };
 
 // ---- car radio: tiny procedural stations
@@ -2344,6 +2480,7 @@ const CT = {
   ambulance: { label: 'Ambulance',    w: 18, l: 38, max: 310, acc: 195, turn: 2.6, hp: 300, mass: 1.4, colors: ['#f4f6f7'] },
   swat:    { label: 'SWAT Van',       w: 20, l: 42, max: 300, acc: 170, turn: 2.2, hp: 650, mass: 2.6, colors: ['#1c2330'] },
   firetruck: { label: 'Fire Truck',   w: 20, l: 50, max: 260, acc: 150, turn: 2.0, hp: 480, mass: 2.6, colors: ['#c0392b'] },
+  tram:    { label: 'Tram',           w: 16, l: 62, max: 150, acc: 63, turn: 0, hp: 1500, mass: 40, colors: ['#d3202a'] }, // (only the cab you drive: see the trams)
   tractor: { label: 'Tractor',        w: 17, l: 27, max: 150, acc: 120, turn: 2.6, hp: 340, mass: 2.0, colors: ['#2e7d32', '#c62828', '#1565c0', '#e0a800'], offroad: true },
 };
 const CIV_RURAL = ['compact', 'sedan', 'sedan', 'truck', 'truck', 'tractor', 'bike', 'sports', 'taxi'];
@@ -2358,6 +2495,7 @@ const SHIRTS = ['#c0392b', '#2980b9', '#27ae60', '#8e44ad', '#f39c12', '#16a085'
 const SKINS = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
 
 let cars = [], peds = [], bullets = [], parts = [], decals = [], pickups = [];
+let trams = [], tramId = 1; // (inner Brno's trams, see updateTrams)
 let player = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, hp: 100, car: null, weapons: {}, weapon: null, cash: 0, lives: 5, mult: 1,
   anim: 0, moving: false, shootCd: 0, bust: 0, down: 0, downKind: null, hidden: true,
   shirt: '#ff7a1a', skin: '#e0ac69', hair: '#1a1a1a', pants: '#1e2a3a' };
@@ -2469,10 +2607,11 @@ function applyControls(c, throttle, steer, hand, dt) {
   else c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), 90 * dt);
   c.brk = hand || (throttle < 0 && c.speed > 0);
   if (hand) c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), 200 * dt);
-  // off the road a car is much slower: sand and ploughed fields bog it down, grass drags (tractors and the tank don't mind).
+  // off the road a car is much slower: sand and ploughed fields bog it down, grass drags (tractors and the tank don't mind;
+  // in a tunnel or up on an overpass the car is on its road whatever the ground above or below it is).
   // Traffic only brushes the verge on the bends of its lanes, so it gets off lightly.
   const tl = tileAtP(c.x, c.y), lane = c.driver === 'ai' || c.driver === 'service';
-  const surf = c.ghost || t.offroad || c.type === 'tank' ? 1 : tl === SAND ? (lane ? 0.62 : 0.36) : tl === FIELD ? (lane ? 0.7 : 0.42) : tl === GRASS ? (lane ? 0.85 : 0.5) : 1;
+  const surf = c.ghost || t.offroad || c.type === 'tank' || c.lay ? 1 : tl === SAND ? (lane ? 0.62 : 0.36) : tl === FIELD ? (lane ? 0.7 : 0.42) : tl === GRASS ? (lane ? 0.85 : 0.5) : 1;
   const maxF = t.max * (c.hp < t.hp * 0.3 ? 0.7 : 1);
   c.speed = clamp(c.speed, -t.max * 0.35, maxF);
   if (c.speed > maxF * surf) c.speed -= (c.speed - maxF * surf) * Math.min(1, 2.5 * dt);
@@ -2504,18 +2643,21 @@ function carHitsWall(c, x, y, a) {
   if (t) { if (c.type === 'tank' && !c.ghost) { knockTree(t); return false; } return true; }
   return false;
 }
-// in a tunnel the walls are the tube's (34 px either side of its centre line); on a ramp the street's, until the tube
 // is (x, y) up on a deck: within its carriageway and the parapets (8 px past each kerb)?
 function onDeck(x, y) {
   for (const e of OVERS) { const b = e.obb; if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue; const P = e.pts, r = e.wd / 2 + 8; for (let i = 0; i < P.length - 1; i++) if (closestOnSeg([x, y], P[i], P[i + 1]).d < r) return true; }
   return false;
 }
+// what a car off the street level runs into: up on a deck, anything off the deck; in a tunnel, the walls of its tube (as
+// wide as its lanes, with a shoulder each side); on a ramp, the street's walls until the tube begins
 function layerSolid(c, x, y) {
   const tx = Math.floor(x / T), ty = Math.floor(y / T); if (tx < 0 || ty < 0 || tx >= MW || ty >= MH) return true;
   const k = ty * MW + tx, tz = tunT[k];
   if (c.lay === 3) return !onDeck(x, y); // up on a deck: only the deck is road
   // (in a tunnel only its bore is road, as wide as its lanes; a deck's ramp that passes over one is not in it)
-  if (tz === 1 && c.lay !== 4) { const id = tE[k]; if (id < 0) return true; const P = EDGES[id].pts, r = EDGES[id].wd / 2 + 2; for (let i = 0; i < P.length - 1; i++) if (closestOnSeg([x, y], P[i], P[i + 1]).d < r) return false; return true; }
+  if (tz === 1 && c.lay !== 4) { // (the tube the car itself is in, not whichever is nearest each corner: twin tubes run close)
+    const id = tE[Math.floor(c.y / T) * MW + Math.floor(c.x / T)] >= 0 ? tE[Math.floor(c.y / T) * MW + Math.floor(c.x / T)] : tE[k]; if (id < 0) return true;
+    const P = EDGES[id].pts, r = EDGES[id].wd / 2 + 10; for (let i = 0; i < P.length - 1; i++) if (closestOnSeg([x, y], P[i], P[i + 1]).d < r) return false; return true; }
   return tz === 0 && c.lay === 1 ? true : solidAt(x, y);
 }
 const layersApart = (a, b) => { const p = a.lay || 0, q = b.lay || 0; // (one in a tunnel or up on a deck, the other on the street; ramps meet both)
@@ -2557,7 +2699,8 @@ function moveCar(c, dt) {
   const impact = wallMove(c, dt);
   if (TUNNELS.length || OVERS.length) { // the layer the car is on: 0 the street, 1 a tunnel (only down a ramp, 2), 3 an overpass (only up a ramp, 4)
     const k = Math.floor(c.y / T) * MW + Math.floor(c.x / T), tz = tunT[k] || 0, oz = ovT[k] || 0, L0 = c.lay;
-    if (tz && !(oz && (L0 === 3 || L0 === 4))) c.lay = L0 === undefined ? (tz === 1 && c.ln && c.ln.L.e.tunnel ? 1 : tz === 2 ? 2 : 0) : tz === 2 ? 2 : L0 === 1 || L0 === 2 ? 1 : L0 === 3 || L0 === 4 ? L0 : 0;
+    if (tz && !(oz && (L0 === 3 || L0 === 4))) c.lay = L0 === undefined ? (tz === 1 && c.ln && c.ln.L.e.tunnel ? 1 : tz === 2 && rampAligned(c) ? 2 : 0)
+      : tz === 2 ? (L0 === 1 || L0 === 2 || rampAligned(c) ? 2 : L0 === 3 || L0 === 4 ? L0 : 0) : L0 === 1 || L0 === 2 ? 1 : L0 === 3 || L0 === 4 ? L0 : 0; // (down a ramp only along it)
     else if (oz) { // (a car that starts out here is up there only if its lane is)
       const up = L0 === undefined ? !!(c.ln && c.ln.L.e.over) : null;
       c.lay = oz === 2 ? (L0 === 3 || L0 === 4 || (up ?? deckAligned(c, k)) ? 4 : 0) : L0 === 3 || (L0 === 4 && deckAligned(c, k)) || up ? 3 : 0;
@@ -2719,6 +2862,7 @@ function obstacleAhead(c, ignore) {
     if (Math.abs(-dx * hy + dy * hx) < 15) return o;
   }
   if (c.lay === 1 || c.lay === 3) return null; // (nobody walks in the tunnels, or up on the decks)
+  if (trams.length) { const tr = tramAhead(c, hx, hy, look + 10); if (tr) return tr; }
   const chk = p => { const dx = p.x - c.x, dy = p.y - c.y, f = dx * hx + dy * hy; return f > 0 && f < look && Math.abs(-dx * hy + dy * hx) < 13; };
   for (const p of peds) if (!p.dead && p !== ignore && chk(p)) return p;
   return !player.car && !player.hidden && !player.down && chk(player) ? player : null;
@@ -3253,6 +3397,7 @@ function explode(x, y, r, src) {
       c.vx += (c.x - x) / (d || 1) * 260 * f; c.vy += (c.y - y) / (d || 1) * 260 * f;
     }
   }
+  for (const t of trams) for (const S of t.sec) { const d = Math.hypot(S.x - x, S.y - y); if (!S.lv && d < r + S.l / 2) { damageTram(t, (1 - d / (r + S.l / 2)) * 420, src); break; } }
   for (const p of peds) if (!p.dead && Math.hypot(p.x - x, p.y - y) < r) killPed(p, src, true);
   scare(x, y, r * 4);
   if (!player.car && !player.hidden) {
@@ -3449,7 +3594,7 @@ function fire() {
 function enterExit() {
   if (player.car) {
     const c = player.car;
-    if (Math.abs(c.speed) > 90) { msg('Slow down to bail out!', 1.5); return; }
+    if (Math.abs(c.speed) > 90 || (c.tram && Math.abs(c.speed) > 25)) { msg(c.tram ? 'Stop the tram first.' : 'Slow down to bail out!', 1.5); return; }
     if (c.lay === 1) { msg('Not in the tunnel: drive out first.', 1.5); return; }
     if (c.lay === 3) { msg('Not up on the overpass: drive off it first.', 1.5); return; }
     if (player.tow) dropTow();
@@ -3466,6 +3611,8 @@ function enterExit() {
     const d = d2(c.x, c.y, player.x, player.y);
     if (d < bd) { bd = d; bestC = c; }
   }
+  const tc = trams.length ? tramCabNear(player.x, player.y) : null; // (or a tram's cab, up at its front)
+  if (tc && (!bestC || tc.d < bd)) { boardTram(tc.t); return; }
   if (!bestC) return;
   const c = bestC, t = CT[c.type];
   // getting in takes a moment: walk round to the driver's door (or the other one, if that side is blocked), open it, drag
@@ -3529,7 +3676,7 @@ function getIn(c, jacked) {
     if (copNear(c.x, c.y, 380) || wasCop) addHeat(wasCop ? 1.2 : 0.6);
     msg(wasCop ? 'You jacked a cop car. Bold.' : `Carjacked a ${CT[c.type].label}!`, 2);
   } else if (c.type === 'police' && !jacked) addHeat(1);
-  c.driver = 'player'; player.car = c; c.parked = false; c.job = null; c.chase = false; c.block = false; c.recall = false;
+  c.driver = 'player'; player.car = c; c.parked = false; c.job = null; c.chase = false; c.block = false; c.recall = false; c.ln = null; // (its last driver's lane is no longer its)
   if (c.type === 'ambulance' && player.hp < 100) { player.hp = 100; msg('Ambulance first-aid kit: health restored.', 2); }
   if (c.type === 'tank') msg('TANK! Space fires the cannon.', 3);
   if (c.type === 'firetruck') msg('Fire truck: Space sprays water.', 3);
@@ -3824,10 +3971,14 @@ function updatePlayer(dt) {
     player.fishHint = fs;
   }
   if (hit('KeyQ', 'Tab')) { cycleWeapon(); msg(player.weapon ? WEAPONS[player.weapon].name : 'Fists', 1.2); }
-  if (hit('KeyX')) superpose();
-  if (hit('KeyT')) entangle();
-  if (hit('KeyG')) grabTow();
-  if (player.car) {
+  if (player.car && player.car.tram) { if (hit('KeyX') || hit('KeyT') || hit('KeyG')) msg('A tram keeps to its rails: no quantum tricks aboard, and no tweezer.', 2); }
+  else {
+    if (hit('KeyX')) superpose();
+    if (hit('KeyT')) entangle();
+    if (hit('KeyG')) grabTow();
+  }
+  if (player.car && player.car.tram) { /* (the tram you drive answers to the keys in updateTrams) */ }
+  else if (player.car) {
     const c = player.car, special = c.type === 'tank' || c.type === 'firetruck';
     // keyboard steering ramps in instead of snapping to full lock
     c.steerIn = (c.steerIn || 0) + ((keys.right - keys.left) - (c.steerIn || 0)) * Math.min(1, dt * 9);
@@ -3960,6 +4111,14 @@ function updateBullets(dt) {
           if (c.driver === 'ai' && b.owner === 'player' && Math.random() < 0.3) ejectDriver(c, true);
           addPart(b.x, b.y, rand(-50, 50), rand(-50, 50), 0.2, 1.5, '#ffe08a');
           done = true; break;
+        }
+      }
+      if (!done && trams.length) { // (a tram's side stops a bullet)
+        const t = tramHitAt(b.x, b.y);
+        if (t && !(b.owner === 'player' && t.cab && player.car === t.cab)) {
+          if (!b.rocket) damageTram(t, b.dmg * (t.cab ? 0.5 : 0.15), b.owner === 'player' ? 'player' : null);
+          for (let k = 0; k < 3; k++) addPart(b.x, b.y, rand(-50, 50), rand(-50, 50), 0.2, 1.5, '#ffe08a');
+          done = true;
         }
       }
       if (done) break;
@@ -4357,7 +4516,7 @@ function spawnTraffic(type, driver) {
     const q = { x: rand(o.x0, o.x1), y: rand(o.y0, o.y1) };
     if (inV(q)) continue;
     const p = nearestLanePt(q.x, q.y, null, 64);
-    if (!p || inV(p) || cars.some(c => d2(c.x, c.y, p.x, p.y) < 50 * 50)) continue;
+    if (!p || inV(p) || cars.some(c => d2(c.x, c.y, p.x, p.y) < 50 * 50) || (trams.length && tramHitAt(p.x, p.y))) continue;
     const c = makeCar(type, p.x, p.y, p.h, driver);
     c.ln = { L: p.L, s: p.s, nx: null };
     c.speed = c.ai.cruise * 0.7; c.vx = Math.cos(c.angle) * c.speed; c.vy = Math.sin(c.angle) * c.speed;
@@ -4533,6 +4692,376 @@ function updateLab() {
 }
 
 // ============================================================ main update
+// ============================================================ trams
+function newTram(R, s, prev, m) {
+  if (!m) { let r = Math.random(); m = TRAM_MODELS.find(q => (r -= q.p) < 0) || TRAM_MODELS[0]; }
+  const len = m.secs.reduce((a, b) => a + b, 0) + m.gap * (m.secs.length - 1);
+  const t = { id: tramId++, R, s, v: 0, prev: prev || null, m, len, si: 0, li: 0, dwell: 0, doors: 0, bell: 0, wait: 0, hp: 1500, dead: false, fire: 0,
+    sec: [], cab: null, left: false, gone: false, blockBy: null, endT: 0 };
+  tramIdx(t); placeTram(t); return t;
+}
+function tramIdx(t) { // the next stop and the next light from where the tram is
+  t.si = t.R.stops.findIndex(q => q.s > t.s - 4); if (t.si < 0) t.si = t.R.stops.length;
+  t.li = t.R.lights.findIndex(q => q.s > t.s - 2); if (t.li < 0) t.li = t.R.lights.length;
+}
+const tramAt = (t, s) => s < 0 && t.prev ? tramPt(t.prev, t.prev.len + s) : tramPt(t.R, s);
+// each section a chord between its two bogies, so the tram bends round the curves
+function placeTram(t) {
+  let o = 0; t.sec.length = 0;
+  for (const l of t.m.secs) {
+    const sa = t.s - o, sb = sa - l, a = tramAt(t, sa), b = tramAt(t, sb), sm = (sa + sb) / 2;
+    const on = sb >= 0 || !t.prev ? t.R : null; // (the run it is on, or null where it straddles two)
+    t.sec.push({ x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2, a: Math.atan2(a[1] - b[1], a[0] - b[0]), l, sa, sb, on,
+      lv: sm < 0 && t.prev ? tramLv(t.prev, t.prev.len + sm) : tramLv(t.R, sm) });
+    o += l + t.m.gap;
+  }
+  const f = t.sec[0]; t.x = f.x; t.y = f.y; t.angle = f.a;
+  if (t.cab) Object.assign(t.cab, { x: f.x, y: f.y, angle: f.a, speed: t.v, vx: Math.cos(f.a) * t.v, vy: Math.sin(f.a) * t.v, hp: t.hp });
+}
+// is the track clear for a new tram from s0 to s1 of route R?
+function tramClear(R, s0, s1) {
+  for (let s = s0; s <= s1; s += 30) {
+    const [x, y] = tramPt(R, s);
+    for (const t of trams) if (Math.abs(t.x - x) < 260 && Math.abs(t.y - y) < 260) for (const S of t.sec) if (d2(S.x, S.y, x, y) < (S.l / 2 + 30) ** 2) return false;
+  }
+  return true;
+}
+function initTrams() {
+  trams = [];
+  for (const R of TL) {
+    R.spawnT = rand(0, TRAM_GAP / 70);
+    for (let s = 230 + rand(0, TRAM_GAP); s < R.len - 30; s += TRAM_GAP * rand(0.8, 1.2)) {
+      const t = newTram(R, s);
+      if (tramClear(R, s - t.len - 20, s + 20)) trams.push(t);
+    }
+  }
+}
+// the capsules (axis and radius) of what might be on a tram's track, for its look ahead and for the cars' look ahead
+function capsOf(o) {
+  if (o.sec) return o.sec.filter(S => S.lv === 0).map(S => { const c = Math.cos(S.a) * S.l / 2, s = Math.sin(S.a) * S.l / 2; return [S.x + c, S.y + s, S.x - c, S.y - s, TRAM_W / 2, o]; });
+  if (o.type) { const [a, b, r] = carCircles(o); return [[a[0], a[1], b[0], b[1], r, o]]; }
+  return [[o.x, o.y, o.x, o.y, 4, o]];
+}
+function segPtD(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy, f = l2 ? clamp(((px - ax) * dx + (py - ay) * dy) / l2, 0, 1) : 0;
+  return Math.hypot(px - ax - dx * f, py - ay - dy * f);
+}
+function segSegD(a, b, c, d) { // (two segments: [ax, ay], [bx, by] and [cx, cy], [dx, dy])
+  const cr = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  if (cr(a, b, c) * cr(a, b, d) < 0 && cr(c, d, a) * cr(c, d, b) < 0) return 0;
+  return Math.min(segPtD(a[0], a[1], c[0], c[1], d[0], d[1]), segPtD(b[0], b[1], c[0], c[1], d[0], d[1]), segPtD(c[0], c[1], a[0], a[1], b[0], b[1]), segPtD(d[0], d[1], a[0], a[1], b[0], b[1]));
+}
+// a car's look ahead: a tram across its way (the car waits for it, as Brno's rules say, also behind one at a stop)
+function tramAhead(c, hx, hy, look) {
+  const t0 = CT[c.type], a = [c.x + hx * (t0.l / 2 - 4), c.y + hy * (t0.l / 2 - 4)], b = [c.x + hx * look, c.y + hy * look];
+  for (const t of trams) {
+    if (t.cab || Math.abs(t.x - c.x) > 320 || Math.abs(t.y - c.y) > 320) continue;
+    for (const [ax, ay, bx, by] of capsOf(t)) {
+      if (segSegD(a, b, [ax, ay], [bx, by]) < TRAM_W / 2 + t0.w / 2 - 1) {
+        return t.px || (t.px = { tram: t, get x() { return t.x; }, get y() { return t.y; }, ai: { get queued() { return !(t.left || t.dead); }, dwell: 0 }, get type() { return t.left || t.dead ? 'tram' : undefined; }, get dead() { return t.left || t.dead; }, driver: null });
+      }
+    }
+  }
+  return null;
+}
+// the tram's look ahead along its track: how far its nose is from the first thing in the way (cars, people, other trams)
+function tramLook(t, look, cands) {
+  for (let d = 0; d <= look; d += 9) {
+    const [x, y] = tramAt(t, t.s + d);
+    for (const [ax, ay, bx, by, r, o] of cands) if (segPtD(x, y, ax, ay, bx, by) < TRAM_W / 2 + r - 2) return [Math.max(0, d - r), o];
+  }
+  return null;
+}
+function tramBell(t) { if (t.bell <= 0 && onScreen(t.x, t.y, 120)) { sfx.tram(); t.bell = 1.2; } }
+function tramStopSay(t) { const st = t.R.stops[t.si]; if (t.cab && st) msg(`Next stop: ${st.name}`, 2.5); }
+function updateTrams(dt, active) {
+  if (!TL.length) return;
+  // new trams where their routes come into the map (or start at a terminus, out of sight)
+  for (const R of TL) {
+    if (R.fed || (R.spawnT -= dt) > 0) continue;
+    const [x, y] = tramPt(R, 0);
+    if (!R.edgeIn && onScreen(x, y, 300)) { R.spawnT = 4; continue; }
+    const t = newTram(R, 0);
+    t.s = t.len + 2; tramIdx(t); placeTram(t);
+    if (tramClear(R, 0, t.len + 60)) { trams.push(t); R.spawnT = TRAM_GAP / 70 * rand(0.8, 1.2); } else R.spawnT = 5;
+  }
+  const vs = allCams().map(c => viewRect(700, c)), near = o => vs.some(v => o.x > v.x0 && o.x < v.x1 && o.y > v.y0 && o.y < v.y1);
+  const caps = []; // what is on the street near you: the cars, the people, you
+  for (const c of active) if (c.lay !== 1 && c.lay !== 3) caps.push(...capsOf(c));
+  for (const p of peds) if (!p.dead && near(p)) caps.push(capsOf(p)[0]);
+  if (!player.car && !player.hidden && !player.down) caps.push([player.x, player.y, player.x, player.y, 4, player]);
+  const tcaps = trams.map(capsOf);
+  for (const t of trams) {
+    t.bell -= dt;
+    if (t.dead) { t.v = Math.max(0, t.v - TRAM_EBRK * dt); if (t.fire > 0 && Math.random() < 0.5) { const S = pick(t.sec); addPart(S.x + rand(-20, 20), S.y + rand(-6, 6), rand(-10, 10), rand(-30, -10), 0.7, rand(3, 7), pick(['#ff9c2a', '#ffdf6b', '#ff5a1f', '#555']), 6, true); } }
+    const isNear = near(t);
+    if (t.cab && player.car !== t.cab) { t.cab = null; t.left = true; } // (you got off, or were wasted or busted aboard)
+    const R = t.R;
+    if (t.cab) { // you drive: ↑ go, ↓ brake (and slowly back), Space the bell
+      const c = t.cab, up = keys.up, dn = keys.down;
+      if (up) t.v = Math.min(150, t.v + (t.v < 0 ? TRAM_EBRK : TRAM_ACC * 1.4) * dt);
+      else if (dn) t.v = t.v > 0 ? Math.max(0, t.v - TRAM_EBRK * dt) : Math.max(-40, t.v - 25 * dt);
+      else t.v -= Math.sign(t.v) * Math.min(Math.abs(t.v), 8 * dt);
+      if (keys.fire && t.bell <= 0) { sfx.tram(); t.bell = 0.6; scare(t.x, t.y, 160); }
+      t.doors = Math.max(0, t.doors - dt * 2);
+      c.brk = dn;
+    } else if (t.left || t.dead) { t.v = Math.max(0, t.v - TRAM_BRK * dt); t.doors = Math.max(0, t.doors - dt); }
+    else {
+      let target = TRAM_V;
+      // round the bends ahead
+      const brk = t.v * t.v / (2 * TRAM_BRK) + 24;
+      for (let d = 0; d <= brk; d += 8) { const k = Math.round((t.s + d) / 8); if (k >= 0 && k < R.vmax.length) target = Math.min(target, Math.sqrt(R.vmax[k] ** 2 + 2 * TRAM_BRK * d)); }
+      // the next stop: dwell there, doors open, people get on and off, then the bell and away
+      const st = R.stops[t.si];
+      if (st) {
+        const d = st.s - t.s;
+        if (t.dwell > 0) {
+          t.dwell -= dt; target = 0; t.v = 0;
+          t.doors = t.dwell > 0.8 ? Math.min(1, t.doors + dt * 2) : Math.max(0, t.doors - dt * 1.5);
+          if (isNear && t.dwell > 1.5 && Math.random() < dt * 1.5) for (const p of peds) if (p.wait === 'bus' && !p.gone && d2(p.x, p.y, t.x, t.y) < 130 * 130) { p.gone = true; break; }
+          if (isNear && t.dwell > 2 && Math.random() < dt * 0.4 && peds.length < 90) { // (someone gets off)
+            const S = pick(t.sec), nx = -Math.sin(S.a), ny = Math.cos(S.a), x = S.x + nx * (TRAM_W / 2 + 7), y = S.y + ny * (TRAM_W / 2 + 7);
+            if (!circleSolid(x, y, 4)) { const p = makePed(x, y); p.angle = Math.atan2(ny, nx); }
+          }
+          if (t.dwell <= 0) { t.si++; tramBell(t); t.wait = 0; }
+        } else if (d < 3 && t.v < 12) { t.dwell = rand(6, 11); t.v = 0; target = 0; }
+        else if (d < -12) t.si++;
+        else target = Math.min(target, Math.sqrt(2 * TRAM_BRK * Math.max(0, d - 1)));
+      }
+      if (!(t.dwell > 0)) t.doors = Math.max(0, t.doors - dt * 1.5);
+      // red lights
+      while (t.li < R.lights.length && R.lights[t.li].s < t.s - 2) t.li++;
+      const L = R.lights[t.li];
+      if (L && L.s - t.s < 200) {
+        const ph = lightPhase(L.n), d = L.s - t.s;
+        if (ph !== (L.g ? 2 : 0) && !(ph === (L.g ? 3 : 1) && t.v * t.v / (2 * TRAM_BRK) > d - 4)) target = Math.min(target, d < 2 ? 0 : Math.sqrt(2 * TRAM_BRK * Math.max(0, d - 2)));
+      }
+      // the end of the line: on into the route it becomes, or out over the map's edge, or wait at the terminus
+      if (!R.next.length && !R.edgeOut) target = Math.min(target, Math.sqrt(2 * TRAM_BRK * Math.max(0, R.len - t.s - 2)));
+      // whatever is on the track: other trams anywhere, and near you the cars and people too
+      const look = t.v * t.v / (2 * TRAM_BRK) + 40;
+      const mine = [];
+      for (let j = 0; j < trams.length; j++) { const o = trams[j]; if (o !== t && Math.abs(o.x - t.x) < look + 240 && Math.abs(o.y - t.y) < look + 240 && !(o.blockBy === t && t.id < o.id)) mine.push(...tcaps[j]); }
+      if (isNear) for (const q of caps) if (Math.abs(q[0] - t.x) < look + 60 && Math.abs(q[1] - t.y) < look + 60) mine.push(q);
+      const hit = tramLook(t, look, mine);
+      t.blockBy = null;
+      if (hit) {
+        const [d, o] = hit, free = d - 10;
+        target = Math.min(target, free < 1 ? 0 : Math.sqrt(2 * TRAM_BRK * free));
+        if (o.sec) t.blockBy = o;
+        if (t.v < 5 && free < 30) {
+          t.wait += dt;
+          if (t.wait > 1.2 && !o.sec) tramBell(t);
+          if (t.wait > 7 && !o.sec && o !== player) target = 22; // (it won't budge: nudge it out of the way)
+        }
+        if (free < t.v * 0.25 && !o.sec && t.v > 40 && Math.random() < dt * 4) tramBell(t);
+      } else t.wait = 0;
+      // speed up gently, brake firmly (hard, if something came out right in front)
+      if (t.v < target) t.v = Math.min(target, t.v + TRAM_ACC * dt);
+      else t.v = Math.max(target, t.v - (t.v - target > 30 ? TRAM_EBRK : TRAM_BRK) * dt);
+    }
+    t.s += t.v * dt;
+    if (t.cab && t.s < t.len + 2 && !t.prev) { t.s = t.len + 2; t.v = Math.max(0, t.v); }
+    if (t.s > R.len) {
+      if (R.next.length) { t.prev = R; t.R = TL[pick(R.next)]; t.s -= t.prev.len; tramIdx(t); tramStopSay(t); }
+      else if (t.cab) { t.s = R.len; if (t.v > 5) msg(R.edgeOut ? 'The line runs on out of town: this is as far as it goes.' : 'End of the line.', 2); t.v = 0; }
+      else if (R.edgeOut) { t.gone = true; continue; }
+      else t.s = R.len;
+    }
+    if (t.prev && t.s > t.len + 10) t.prev = null;
+    if (t.cab) { const si = t.si; while (t.si < R.stops.length && R.stops[t.si].s < t.s - 4) t.si++; if (t.si !== si) tramStopSay(t); }
+    // at a terminus inside the map, or abandoned, or burnt out: gone once out of sight
+    if (!t.cab && (t.left || t.dead || (!R.next.length && !R.edgeOut && t.s >= R.len - 4))) { t.endT += dt; if (t.endT > 12 && !near(t) && !t.fire) t.gone = true; }
+    placeTram(t);
+    if (isNear) tramCollide(t, active, dt);
+  }
+  trams = trams.filter(t => !t.gone);
+}
+// what a tram runs into is pushed out of its way: cars bounce off (and get dented), people are knocked down
+function tramCollide(t, active, dt) {
+  const src = t.cab ? 'player' : null;
+  for (const S of t.sec) {
+    if (S.lv) continue;
+    const ca = Math.cos(S.a), sa = Math.sin(S.a), hl = S.l / 2, hw = TRAM_W / 2, vx = ca * t.v, vy = sa * t.v;
+    for (const c of active) {
+      if (c.lay === 1 || c.lay === 3 || c.heldBy || Math.abs(c.x - S.x) > hl + 30 || Math.abs(c.y - S.y) > hl + 30) continue;
+      for (const q of carCircles(c).slice(0, 2)) {
+        const r = CT[c.type].w / 2 + 1, dx = q[0] - S.x, dy = q[1] - S.y, lx = dx * ca + dy * sa, ly = -dx * sa + dy * ca;
+        const cx = clamp(lx, -hl, hl), cy = clamp(ly, -hw, hw);
+        let ex = lx - cx, ey = ly - cy, d = Math.hypot(ex, ey);
+        if (d >= r) continue;
+        if (t.wait > 7 && Math.abs(lx) >= hl - 1 && Math.abs(ly) > 1) { ex = 0; ey = Math.sign(ly); d = Math.abs(ly) < hw ? -(hw - Math.abs(ly)) : Math.abs(ly) - hw; } // (nudging: aside, not on ahead)
+        else if (d < 1e-6) { if (hl - Math.abs(lx) < hw - Math.abs(ly)) { ex = Math.sign(lx) || 1; ey = 0; d = -(hl - Math.abs(lx)); } else { ex = 0; ey = Math.sign(ly) || 1; d = -(hw - Math.abs(ly)); } }
+        else { ex /= d; ey /= d; }
+        const nx = ex * ca - ey * sa, ny = ex * sa + ey * ca, ov = r - d;
+        if (!carHitsWall(c, c.x + nx * ov, c.y + ny * ov, c.angle)) { c.x += nx * ov; c.y += ny * ov; }
+        const vn = (c.vx - vx) * nx + (c.vy - vy) * ny;
+        if (vn < 0) {
+          c.vx -= 1.3 * vn * nx; c.vy -= 1.3 * vn * ny; c.speed = c.vx * Math.cos(c.angle) + c.vy * Math.sin(c.angle);
+          if (-vn > 60) {
+            damageCar(c, (-vn - 60) * 0.35, src);
+            if (onScreen(c.x, c.y)) sfx.crash();
+            if (c === player.car) { shake = Math.min(1, -vn / 300); if (-vn > 130) hardKnock(); if (CT[c.type].bike && -vn > 120) bikeThrow(); }
+            for (let k = 0; k < 4; k++) addPart(q[0] - nx * r, q[1] - ny * r, rand(-60, 60), rand(-60, 60), 0.3, 2, '#ffd27a');
+            if (!t.cab && !t.dead) { t.v *= 0.85; tramBell(t); }
+          }
+          if (c.driver === 'police' && t.cab) bumpedCop(c, { driver: 'player' });
+        }
+        break;
+      }
+    }
+    const knock = (p, isPlayer) => {
+      const dx = p.x - S.x, dy = p.y - S.y; if (dx * dx + dy * dy > (hl + 8) ** 2) return;
+      const lx = dx * ca + dy * sa, ly = -dx * sa + dy * ca; if (Math.abs(lx) > hl + 3 || Math.abs(ly) > hw + 4) return;
+      const fast = Math.abs(t.v) > 45;
+      if (fast && !isPlayer) { killPed(p, src); if (onScreen(p.x, p.y)) sfx.splat(); }
+      else if (fast) hurtPlayer(Math.abs(t.v) * 0.3);
+      const side = Math.sign(ly) || 1, nx = p.x - sa * side * (hw + 5 - Math.abs(ly)) * 1, ny = p.y + ca * side * (hw + 5 - Math.abs(ly));
+      if (!circleSolid(nx, ny, 3)) { p.x = nx; p.y = ny; }
+    };
+    for (const p of peds) if (!p.dead && !p.held) knock(p, false);
+    if (!player.car && !player.hidden && !player.down) knock(player, true);
+  }
+  if (t.cab) for (const o of trams) { // (you can ram another tram, too)
+    if (o === t || Math.abs(o.x - t.x) > 300 || Math.abs(o.y - t.y) > 300) continue;
+    const [fx, fy] = tramAt(t, t.s + 2), [bx, by] = tramAt(t, t.s - t.len - 2);
+    for (const [ax, ay, cx, cy] of capsOf(o)) for (const [px, py, dir] of [[fx, fy, 1], [bx, by, -1]]) {
+      if (segPtD(px, py, ax, ay, cx, cy) < TRAM_W - 2 && t.v * dir > 0) {
+        const v = Math.abs(t.v); t.v = -t.v * 0.25; t.s += t.v * dt * 2;
+        if (v > 50) { t.hp -= v * 0.8; o.hp -= v * 0.8; sfx.crash(); shake = Math.min(1, v / 250); hardKnock(); }
+      }
+    }
+  }
+  if (t.hp <= 0 && !t.dead) wreckTram(t, src);
+}
+function wreckTram(t, src) {
+  t.dead = true; t.fire = 6; t.hp = 0;
+  const S = t.sec[0]; explode(S.x, S.y, 80, src);
+  if (src === 'player') { earn(300); addHeat(0.8); }
+  if (t.cab && player.car === t.cab) killPlayer();
+}
+function damageTram(t, amt, src) {
+  if (t.dead) return;
+  t.hp -= amt;
+  if (src === 'player' && !t.cab && copNear(t.x, t.y, 400)) addHeat(0.1);
+  if (t.hp <= 0) wreckTram(t, src);
+}
+// a bullet at (x, y): did it hit a tram's side? (it stops there)
+function tramHitAt(x, y) {
+  for (const t of trams) {
+    if (Math.abs(t.x - x) > 230 || Math.abs(t.y - y) > 230) continue;
+    for (const S of t.sec) {
+      if (S.lv < 0) continue;
+      const dx = x - S.x, dy = y - S.y, lx = dx * Math.cos(S.a) + dy * Math.sin(S.a), ly = -dx * Math.sin(S.a) + dy * Math.cos(S.a);
+      if (Math.abs(lx) < S.l / 2 && Math.abs(ly) < TRAM_W / 2) return t;
+    }
+  }
+  return null;
+}
+// on foot by a tram's front: climb into the cab (its driver is shown the door)
+function tramCabNear(x, y) {
+  let best = null, bd = 40 * 40;
+  for (const t of trams) {
+    if (t.dead || Math.abs(t.v) > 30 || NET.role) continue;
+    const S = t.sec[0];
+    if (S.lv) continue;
+    const cx = S.x + Math.cos(S.a) * (S.l / 2 - 12), cy = S.y + Math.sin(S.a) * (S.l / 2 - 12), d = d2(cx, cy, x, y);
+    if (d < bd) { bd = d; best = t; }
+  }
+  return best && { t: best, d: bd };
+}
+function boardTram(t) {
+  const S = t.sec[0], ca = Math.cos(S.a), sa = Math.sin(S.a), R = t.R;
+  if (!t.left) { // the driver gets out at the front door, and runs
+    const p = makePed(S.x + ca * (S.l / 2 - 14) - sa * (TRAM_W / 2 + 8), S.y + sa * (S.l / 2 - 14) + ca * (TRAM_W / 2 + 8), {});
+    p.shirt = '#34495e'; p.pants = '#2c3e50'; p.flee = 6; p.fx = player.x; p.fy = player.y;
+    if (copNear(t.x, t.y, 380)) addHeat(0.6);
+    msg(`You hijacked a tram: line ${R.ref} to ${R.dest}!`, 3);
+  }
+  t.left = false; t.dwell = 0; t.wait = 0; t.endT = 0; t.doors = 0;
+  t.cab = { type: 'tram', tram: t, x: t.x, y: t.y, angle: t.angle, vx: 0, vy: 0, speed: 0, hp: t.hp, driver: 'player', lay: 0, ai: {}, color: t.m.body, fire: 0 };
+  player.car = t.cab; player.x = t.x; player.y = t.y;
+  msg(`${touchOn() ? '▲' : '↑'} go, ${touchOn() ? '▼' : '↓'} brake (and back up), Space rings the bell. ${touchOn() ? '⇄' : 'Enter'}: get off.`, 5);
+  tramStopSay(t);
+  sfx.tram();
+}
+// ---- drawing: each section's roof seen from above, its sides' windows, the joints' bellows, a pantograph on the
+// middle section, the line's number up front; the doors on the right open at the stops
+function drawTramSec(t, S, k) {
+  const m = t.m, l = S.l, w = TRAM_W, n = t.sec.length, end = k === 0 || k === n - 1;
+  // where it runs into a tunnel, only the part still outside shows
+  let x0 = -l / 2, x1 = l / 2;
+  if (!S.on && S.lv < 0) return;
+  if (S.on && S.on.lv.length) for (const [a, b, v] of S.on.lv) if (v < 0 && b > S.sb && a < S.sa) {
+    const sm = (S.sa + S.sb) / 2;
+    if (a > S.sb && a < S.sa) x1 = Math.min(x1, a - sm); // (the front is in)
+    if (b > S.sb && b < S.sa) x0 = Math.max(x0, b - sm); // (the back is still in)
+    if (a <= S.sb && b >= S.sa) return;
+  }
+  if (x1 - x0 < 2) return;
+  ctx.save(); ctx.translate(S.x, S.y); ctx.rotate(S.a);
+  if (x0 > -l / 2 || x1 < l / 2) { ctx.beginPath(); ctx.rect(x0, -w, x1 - x0, w * 2); ctx.clip(); }
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; rrect(-l / 2 + 2, -w / 2 + 3, l, w, 3);
+  ctx.fillStyle = t.dead ? '#262626' : m.body; rrect(-l / 2, -w / 2, l, w, end ? 5 : 2);
+  if (!t.dead) {
+    ctx.fillStyle = m.roof; ctx.fillRect(-l / 2 + 3, -w / 2 + 3, l - 6, w - 6);
+    if (m.band) { ctx.fillStyle = m.band; ctx.fillRect(-l / 2 + 1, -w / 2, l - 2, 1.4); ctx.fillRect(-l / 2 + 1, w / 2 - 1.4, l - 2, 1.4); }
+    ctx.fillStyle = '#1b2631'; // (the side windows)
+    for (let x = -l / 2 + 5; x < l / 2 - 9; x += 9) { ctx.fillRect(x, -w / 2 + 1.2, 6.5, 1.8); ctx.fillRect(x, w / 2 - 3, 6.5, 1.8); }
+    if (k === 0) { ctx.fillRect(l / 2 - 5, -w / 2 + 2, 3.5, w - 4); }
+    if (k === n - 1 && m.two) ctx.fillRect(-l / 2 + 1.5, -w / 2 + 2, 3.5, w - 4);
+    ctx.fillStyle = 'rgba(70,74,80,.55)'; // (the roof's equipment)
+    if (l > 40) { ctx.fillRect(-l * 0.18, -3.5, l * 0.16, 7); ctx.fillRect(l * 0.08, -2.5, l * 0.1, 5); }
+    if (k === (n >> 1)) { // the pantograph: a folded diamond on its frame
+      ctx.strokeStyle = '#3a3d42'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(0, -5); ctx.lineTo(9, 0); ctx.lineTo(0, 5); ctx.closePath(); ctx.stroke();
+      ctx.fillStyle = '#2b2e33'; ctx.fillRect(-1, -w / 2 + 2, 2, w - 4);
+    }
+    if (k === 0) { // the line's number on the front, in its colour
+      ctx.fillStyle = t.R.col; ctx.fillRect(l / 2 - 15, -4.5, 9, 9);
+      ctx.save(); ctx.translate(l / 2 - 10.5, 0); ctx.rotate(-S.a); // (upright)
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 7px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t.R.ref, 0, 0.5); ctx.textBaseline = 'alphabetic';
+      ctx.restore();
+    }
+    if (t.doors > 0.05) { // the doors on the right, open: the lit vestibule, and the leaves slid out along the side
+      const nd = l >= 60 ? 2 : 1;
+      for (let i = 0; i < nd; i++) {
+        const dx = nd === 1 ? 0 : (i ? l * 0.24 : -l * 0.24), o = 5 * t.doors;
+        ctx.fillStyle = `rgba(255,232,160,${0.95 * t.doors})`; ctx.fillRect(dx - 5, w / 2 - 3, 10, 3.5);
+        ctx.fillStyle = shade(m.body, 0.8); ctx.fillRect(dx - 5 - o, w / 2 - 0.5, 5, 1.6); ctx.fillRect(dx + o, w / 2 - 0.5, 5, 1.6);
+      }
+    }
+    ctx.fillStyle = carGloss(l, w); rrect(-l / 2, -w / 2, l, w, end ? 5 : 2);
+  }
+  if (k === 0) { ctx.fillStyle = '#fff6c8'; ctx.fillRect(l / 2 - 1.5, -w / 2 + 1.5, 1.5, 2.5); ctx.fillRect(l / 2 - 1.5, w / 2 - 4, 1.5, 2.5); }
+  if (k === n - 1) { ctx.fillStyle = t.v < 3 || (t.cab && keys.down) ? '#ff4040' : '#a31515'; ctx.fillRect(-l / 2, -w / 2 + 1.5, 1.5, 2.5); ctx.fillRect(-l / 2, w / 2 - 4, 1.5, 2.5); }
+  ctx.restore();
+}
+function drawTrams(v, up) {
+  for (const t of trams) {
+    if (t.x < v.x0 - 240 || t.x > v.x1 + 240 || t.y < v.y0 - 240 || t.y > v.y1 + 240) continue;
+    const S = t.sec;
+    for (let k = 0; k < S.length - 1; k++) { // the bellows at the joints
+      const A = S[k], B = S[k + 1];
+      if ((A.lv > 0) !== !!up || A.lv < 0 || B.lv < 0) continue;
+      const ax = A.x - Math.cos(A.a) * A.l / 2, ay = A.y - Math.sin(A.a) * A.l / 2, bx = B.x + Math.cos(B.a) * B.l / 2, by = B.y + Math.sin(B.a) * B.l / 2;
+      ctx.save(); ctx.translate((ax + bx) / 2, (ay + by) / 2); ctx.rotate(Math.atan2(ay - by, ax - bx) || A.a);
+      ctx.fillStyle = '#3b3f45'; ctx.fillRect(-t.m.gap / 2 - 3, -TRAM_W / 2 + 2, t.m.gap + 6, TRAM_W - 4);
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; for (let i = -1; i <= 1; i++) ctx.fillRect(i * 2 - 0.5, -TRAM_W / 2 + 2, 1, TRAM_W - 4);
+      ctx.restore();
+    }
+    for (let k = S.length - 1; k >= 0; k--) if ((S[k].lv > 0) === !!up) drawTramSec(t, S[k], k); // (in a tunnel: only what is still outside)
+  }
+  if (!up) for (const p of TRAM_PORTALS) { // the tunnels' mouths
+    if (p.x < v.x0 - 60 || p.x > v.x1 + 60 || p.y < v.y0 - 60 || p.y > v.y1 + 60) continue;
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a);
+    const g = ctx.createLinearGradient(0, 0, 34, 0); g.addColorStop(0, 'rgba(14,14,16,.92)'); g.addColorStop(1, 'rgba(14,14,16,.55)');
+    ctx.fillStyle = g; ctx.fillRect(0, -13, 34, 26);
+    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(-1, -15, 6, 31);
+    ctx.fillStyle = tint('#b5b1a7', 1); ctx.fillRect(-3, -15, 5, 30);
+    ctx.restore();
+  }
+}
 function updateWorld(dt) {
   time += dt;
   heatCd -= dt;
@@ -4577,6 +5106,7 @@ function updateWorld(dt) {
   updateZones(dt);
   collideCars(active);
   collideCarPeds(active);
+  updateTrams(dt, active);
   if (player.car) { player.x = player.car.x; player.y = player.car.y; }
   updateBranches(dt);
   if (NET.guest) asGuest(() => { if (player.car) { player.x = player.car.x; player.y = player.car.y; } updateBranches(dt); });
@@ -5280,7 +5810,7 @@ function drawGroundStatic(v) {
   // crosswalks and stop lines at signalised junctions
   for (const n of LIGHT_NODES) {
     if (n.x < v.x0 - 100 || n.x > v.x1 + 100 || n.y < v.y0 - 100 || n.y > v.y1 + 100) continue;
-    for (const e of n.edges) { // (stripes across the whole street; the stop line across the lanes coming in)
+    for (const e of n.edges) if (n.grp.has(e.id)) { // (stripes across the whole street; the stop line across the lanes coming in)
       const [ux, uy] = n.dirs.get(e.id), h = e.wd / 2, away = e.a === n.id, dv = (e.lb - e.lf) * e.wd / (e.lf + e.lb) / 2, dd = away ? dv : -dv;
       ctx.save(); ctx.translate(n.x, n.y); ctx.rotate(Math.atan2(uy, ux));
       ctx.fillStyle = '#dcdcdc'; for (let k = Math.ceil((3 - h) / 9); k * 9 <= h - 3; k++) ctx.fillRect(n.clr - 31, k * 9 - 2.5, 22, 5);
@@ -5430,6 +5960,14 @@ function drawProps(v) {
         ctx.fillStyle = p.c; ctx.fillRect(-hw * k, -9, hw * 2 * k, 18); ctx.fillStyle = '#f1c40f'; ctx.fillRect(-hw * k, -9, hw * 2 * k, 2); ctx.fillRect(-hw * k, 7, hw * 2 * k, 2);
         ctx.fillStyle = '#fff3b0'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(p.text, 0, 0.5); ctx.textBaseline = 'alphabetic';
         ctx.restore(); break;
+      }
+      case 'tramstop': { // a stop's sign (a tram on a red-edged plate), and its name close up
+        ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(x - 3, y - 6, 10, 9);
+        ctx.fillStyle = '#5a5f66'; ctx.fillRect(x - 1, y - 1, 2, 2);
+        ctx.fillStyle = '#fafafa'; ctx.fillRect(x - 5, y - 10, 10, 8); ctx.strokeStyle = '#c8202a'; ctx.lineWidth = 1.2; ctx.strokeRect(x - 5, y - 10, 10, 8);
+        ctx.fillStyle = '#c8202a'; ctx.fillRect(x - 3, y - 8, 6, 3); ctx.fillRect(x - 3, y - 5, 1.2, 1.2); ctx.fillRect(x + 1.8, y - 5, 1.2, 1.2);
+        if (cam.zoom > 0.75) { ctx.font = 'bold 8px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.lineJoin = 'round'; ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(18,20,24,.75)'; ctx.strokeText(p.name, x + 7, y - 4); ctx.fillStyle = '#ffe9a0'; ctx.fillText(p.name, x + 7, y - 4); }
+        break;
       }
       case 'busstop':
         ctx.save(); ctx.translate(x, y); ctx.rotate(p.a || 0);
@@ -5585,7 +6123,7 @@ const sigCol = (n, g) => { const ph = lightPhase(n); return g ? (ph === 2 ? 0 : 
 function forLights(v, fn) {
   for (const n of LIGHT_NODES) {
     if (n.x < v.x0 - 120 || n.x > v.x1 + 120 || n.y < v.y0 - 120 || n.y > v.y1 + 120) continue;
-    if (!n.poles) n.poles = n.edges.map(e => { const [ux, uy] = n.dirs.get(e.id), a = n.clr + 2, o = e.wd / 2 + 14; return { x: n.x + ux * a + uy * o, y: n.y + uy * a - ux * o, g: n.grp.get(e.id) }; })
+    if (!n.poles) n.poles = n.edges.filter(e => n.grp.has(e.id)).map(e => { const [ux, uy] = n.dirs.get(e.id), a = n.clr + 2, o = e.wd / 2 + 14; return { x: n.x + ux * a + uy * o, y: n.y + uy * a - ux * o, g: n.grp.get(e.id) }; })
       .filter(p => tileAtP(p.x, p.y) === WALK);
     fn(n, n.poles);
   }
@@ -6846,6 +7384,12 @@ function drawLighting(v) {
     }
     if (c.fire > 0) l.drawImage(glowSpr, c.x - 70, c.y - 70, 140, 140);
   }
+  for (const t of trams) { // a tram's lit saloon, and its headlights
+    if (!vis(t.x, t.y, 260)) continue;
+    for (const S of t.sec) { if (S.lv < 0) continue; l.save(); l.translate(S.x, S.y); l.rotate(S.a); l.globalAlpha = t.dead ? 0.3 : 0.6; l.drawImage(glowSpr, -S.l * 0.62, -TRAM_W, S.l * 1.24, TRAM_W * 2); l.globalAlpha = 1; l.restore(); }
+    const S = t.sec[0]; if (!t.dead && !S.lv) { l.save(); l.translate(S.x, S.y); l.rotate(S.a); l.drawImage(coneSpr, S.l / 2 - 2, -40, 150, 80); l.restore(); }
+    if (t.fire > 0) l.drawImage(glowSpr, t.x - 90, t.y - 90, 180, 180);
+  }
   if (Q.branches) for (const g of Q.branches) l.drawImage(glowSpr, g.x - 40, g.y - 40, 80, 80);
   for (const q of parts) if (q.grow > 10 && q.life > 0.2 && !q.top) l.drawImage(glowSpr, q.x - 50, q.y - 50, 100, 100);
   if (!player.car && !player.hidden) l.drawImage(glowSpr, player.x - 45, player.y - 45, 90, 90);
@@ -6866,6 +7410,9 @@ function drawLighting(v) {
       const t = CT[c.type], ca = Math.cos(c.angle), sa = Math.sin(c.angle), br = c.speed > 5 && c.brk ? 0.85 : 0.45;
       ctx.fillStyle = `rgba(255,36,28,${br})`;
       for (const s of [-1, 1]) { const x = c.x - ca * (t.l / 2 - 1) - sa * s * t.w * 0.32, y = c.y - sa * (t.l / 2 - 1) + ca * s * t.w * 0.32; ctx.beginPath(); ctx.arc(x, y, t.bike ? 2 : 2.6, 0, TAU); ctx.fill(); if (t.bike) break; }
+    }
+    for (const t of trams) if (!t.dead && vis(t.x, t.y, 220)) for (const S of t.sec) if (S.lv >= 0) { // (the saloon's windows glow warm)
+      ctx.save(); ctx.translate(S.x, S.y); ctx.rotate(S.a); ctx.fillStyle = 'rgba(255,210,130,.28)'; ctx.fillRect(-S.l / 2 + 3, -TRAM_W / 2 + 1, S.l - 6, TRAM_W - 2); ctx.restore();
     }
     for (const c of cars) if ((c.chase || c.job) && c.lay !== 1 && vis(c.x, c.y, 40)) { ctx.fillStyle = on ? 'rgba(255,40,40,.4)' : 'rgba(40,90,255,.4)'; ctx.beginPath(); ctx.arc(c.x, c.y, 34, 0, TAU); ctx.fill(); }
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
@@ -6920,8 +7467,10 @@ function drawWorld() {
   drawTow();
   const oth = otherPlayer();
   if (oth && !oth.inCar && !oth.hidden) drawPed(oth.dead ? Object.assign({}, oth.p, { dead: true }) : oth.p);
+  drawTrams(v, 0);
   for (const c of cars) if (c.lay !== 1 && c.lay !== 3 && c.lay !== 4 && onScreen(c.x, c.y, 60)) drawCar(c);
   drawDecks(v);
+  drawTrams(v, 1); // (up on a bridge over a street)
   drawBranches();
   drawZoneFx(v);
   for (const pl of PLANES) if (onScreen(pl.x, pl.y, 80)) drawPlane(pl.x, pl.y, pl.a, 0);
@@ -7187,6 +7736,7 @@ function drawHUD() {
     for (const h of POLICE_POSTS) dot(h.x, h.y, '#3498db', 2);
     for (const sp of SPRAYS) dot(sp.x, sp.y, '#c27cf0', 2);
     for (const sp of FISH_SPOTS) dot(sp.x, sp.y, '#4fc3f7', 2);
+    for (const t of trams) if (!t.dead) dot(t.x, t.y, t.R.col, full ? 1.6 : 1.8); // (the trams, in their lines' colours)
     if (Q.branches) for (const g of Q.branches) dot(g.x, g.y, g.tint, 2);
     // BUT's other faculties: a small diamond each in the faculty's colour
     for (const f of FACS) {
@@ -7488,7 +8038,7 @@ function drawAOD() {
 const HELP = [
   ['Arrows / WASD', 'drive · walk (up = forward, left/right = turn)'],
   ['Space', 'shoot on foot · handbrake in a car'],
-  ['Enter / F / E', 'get in or out of cars (occupied ones too) · fish at a jetty'],
+  ['Enter / F / E', 'get in or out of cars (occupied ones too) · a tram, at its front · fish at a jetty'],
   ['Q / Tab', 'switch weapon'],
   ['X', 'superposition: split your car into 3 branches'],
   ['V', 'slow motion + amplitude arrows (while superposed)'],
@@ -7612,10 +8162,11 @@ function hostSnap() {
   const P = peds.filter(inV).map(p => { const i = nid(p); now.add(i); return [i, p.x | 0, p.y | 0, +p.angle.toFixed(1), (p.dead ? 1 : 0) | (p.cop ? 2 : 0) | (p.swat ? 4 : 0) | (p.moving ? 8 : 0) | (p.burnt ? 16 : 0), +(p.anim || 0).toFixed(1), ...(was.has(i) ? [] : [p.shirt, p.skin, p.hair, p.pants || 0])]; });
   NET.shown = now;
   const B = bullets.filter(inV).map(b => [b.x | 0, b.y | 0, b.rocket ? 1 : 0]);
+  const TR = trams.filter(inV).map(t => [t.id, t.R.i, Math.round(t.s), t.prev ? t.prev.i : -1, TRAM_MODELS.indexOf(t.m), (t.doors > 0.3 ? 1 : 0) | (t.dead ? 2 : 0), Math.round(t.v)]);
   const tg = missionTarget(), ml = missionLine(), gq = g.Q;
   const pk = pickups.map(u => u.cd > 0 ? 0 : 1).join('');
   const snap = { t: 's', time: +time.toFixed(2), dayT: +dayT.toFixed(5), heat: +heat.toFixed(2), bel: [belief.x | 0, belief.y | 0, belief.sig | 0, belief.seen ? 1 : 0],
-    fl: flight.on ? [flight.x | 0, +flight.alt.toFixed(2)] : 0, he: heli ? [heli.x | 0, heli.y | 0, +heli.angle.toFixed(2), +heli.rot.toFixed(2), heli.dead ? 1 : 0, +(heli.fall || 0).toFixed(2)] : 0, C, P, B,
+    fl: flight.on ? [flight.x | 0, +flight.alt.toFixed(2)] : 0, TR, he: heli ? [heli.x | 0, heli.y | 0, +heli.angle.toFixed(2), +heli.rot.toFixed(2), heli.dead ? 1 : 0, +(heli.fall || 0).toFixed(2)] : 0, C, P, B,
     me: [gp.x | 0, gp.y | 0, +gp.angle.toFixed(2), gp.hp | 0, gp.car ? nid(gp.car) : 0, gp.weapons, gp.weapon, gp.cash | 0, gp.lives, gp.mult, +gp.down.toFixed(2), gp.downKind, gp.moving ? 1 : 0, +gp.anim.toFixed(1), gq.psi, gq.ent, gq.link ? nid(gq.link) : 0, gq.branches ? gq.branches.map(b => [b.x | 0, b.y | 0, +b.angle.toFixed(2), b.tint, +(b.amp || 0).toFixed(2)]) : 0],
     ho: [player.x | 0, player.y | 0, +player.angle.toFixed(2), player.car ? nid(player.car) : 0, player.hidden || (player.down && player.downKind === 'busted') ? 1 : 0, player.moving ? 1 : 0, +player.anim.toFixed(1), player.down && player.downKind === 'wasted' ? 1 : 0],
     mt: tg ? [tg.x | 0, tg.y | 0, mission ? 1 : 0] : 0, ml, rg: ringing ? BOOTHS.indexOf(ringing) : -1, ev: NET.ev };
@@ -7679,6 +8230,7 @@ function guestApply(d) {
   for (const id of E.keys()) if (!seen.has(id)) E.delete(id);
   cars = cars.filter(c => c.type); // (never draw something whose looks haven't arrived)
   bullets = d.B.map(([x, y, r]) => ({ x, y, rocket: !!r }));
+  if (d.TR) { const old = new Map(trams.map(t => [t.id, t])); trams = d.TR.map(([id, ri, s, pi, mi, f, v]) => { const R = TL[ri]; let t = old.get(id); if (!t) { t = newTram(R, s, null, TRAM_MODELS[mi]); t.id = id; } if (t.R !== R) { t.R = R; t.s = s; } t.ts = s; t.prev = pi >= 0 ? TL[pi] : null; t.v = v; t.doors = f & 1; t.dead = !!(f & 2); return t; }); }
   const [x, y, a, hp, car, w, wp, cash, lives, mult, down, dk, mv, an, psi, ent2, link, br] = d.me;
   Object.assign(player, { tx: x, ty: y, ta: a, hp, weapons: w, weapon: wp, cash, lives, mult, down, downKind: dk, moving: !!mv, anim: an });
   if (Math.hypot(player.x - x, player.y - y) > 300) { player.x = x; player.y = y; }
@@ -7710,6 +8262,7 @@ function guestTick(dt) {
   const k = Math.min(1, dt * 14), sm = o => { o.x += (o.tx - o.x) * k; o.y += (o.ty - o.y) * k; o.angle += wrapA(o.ta - o.angle) * k; };
   for (const c of cars) sm(c);
   for (const p of peds) sm(p);
+  for (const t of trams) { t.ts += t.v * dt; t.s += t.v * dt; t.s += (t.ts - t.s) * k; placeTram(t); }
   if (player.tx !== undefined) sm(player);
   if (player.car) { player.x = player.car.x; player.y = player.car.y; }
   time += dt;
@@ -7805,7 +8358,7 @@ try { const pj = sessionStorage.getItem('qta.join'); if (pj) { sessionStorage.re
 // ============================================================ game flow
 function resetWorld() {
   cars = []; peds = []; bullets = []; parts = []; decals = []; heli = null;
-  seed = 4242; placeParked(); placePickups();
+  seed = 4242; placeParked(); placePickups(); initTrams();
 }
 let startSel = 0; // which of STARTS a new game begins in (chosen on the title screen)
 // the maps are generated when the page loads, so switching map reloads it (and remembers the choice)
@@ -7912,7 +8465,7 @@ function frame(nowT) {
 }
 requestAnimationFrame(frame);
 // debug/test hook
-window.__gridlock = { get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
+window.__gridlock = { get trams() { return trams; }, TL, TRAM_STOPS, get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
   newGame, startLab, setupLesson, makeCar, superpose, collapse, entangle, startMission, bb84, keys, pressed, labFlags: () => labFlags, arcProg: () => arcProg,
   NET, netAttach, faceOpen, TUNNELS, RAMPS, tunT, OVERS, OVRAMPS, ovT, oE, carDeckZ, FISH, FISH_SPOTS, startFishing, castDist, ZONES, CONSOLES, get ATOM_LAB() { return ATOM_LAB; }, grabTow, dropTow, towBase, RB_R, aodOpen, aodToggle, aodShift, aodGo, aodPulse, aodPointer, aodSolved, AOD_LV, get AOD() { return AOD; }, hostSnap, hostNet, joinNet, MAP_ID, geo, LCG, taken, dR, mm, trees, props, FIELDS, STARTS, REG, SITE_PSI, HOSPITALS, POLICE_POSTS, get startSel() { return startSel; }, set startSel(v) { startSel = v; }, get showMap() { return showMap; }, set showMap(v) { showMap = v; } };
 })();

@@ -23,13 +23,13 @@ def runs(g):
         s.append(np.base_repr(flat[i], 36).lower() + np.base_repr(j - i, 36).lower().rjust(2, '0')); i = j
     return ''.join(s)
 def fl(pts, nd=1): return [c for x, y in pts for c in (round(x, nd), round(y, nd))]
-def clip(pts, m=1.0):
+def clip(pts, m=1.0, eps=0.1):
     out, cur = [], []
     for p in resample(pts, 0.25):
         if m <= p[0] <= MW - m and m <= p[1] <= MH - m: cur.append(p)
         elif cur: out.append(cur); cur = []
     if cur: out.append(cur)
-    return [dp(c, 0.2) for c in out if seglen(c) >= 1]
+    return [dp(c, eps) for c in out if seglen(c) >= 1]
 if __name__ == '__main__':
     land = np.load('land5.npy')
     net = json.load(open('net5.json'))
@@ -46,7 +46,8 @@ if __name__ == '__main__':
         t = e.get('tags', {})
         if e['type'] != 'way' or t.get('railway') not in ('rail', 'tram', 'light_rail') or t.get('tunnel') == 'yes': continue
         pts = [P(g['lat'], g['lon']) for g in e['geometry']]
-        for c in clip(pts, 0.5): (trams if t['railway'] == 'tram' else rails).append(fl(dp(c, 0.15)))
+        if t['railway'] == 'tram': trams += [fl(c, 2) for c in clip(pts, 0.5, 0.05)]  # (closely: the trams run on these, see tram5.py)
+        else: rails += [fl(dp(c, 0.15)) for c in clip(pts, 0.5)]
     places = [(e['tags']['name'], *P(e['lat'], e['lon'])) for e in lay if e['type'] == 'node' and 'place' in e.get('tags', {})]
     places = [[n, round(x, 1), round(y, 1)] for n, x, y in places if -150 < x < MW + 150 and -150 < y < MH + 150 and n not in ('Brno-město',)]
     places.append(['Staré Město', *[round(v, 1) for v in P(49.1951, 16.6080)]])
@@ -68,6 +69,13 @@ if __name__ == '__main__':
         for r in land_rings(e):
             r = dp(r, 0.3)
             if len(r) >= 3 and any(0 <= x < MW and 0 <= y < MH for x, y in r): unis.append([t['name'], fl(r)])
+    # traffic signals as mapped (not those of a pedestrian crossing, nor blinkers): the game lights the junctions they stand at
+    sig = []
+    if os.path.exists('signals.json'):
+        for e in json.load(open('signals.json'))['elements']:
+            if e.get('tags', {}).get('traffic_signals') in ('pedestrian_crossing', 'blinker'): continue
+            x, y = P(e['lat'], e['lon'])
+            if 0 <= x < MW and 0 <= y < MH: sig += [round(x, 1), round(y, 1)]
     # buildings, sorted top to bottom: kind, floors, roof shape and height, glass, colours, name, then each piece in
     # tenths of a tile: a turned rectangle (corner, angle, size), a right-angled outline (angle, then each ring's first
     # corner and its steps along and across the frame in turn) or a free polygon (each ring's corner and steps); every
@@ -110,9 +118,19 @@ if __name__ == '__main__':
     ts, px, py = [], 0, 0
     for x, y in tr: ts.append(vlq(x - px) + vlq(y - py)); px, py = x, y
     rivers = json.load(open('rivers5.json'))
+    # the tram routes: line, its colour, where it goes, its path (hundredths of a tile), its stops (arc length, name),
+    # where it runs under (-1) or over (1) a street, which routes it goes on as at a terminus, and flags: 1 it comes in
+    # over the map's edge, 2 it leaves over it, 4 trams come onto it from another route
+    tl, tsn = [], []
+    for r in json.load(open('tram5.json')):
+        st = []
+        for s, nm in r['stops']:
+            if nm not in tsn: tsn.append(nm)
+            st += [s, tsn.index(nm)]
+        tl.append([r['ref'], r['col'], r['dest'], fl(r['pts'], 2), st, [v for q in r['lv'] for v in q], r['next'], r['edge0'] | r['edge1'] << 1 | r['fed'] << 2])
     data = {'bbox': [LON0, LON1, LAT0, LAT1], 'mw': MW, 'mh': MH, 'lc': runs(land), 'roads': R, 'rails': rails, 'trams': trams,
             'rivers': [[n, [c for x, y in pts for c in (round(x, 1), round(y, 1))]] for n, pts in rivers], 'places': places, 'pois': pois,
-            'bld': bld, 'bnames': names, 'bcols': cols, 'trees': ''.join(ts), 'land': lands, 'unis': unis}
+            'bld': bld, 'bnames': names, 'bcols': cols, 'trees': ''.join(ts), 'land': lands, 'unis': unis, 'sig': sig, 'tl': tl, 'tsn': tsn}
     js = '// Inner Brno at about 5 m a tile, from OpenStreetMap (© OpenStreetMap contributors, ODbL). Built by tools/brno5.\nwindow.BRNO5_DATA = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n'
     out = sys.argv[1] if len(sys.argv) > 1 else 'brno5_data.js'
     open(out, 'w').write(js)

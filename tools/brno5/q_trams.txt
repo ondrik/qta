@@ -1,0 +1,5 @@
+[out:json][timeout:120];
+rel["route"="tram"](49.166,16.500,49.242,16.654);
+out geom;
+node(r);
+out;

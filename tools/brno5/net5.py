@@ -1,92 +1,91 @@
-# Inner Brno's street network at 5 m a tile: every public street, traced into one connected graph (as ../brno/net.py
-# does for the main roads), with tunnels and overpasses traced on their own so the streets they cross don't meet them.
-# An overpass is a bridge that crosses another street (bridges over water or rails stay ordinary streets); it keeps a
-# stretch of each approach as its ramps, so the street beneath always passes under the full height of the deck.
+# Inner Brno's street network straight from OpenStreetMap's ways: a junction wherever ways share a node and nowhere else,
+# each way cut into edges at its junctions (and joined up again where nothing branches off), so that dual carriageways stay
+# two one-way roads, slip roads, loops and roundabouts are as mapped, and a road crossing another on a bridge or in a
+# tunnel never meets it. A bridge over a street is a deck and a tunnel under one is a tunnel (as ../brno/decks.py
+# tells them apart); each street keeps its own lanes and width. Writes net5.json (bld5.py and export5.py read it).
+# Run from the data directory, with QTA_MAP=brno5.
 import json, math, os, sys
+from collections import defaultdict
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'brno'))
-from roads import resample, dp, seglen, P, MW, MH, SC
-import net
-from net import R, trace_clean, graph_edges, close_gaps
-from decks import seg_grid, crosses, smooth, side, ramps, level, separate, by_level, tube_lines, clear_ends, join_decks
-from lanes5 import way_lanes, Index, assign
-from straight5 import straighten
+from roads import resample, dp, seglen, P, MW, MH
+from decks import level, separate, ramps
+from lanes5 import way_lanes, LANE_PX, MIN_PX
 RK = {'motorway': 0, 'motorway_link': 0, 'trunk': 1, 'trunk_link': 1, 'primary': 2, 'primary_link': 2, 'secondary': 3, 'secondary_link': 3,
       'tertiary': 4, 'tertiary_link': 4, 'residential': 5, 'unclassified': 5, 'living_street': 5}
 RAMP = 4.0  # tiles of approach that rise to an overpass (20 m)
+
+def key(q): return (round(q['lat'], 7), round(q['lon'], 7))
 
 if __name__ == '__main__':
     ways = []
     for e in json.load(open('roads.json'))['elements']:
         t = e['tags']; h = t.get('highway')
-        if h not in RK or t.get('area') == 'yes' or t.get('access') in ('private', 'no'): continue
+        if h not in RK or t.get('area') == 'yes' or t.get('access') in ('private', 'no') or len(e.get('geometry', [])) < 2: continue
         d, f, b = way_lanes(t, h)
-        ways.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'link': h.endswith('_link'), 'lev': level(t), 'lv': abs(level(t)),
-                     'dir': d, 'lf': f, 'lb': b})
-    # a road on another level than one it crosses is carried over it on a deck, or under it in a tunnel: never a junction
+        ways.append({'r': RK[h], 'name': t.get('name') or t.get('ref') or '', 'pts': [P(q['lat'], q['lon']) for q in e['geometry']],
+                     'keys': [key(q) for q in e['geometry']], 'link': h.endswith('_link'), 'lev': level(t), 'lv': abs(level(t)), 'dir': d, 'lf': f, 'lb': b})
+    # which level each way is on: a bridge over a road is a deck, a tunnel under a street a tube, anything else the ground
     decks, tubes, ground = separate(ways)
-    decks, ground = join_decks(decks, ground, 16.0)
-    ground = clear_ends(decks, ground, 5.0)  # (a short bridge's streets kept clear of the road it crosses, beyond the tracer's reach)
-    print('ground ways', len(ground), 'overpass ways', len(decks), 'tunnel ways', len(tubes), 'levels', sorted({w['lev'] for w in decks + tubes}))
+    kind = {id(w): 'over' for w in decks}; kind.update({id(w): 'tunnel' for w in tubes})
+    # junctions: a node two ways share (or one way twice), and every way's ends
+    use = defaultdict(int)
+    for w in ways:
+        for k in w['keys']: use[k] += 1
+    edges = []
+    for w in ways:
+        cut = [i for i, k in enumerate(w['keys']) if i == 0 or i == len(w['keys']) - 1 or use[k] > 1]
+        for i0, i1 in zip(cut, cut[1:]):
+            if i1 > i0: edges.append({'w': w, 'pts': w['pts'][i0:i1 + 1], 'a': w['keys'][i0], 'b': w['keys'][i1]})
+    # an edge runs the way its traffic goes (one-way against the way's points: turned round)
+    for e in edges:
+        w = e['w']
+        if w['dir'] < 0: e['pts'] = e['pts'][::-1]; e['a'], e['b'] = e['b'], e['a']
+    # join up edges where nothing branches off and nothing changes (the same street, lanes, level and direction of travel)
+    sig = lambda e: (e['w']['name'], e['w']['r'], e['w']['dir'] != 0, e['w']['lf'], e['w']['lb'], kind.get(id(e['w']), 'ground'), e['w']['lv'], e['w']['link'])
+    at = defaultdict(list)
+    for e in edges: at[e['a']].append(e); at[e['b']].append(e)
+    alive = set(range(len(edges))); idx = {id(e): i for i, e in enumerate(edges)}
+    changed = True
+    while changed:
+        changed = False
+        for n, es in list(at.items()):
+            es = [e for e in es if idx[id(e)] in alive]; at[n] = es
+            if len(es) != 2 or es[0] is es[1] or sig(es[0]) != sig(es[1]): continue
+            e1, e2 = es
+            if e1['w']['dir'] or e2['w']['dir']: # (one-way: only end to start)
+                if e1['b'] == n and e2['a'] == n: first, second = e1, e2
+                elif e2['b'] == n and e1['a'] == n: first, second = e2, e1
+                else: continue
+                pts, a, b = first['pts'] + second['pts'][1:], first['a'], second['b']
+            else:
+                if e1['w']['lf'] != e1['w']['lb'] and not ((e1['b'] == n and e2['a'] == n) or (e2['b'] == n and e1['a'] == n)): continue # (more lanes one way: only end to start, or they would swap sides)
+                if e1['w']['lf'] != e1['w']['lb'] and e2['b'] == n: e1, e2 = e2, e1
+                p1 = e1['pts'] if e1['b'] == n else e1['pts'][::-1]; a = e1['a'] if e1['b'] == n else e1['b']
+                p2 = e2['pts'] if e2['a'] == n else e2['pts'][::-1]; b = e2['b'] if e2['a'] == n else e2['a']
+                if a == b: continue  # (a closed loop stays in two pieces)
+                pts = p1 + p2[1:]
+            m = {'w': first['w'] if (e1['w']['dir'] or e2['w']['dir']) else e1['w'], 'pts': pts, 'a': a, 'b': b}
+            alive.discard(idx[id(e1)]); alive.discard(idx[id(e2)])
+            idx[id(m)] = len(edges); edges.append(m); alive.add(idx[id(m)])
+            at[n] = []; at[a] = [x for x in at[a] if x is not e1 and x is not e2] + [m]; at[b] = [x for x in at[b] if x is not e1 and x is not e2] + [m]
+            changed = True
+    edges = [edges[i] for i in sorted(alive)]
     land = np.load('land5.npy'); urban = np.isin(land, (4, 5, 9, 10, 11, 12))
-    def streets(ground, decks, tubes):
-        portals = [w['pts'][k] for w in decks + tubes for k in (0, -1)]
-        cent, edges, near = trace_clean(ground, spur=4 * R, minlen=3 * R, width=1.3, close_iter=3)
-        print('ground graph', len(cent), 'nodes', len(edges), 'edges')
-        # (the traced streets put back on the ways they follow, and the junctions where those ways meet)
-        tile = lambda q: (q[0] / R + 0.25, q[1] / R + 0.25)
-        raw = [(a, b, [tile(q) for q in [cent[a]] + path[1:-1] + [cent[b]]]) for a, b, path in edges]
-        nodes = {n: tile(cent[n]) for a, b, _ in edges for n in (a, b)}
-        newn, spts = straighten(raw, nodes, Index(ground), keep=[w['pts'][k] for w in tubes for k in (0, -1)])
-        moved = [math.hypot(newn[n][0] - nodes[n][0], newn[n][1] - nodes[n][1]) for n in nodes]
-        print('straightened', sum(1 for _, ok in spts if ok), 'of', len(spts), 'streets; junctions moved', round(sum(moved) / max(1, len(moved)), 2), 'tiles on average')
-        out = []
-        for (a, b, path), (spt, snapped) in zip(edges, spts):
-            pts = spt
-            votes = {}
-            for x, y in pts:
-                l = near[min(MH * R - 1, int(y * R)), min(MW * R - 1, int(x * R))]
-                if l >= 0: votes[l] = votes.get(l, 0) + 1
-            named = {l: v for l, v in votes.items() if ground[l]['name'] and not ground[l].get('link')}
-            best = max(votes, key=votes.get) if votes else -1
-            nb_ = max(named, key=named.get) if named else best
-            name = ground[nb_]['name'] if nb_ >= 0 else ''
-            rank = ground[best]['r'] if best >= 0 else 5
-            pts = pts if snapped else dp(smooth(pts, 8), 0.25) # (one put back on its ways is as straight, or as curved, as they are)
-            if seglen(pts) < 1.5: continue
-            smp = resample(pts, 0.5)
-            ur = sum(1 for x, y in smp if 0 <= int(x) < MW and 0 <= int(y) < MH and urban[int(y), int(x)]) / max(1, len(smp))
-            out.append({'name': name, 'r': rank, 'rural': 1 if (rank <= 1 or ur < 0.4) else 0, 'pts': pts})
-        out += close_gaps(out, portals, pair_max=8, reach=5, margin=6)
-        # each level on its own (a tunnel's tubes apart from the slip roads that dip under the street beside it), hooked on
-        # to the streets; what really crosses a road at another level stays apart from it, the rest joins the streets
-        tun, over, back = [], [], []
-        for g in by_level(tubes):
-            t_, b_ = side(g, out, 'tunnel', 3.0, 4, 30, apart=seg_grid([w for w in ground if w['lev'] > g[0]['lev']]), lines=tube_lines(g, 8)); tun += t_; back += b_
-        for g in by_level(decks):
-            o_, b_ = side(g, out, 'over', 1.3, 3, 8, apart=seg_grid([w for w in ground + tubes + decks if w['lev'] < g[0]['lev']]), lines=tube_lines(g, 4)); over += o_; back += b_
-        return out + back, tun, over
-    out, tun, over = streets(ground, decks, tubes)
-    print('decks', len(over), 'tunnels', len(tun))
-    ramps(over, out, RAMP)
-    for t in tun: t['r'] = 1; t['rural'] = 0
-    print('tunnels', [(t['name'], round(seglen(t['pts']))) for t in tun])
-    print('overpasses', len(over), [(o['name'], round(seglen(o['pts']))) for o in over][:40])
-    out += tun + over
-    # each street's lanes each way and its width, from the ways alongside it (a tunnel's from its tubes, a deck's from its
-    # bridges; a street that has none of its own, from those)
-    gi, ti, di, ui = Index(ground), Index(tubes), Index(decks), Index(tubes + decks)
-    for w in out: assign(w, ti if w.get('tunnel') else di if w.get('over') else gi, fallback=None if w.get('tunnel') or w.get('over') else ui)
-    from collections import Counter
-    print('lanes', sorted(Counter((w['lf'], w['lb']) for w in out).items(), key=lambda kv: -kv[1])[:12], 'one-way', sum(1 for w in out if w['lb'] == 0))
-    json.dump(out, open('net5.json', 'w'), ensure_ascii=False)
-    from PIL import Image, ImageDraw
-    S = 1; im = Image.new('RGB', (MW * S, MH * S), (35, 60, 35)); d = ImageDraw.Draw(im)
-    col = {0: (230, 120, 60), 1: (230, 180, 60), 2: (240, 220, 120), 3: (240, 240, 240), 4: (200, 200, 200), 5: (140, 140, 140)}
-    for w in out: d.line([(x * S, y * S) for x, y in w['pts']], fill=(80, 160, 255) if w.get('tunnel') else (255, 60, 200) if w.get('over') else col[w['r']], width=2 if w.get('over') or w.get('tunnel') or w['r'] < 5 else 1)
-    deg = {}
-    for w in out:
-        for p in (w['pts'][0], w['pts'][-1]): k = (round(p[0], 1), round(p[1], 1)); deg[k] = deg.get(k, 0) + 1
-    dead = [(x, y) for (x, y), n in deg.items() if n == 1 and 6 < x < MW - 6 and 6 < y < MH - 6]
-    for x, y in dead: d.ellipse([x * S - 2, y * S - 2, x * S + 2, y * S + 2], fill=(255, 50, 50))
-    im.save('net5.png'); print('inner dead ends', len(dead), 'roads', len(out))
+    out, over, tun = [], [], []
+    for e in edges:
+        w = e['w']; pts = dp(e['pts'], 0.05)
+        if seglen(pts) < 0.3: continue
+        smp = resample(pts, 0.5)
+        ur = sum(1 for x, y in smp if 0 <= int(x) < MW and 0 <= int(y) < MH and urban[int(y), int(x)]) / max(1, len(smp))
+        lf, lb = (w['lf'], 0) if w['dir'] else (w['lf'], w['lb'])
+        rec = {'name': w['name'], 'r': w['r'], 'rural': 1 if (w['r'] <= 1 or ur < 0.4) else 0, 'pts': pts, 'lf': lf, 'lb': lb,
+               'wd': max(MIN_PX, (lf + lb) * LANE_PX.get(w['r'], 24))}
+        k = kind.get(id(w), 'ground')
+        if k == 'over': rec.update({'over': 1, 'lv': max(1, w['lv'])}); over.append(rec)
+        elif k == 'tunnel': rec.update({'tunnel': 1, 'r': 1, 'rural': 0}); tun.append(rec)
+        else: out.append(rec)
+    ramps(over, out, RAMP)  # (each deck takes the end of each street it meets as its ramp)
+    print('ways', len(ways), 'edges', len(out), 'decks', len(over), 'tunnels', len(tun), 'one-way', sum(1 for r in out + over + tun if r['lb'] == 0))
+    print('tunnels', sorted({(t['name'], round(seglen(t['pts']))) for t in tun})[:12])
+    json.dump(out + tun + over, open('net5.json', 'w'), ensure_ascii=False)

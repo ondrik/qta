@@ -170,16 +170,24 @@ The third map is inner Brno at about **5 m a tile**: 2241 × 1690 tiles, 11.2 ×
 reservoir, Bystrc and Královo Pole in the north to Komárov in the south, and from Kohoutovice to Židenice. At this
 scale a car, a street and a building are their real size.
 
-- **Every street** with its name (about 4,300 of them), traced into one network like the main roads above, then put
-  back on the OpenStreetMap ways it follows (a dual carriageway on the line between its halves), each junction where
-  those ways meet: a main road runs straight through, a side street meets it at its real angle. With the Husovický,
-  Královopolský and Pisárecký tunnels and 50 overpasses. Each is as wide as its lanes, which come from
-  OpenStreetMap (one to four each way; a dual carriageway's two halves add up), with a dashed centre line, a double
-  one on four lanes or more, and lane lines between lanes going the same way. One-way streets are one-way: traffic
-  keeps to its lanes, turns into the kerbside lane after a right turn and the inner one after a left, and never takes a
-  one-way street the wrong way (one that would strand it is two-way after all). The Královopolský tunnel's two tubes run apart, as they do, from the
-  Žabovřeská interchange to Královo Pole; the slip roads that dip under the interchange beside it stay streets of
-  their own. Traffic lights stand where main roads meet; the side streets are left to the drivers.
+- **Every street** with its name, built straight from OpenStreetMap's ways: a junction wherever ways share a point
+  and nowhere else, so a dual carriageway is two one-way roads with its median between them, and every slip road,
+  loop ramp and roundabout is where it is mapped (the Žabovřeská interchange, say). A road on a bridge over another is
+  an overpass (76 of them, with their ramps) and one beneath another a tunnel: the Husovický, Královopolský and
+  Pisárecký tunnels, each tube on its own. Each street is as wide as its lanes, which come from OpenStreetMap (one to
+  four each way), with a dashed centre line, a double one on four lanes or more, and lane lines between lanes going the
+  same way. One-way streets are one-way: traffic keeps to its lanes, turns into the kerbside lane after a right turn and
+  the inner one after a left, and never takes a one-way street the wrong way (one that would strand it is two-way after
+  all). Traffic lights stand where OpenStreetMap has them; a junction of dual carriageways, several points a few metres
+  apart, is signalled as one.
+- **Trams** on all eleven lines (1 to 12: Brno has no 11), each along its own track as OpenStreetMap maps its route,
+  in both directions and every variant: Škoda 13Ts, KT8D5s, VarioLFs and pairs of old T3s, red and cream, with the
+  line's number up front in its colour. They stop at every stop (each with its sign and name), where the doors open
+  and people get on and off. Along a street they wait at its red lights, and they ring the bell at whatever is on the
+  track. They go down into the tram tunnels (the line to Bohunice under Jihlavská) and up over the bridges. Cars give
+  way to them and wait behind one at its stop, as the rules say, and whatever a 40-tonne tram hits gets out of its
+  way. Walk up to a tram's front and press Enter to take it over: ↑ to go, ↓ to brake (and back up), Space rings the
+  bell.
 - **The real buildings**: 51,972 outlines from OpenStreetMap (multi-part ones with their courtyards included), each
   at its real angle and in its real shape: a rectangle at any angle, an L, U or T in its own turned frame, or any
   polygon, with walls along every edge and collisions that follow them exactly. Each keeps its number of floors where
