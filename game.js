@@ -3400,9 +3400,20 @@ function killPed(p, src, burnt) {
   scare(p.x, p.y, 200);
   if (src === 'player') {
     earn(p.cop ? 50 : 10);
-    addHeat(p.cop ? 1.2 : (copNear(p.x, p.y, 600) ? 0.55 : 0.2));
+    if (p.cop) addHeat(1.2); else witnessed(p);
   }
   if (p.target && mission && mission.type === 'hit') completeMission();
+}
+// a killing in the street: a cop who sees it puts a star on you there and then; a passer-by who sees it phones the police,
+// and a few seconds later (unless they're dead by then) that's a star too
+let caller = null; // { p, t }: the passer-by on the phone, and when the call gets through
+function witnessed(v) {
+  if (copSees(v.x, v.y)) { addHeat(heat < 1 ? Math.max(0.55, 1.05 - heat) : 0.55); return; }
+  addHeat(copNear(v.x, v.y, 600) ? 0.55 : 0.35);
+  if (heat >= 1 || caller || lab) return;
+  let w = null, wd = 320 * 320;
+  for (const p of peds) if (!p.dead && !p.cop && !p.held && p !== v) { const dd = d2(p.x, p.y, v.x, v.y); if (dd < wd && los(p.x, p.y, v.x, v.y)) { wd = dd; w = p; } }
+  if (w) { caller = { p: w, t: time + rand(4, 7) }; msg('Someone saw that and is calling the police.', 3); }
 }
 function scare(x, y, r) {
   for (const p of peds) if (!p.dead && !p.cop && d2(p.x, p.y, x, y) < r * r) { p.flee = rand(4, 7); p.fx = x; p.fy = y; }
@@ -3976,8 +3987,10 @@ function readoutFlash(z) {
   }
   if (Q.link && (meIn || inZone(z, Q.link.x, Q.link.y))) { unlink(); msg('The readout light measured your pair: the link is gone.', 3); }
 }
+// the debug console's god mode (yours alone: not your guest's in a two-player game)
+function godOn() { return DBG.god && !NET.inGuest; }
 function hurtPlayer(dmg) {
-  if (player.down || player.hidden) return;
+  if (player.down || player.hidden || godOn()) return;
   if (player.fish) stopFishing();
   player.hp -= dmg;
   addDecal({ k: 'blood', x: player.x, y: player.y, r: 4 });
@@ -3985,6 +3998,7 @@ function hurtPlayer(dmg) {
 }
 function killPlayer() {
   if (player.down) return;
+  if (godOn()) { if (player.car) { const c = player.car; c.driver = null; player.x = c.x; player.y = c.y; player.car = null; } return; } // (thrown clear of the wreck)
   Q.branches = null;
   if (player.car) { const c = player.car; c.driver = null; player.x = c.x; player.y = c.y; player.car = null; }
   player.hp = 0; player.down = 4; player.downKind = 'wasted';
@@ -3995,7 +4009,7 @@ function killPlayer() {
   sfx.bad();
 }
 function bustPlayer() {
-  if (player.down) return;
+  if (player.down || godOn()) return;
   Q.branches = null;
   if (player.car) { player.car.driver = null; player.car = null; }
   player.down = 4; player.downKind = 'busted';
@@ -4020,7 +4034,7 @@ function respawn() {
   const where = nearestOf(player.downKind === 'busted' ? POLICE_POSTS : HOSPITALS, player.x, player.y);
   player.down = 0; player.hp = 100; player.bust = 0; player.car = null; player.fish = null; player.putOut = null; HQ = hqNew(); tankerCars = [];
   player.x = where.x; player.y = where.y; player.angle = faceOpen(where.x, where.y);
-  heat = 0; player.mult = Math.max(1, player.mult - 1);
+  heat = 0; caller = null; player.mult = Math.max(1, player.mult - 1);
   if (player.lives <= 0) { if (player.isGuest) { player.lives = 5; player.cash = Math.floor(player.cash / 2); msg('Out of lives: half your cash for five more.', 4); } else { state = 'over'; saveBest(); } }
 }
 function earn(v) {
@@ -5724,6 +5738,7 @@ function teleport(i) {
 function updateWanted(dt) {
   if (lab) return;
   const P0 = pp(), pc = player.car;
+  if (caller && time >= caller.t) { const c = caller; caller = null; if (!c.p.dead && !player.down && heat < 1) { addHeat(1.05 - heat); msg('A witness called the police.', 3); sfx.bad(); } }
   // outlast a level in plain sight and the next one comes
   if (heat >= 5 && heat < 10.99 && belief.seen && !player.down) heat = Math.min(10.99, heat + dt / 40);
   const stars = Math.floor(heat);
@@ -8228,7 +8243,12 @@ function drawPed(p, isPlayer) {
   ctx.fillStyle = p.skin; ctx.beginPath(); ctx.arc(0.5, 0, 3, 0, TAU); ctx.fill();
   ctx.fillStyle = p.hair; ctx.beginPath(); ctx.arc(-0.5, 0, 3, Math.PI * 0.5, Math.PI * 1.5); ctx.fill();
   if (p.cop) { ctx.fillStyle = p.army ? '#3b4a1f' : p.swat ? '#121418' : '#0d1b4a'; ctx.beginPath(); ctx.arc(0, 0, p.swat ? 3.6 : 3.2, 0, TAU); ctx.fill(); }
+  if (caller && caller.p === p) { ctx.fillStyle = '#111'; ctx.fillRect(-1, 3, 4, 2); } // (the phone at their ear)
   ctx.restore();
+  if (caller && caller.p === p) { // and a ringing handset over their head
+    ctx.globalAlpha = 0.6 + 0.4 * Math.sin(time * 9); ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('☎', p.x, p.y - 10); ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+  }
 }
 // shading across a car's width: dark sills, a bright highlight along the roof; cached per body size in car space
 const glossCache = new Map();
@@ -9436,7 +9456,7 @@ try { const pj = sessionStorage.getItem('qta.join'); if (pj) { sessionStorage.re
 // ============================================================ game flow
 function resetWorld() {
   cars = []; peds = []; bullets = []; parts = []; decals = []; heli = null;
-  seed = 4242; placeParked(); placePickups(); initTrams(); HQ = hqNew(); tankerCars = [];
+  seed = 4242; placeParked(); placePickups(); initTrams(); HQ = hqNew(); tankerCars = []; caller = null;
 }
 let startSel = 0; // which of STARTS a new game begins in (chosen on the title screen)
 // the maps are generated when the page loads, so switching map reloads it (and remembers the choice)
@@ -9605,7 +9625,9 @@ function dbgRun(line) {
 // god mode, and the stats line
 function dbgTick() {
   if (!DBG.god) return;
-  player.hp = 100; player.bust = 0; if (player.car && !player.car.tram) { player.car.hp = CT[player.car.type].hp; player.car.fire = 0; }
+  player.hp = 100; player.bust = 0;
+  const c = player.car, t = c && c.tram;
+  if (t) { if (!t.dead) t.hp = CT.tram.hp; } else if (c) { c.hp = CT[c.type].hp; c.fire = 0; }
 }
 function dbgDraw() {
   if (!DBG.stats) return;

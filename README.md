@@ -70,6 +70,9 @@ across it. No superposition or tweezer on the water, and T entangles a boat only
 
 Spray shops ($500) clear your wanted level (up to five stars). If you are wasted or busted you come back at the nearest hospital or
 police station, facing the street. Ramming a police car gets you at least one star, and that cruiser gives chase.
+So does killing someone where a cop sees it. If a passer-by sees it instead, they phone the police (☎ over their
+head), and a few seconds later that's a star too, unless they don't live to finish the call. Three killings in quick
+succession get you a star even unseen.
 The car you drive has a health bar over it (and in the corner of the screen), and it holds out longer than the
 other cars on the road.
 
