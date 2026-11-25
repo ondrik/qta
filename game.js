@@ -2628,8 +2628,8 @@ let Q = { psi: 1, ent: 2, link: null, linkT: 0, decoy: null, decoyT: 0, branches
 const belief = { x: 0, y: 0, vx: 0, vy: 0, sig: 0, seen: false, seeT: 0 };
 
 const pp = () => player.car || player;
-function msg(text, t = 4) { msgs.push({ text, t }); if (msgs.length > 4) msgs.shift(); }
-function bigText(text, color, t = 2.5, sub = '') { overlay = { text, color, t, max: t, sub }; }
+function msg(text, t = 4) { if (HANTEC_ON) text = hx(text); msgs.push({ text, t }); if (msgs.length > 4) msgs.shift(); }
+function bigText(text, color, t = 2.5, sub = '') { if (HANTEC_ON) { text = hx(text); sub = hx(sub); } overlay = { text, color, t, max: t, sub }; }
 
 function makeCar(type, x, y, angle, driver) {
   const t = CT[type];
@@ -3321,10 +3321,11 @@ function updatePed(p, dt) {
   if (p.dead) { p.deadT += dt; return; }
   if (p.held) { p.moving = true; p.anim = (p.anim || 0) + dt * 20; return; } // (being dragged out of a car)
   if (p.vip) { p.moving = false; p.angle += Math.sin(time * 2) * dt; return; }
+  if (p.monk && !(p.flee > 0)) { monkStep(p, dt); return; }
   p.moving = true;
   const P0 = pp(), pd = Math.hypot(P0.x - p.x, P0.y - p.y);
   const tg = copTarget(p), tp = tg === P0 ? player : NET.guest.player, td = tg === P0 ? pd : Math.hypot(tg.x - p.x, tg.y - p.y);
-  if (p.cop && heat >= 1 && !tp.down && !tp.hidden && td < 520 && (belief.sig < 80 || (td < 250 && los(p.x, p.y, tg.x, tg.y)))) {
+  if (p.cop && heat >= 1 && !tp.down && !tp.hidden && !tp.cellar && td < 520 && (belief.sig < 80 || (td < 250 && los(p.x, p.y, tg.x, tg.y)))) {
     const P0 = tg, pd = td, player = tp; // (this officer is after whichever of you is nearer)
     const a = Math.atan2(P0.y - p.y, P0.x - p.x), sees = los(p.x, p.y, P0.x, P0.y);
     p.angle = a; p.path = null; p.idle = 0;
@@ -3449,6 +3450,7 @@ function pedPurpose(p, dt) {
   if (!p.path || p.pi >= p.path.length) {
     if (p.path && p.pi >= p.path.length) { // arrived
       const k = p.goalKind; p.path = null;
+      if (p.eg && eggArrive(p)) return true;
       if (k === 1 && !p.target && !p.cop && Math.random() < 0.6) {
         const tx = Math.floor(p.x / T), ty = Math.floor(p.y / T);
         for (let d = 0; d < 4; d++) if (tile(tx + DX[d], ty + DY[d]) === BUILD) { p.angle = d * Math.PI / 2; p.entering = 0.7; return true; }
@@ -3511,7 +3513,9 @@ function witnessed(v) {
   addHeat(copNear(v.x, v.y, 600) ? 0.55 : 0.35);
   if (heat >= 1 || caller || lab) return;
   let w = null, wd = 320 * 320;
-  for (const p of peds) if (!p.dead && !p.cop && !p.held && p !== v) { const dd = d2(p.x, p.y, v.x, v.y); if (dd < wd && los(p.x, p.y, v.x, v.y)) { wd = dd; w = p; } }
+  let monk = false; // (a monk who sees it keeps the vow of silence)
+  for (const p of peds) if (!p.dead && !p.cop && !p.held && p !== v) { const dd = d2(p.x, p.y, v.x, v.y); if (dd < wd && los(p.x, p.y, v.x, v.y)) { if (p.monk) monk = true; else { wd = dd; w = p; } } }
+  if (!w && monk) msg('A monk saw it, and keeps the vow of silence.', 3);
   if (w) { caller = { p: w, t: time + rand(4, 7) }; msg('Someone saw that and is calling the police.', 3); }
 }
 function scare(x, y, r) {
@@ -3712,7 +3716,7 @@ function updateLink(dt) {
 function updateBelief(dt) {
   if (heat < 1 || player.hidden) { belief.sig = 0; belief.seen = false; return; }
   belief.seeT -= dt;
-  if (belief.seeT <= 0) { belief.seeT = 0.2; belief.seen = !Q.branches && copSees(player.x, player.y); }
+  if (belief.seeT <= 0) { belief.seeT = 0.2; belief.seen = !Q.branches && !player.cellar && copSees(player.x, player.y); }
   const o = pp();
   if (!Number.isFinite(belief.x + belief.y + belief.vx + belief.vy)) Object.assign(belief, { x: o.x || 0, y: o.y || 0, vx: 0, vy: 0 }); // (never let a bad value spread)
   if (belief.seen) { belief.x = o.x; belief.y = o.y; belief.vx = o.vx || 0; belief.vy = o.vy || 0; belief.sig = 0; if (Q.decoy) { Q.decoy.decoy = false; Q.decoy = null; Q.decoyT = 0; } }
@@ -3873,6 +3877,7 @@ function getIn(c, jacked, across) {
   if (c.type === 'tank') msg('TANK! Space fires the cannon.', 3);
   if (c.type === 'firetruck') msg('Fire truck: Space sprays water.', 3);
   if (mission && mission.type === 'steal' && mission.car === c && mission.stage === 0) advanceSteal();
+  eggGetIn(c);
 }
 // ---- fishing: walk up to a jetty and press Enter. Hold Space to cast (← → aim), strike when the float goes under,
 // then hold Space to reel in, keeping the line's tension out of the red: when the fish runs, ease off or pull the other
@@ -4094,7 +4099,7 @@ function readoutFlash(z) {
 // the debug console's god mode (yours alone: not your guest's in a two-player game)
 function godOn() { return DBG.god && !NET.inGuest; }
 function hurtPlayer(dmg) {
-  if (player.down || player.hidden || godOn()) return;
+  if (player.down || player.hidden || player.cellar || godOn()) return;
   if (player.fish) stopFishing();
   player.hp -= dmg;
   addDecal({ k: 'blood', x: player.x, y: player.y, r: 4 });
@@ -4114,6 +4119,7 @@ function killPlayer() {
 }
 function bustPlayer() {
   if (player.down || godOn()) return;
+  if (player.marble) { player.marble = false; player.bust = 0; player.marbleT = 4; heat = Math.max(0, heat - 1); bigText('LUCKY MARBLE', '#9fe8ff', 3, 'The orloj\'s marble: they let you slip away'); sfx.clink(); return; }
   Q.branches = null;
   if (player.car) { player.car.driver = null; player.car = null; }
   player.down = 4; player.downKind = 'busted';
@@ -4135,9 +4141,11 @@ function faceOpen(x, y) {
 }
 function respawn() {
   if (lab) { player.down = 0; setupLesson(lab.i); return; }
-  const where = nearestOf(player.downKind === 'busted' ? POLICE_POSTS : HOSPITALS, player.x, player.y);
+  const spil = player.downKind === 'busted' && EA && EA.spil && !player.isGuest; // (in Brno you do your time in Špilberk)
+  const where = spil ? EA.spil : nearestOf(player.downKind === 'busted' ? POLICE_POSTS : HOSPITALS, player.x, player.y);
   player.down = 0; player.hp = 100; player.bust = 0; player.car = null; player.fish = null; player.putOut = null; HQ = hqNew(); tankerCars = [];
-  player.x = where.x; player.y = where.y; player.angle = faceOpen(where.x, where.y);
+  player.x = where.x; player.y = where.y; player.angle = faceOpen(where.x, where.y); player.lime = false; player.cellar = null;
+  if (spil) msg('Let out of Špilberk, the old "prison of nations", with a warning.', 4);
   heat = 0; caller = null; player.mult = Math.max(1, player.mult - 1);
   if (player.lives <= 0) { if (player.isGuest) { player.lives = 5; player.cash = Math.floor(player.cash / 2); msg('Out of lives: half your cash for five more.', 4); } else { state = 'over'; saveBest(); } }
 }
@@ -4158,13 +4166,14 @@ function updatePlayer(dt) {
     if (player.down <= 0) respawn();
     return;
   }
+  if (player.cellar) { player.moving = false; return; } // (under the old town: see updateCellar)
   if (player.fish) { updateFishing(dt); return; }
   if (player.jack) { updateJack(dt); return; }
   if (HQ.bell && !player.isGuest) { updateBell(dt); return; }
   const con = !player.car && CONSOLES.find(c => d2(c.x, c.y, player.x, player.y) < 28 * 28);
   const epr = !player.car && heat >= 8 ? eprPhones().findIndex(e => d2(e.x, e.y, player.x, player.y) < 30 * 30) : -1;
   if (epr !== player.eprHint) { if (epr >= 0) msg(`An entangled payphone. ${touchOn() ? '⇄' : 'Enter'}: a Bell measurement, and you teleport to its twin.`, 3); player.eprHint = epr; }
-  if (hit('Enter', 'KeyF', 'KeyE')) { const fs = !player.car && fishSpotAt(player.x, player.y); if (con) { aodOpen(); return; } if (epr >= 0) { startBell(epr); return; } if (fs) startFishing(fs); else enterExit(); }
+  if (hit('Enter', 'KeyF', 'KeyE')) { const hz = !player.car && !player.isGuest ? eggHatchAt(player.x, player.y) : -1; if (hz >= 0) { enterCellar(hz); return; } const fs = !player.car && fishSpotAt(player.x, player.y); if (con) { aodOpen(); return; } if (epr >= 0) { startBell(epr); return; } if (fs) startFishing(fs); else enterExit(); }
   if (!player.car) { // walking up to a jetty or the AOD console: say what it is for
     const fs = fishSpotAt(player.x, player.y) || con;
     if (fs && fs !== player.fishHint) msg(fs === con ? `The AOD console: plan atom moves. ${touchOn() ? '⇄' : 'Enter'}: sit down.` : `A fishing jetty. ${touchOn() ? '⇄' : 'Enter'}: fish.`, 2.5);
@@ -4207,6 +4216,7 @@ function updatePlayer(dt) {
     }
   }
   player.bust = Math.max(0, player.bust - dt * 0.5);
+  if (player.marbleT > 0) { player.marbleT -= dt; player.bust = 0; } // (the orloj's luck, for a moment)
   if (player.bust > 1.4) bustPlayer();
 }
 
@@ -4385,13 +4395,14 @@ function placePickups() {
   // Site Ψ keeps a rocket launcher and spare quantum gear behind its fence
   if (SITE_PSI) for (const [k, fx, fy] of [['rocket', 0.42, 0.62], ['psi', 0.5, 0.75], ['ent', 0.62, 0.75], ['health', 0.7, 0.6]])
     pickups.push({ x: lerp(SITE_PSI.x0, SITE_PSI.x1, fx), y: lerp(SITE_PSI.y0, SITE_PSI.y1, fy), k, cd: 0 });
+  eggPickups(); // (Brno's: the calfskin full of lime, the duck, the Bren gun)
 }
 function updatePickups(dt) {
   const P0 = pp();
   for (const u of pickups) {
     if (u.cd > 0) { u.cd -= dt; continue; }
     if (u.k === 'ent' && heat >= 8) continue; // (the Observer took them)
-    if (!player.down && d2(u.x, u.y, P0.x, P0.y) < 20 * 20) { PK[u.k].give(); msg(PK[u.k].label, 2); sfx.pickup(); u.cd = 45; }
+    if (!player.down && d2(u.x, u.y, P0.x, P0.y) < 20 * 20 && (!PK[u.k].can || PK[u.k].can())) { PK[u.k].give(); msg(PK[u.k].label, PK[u.k].draw ? 5 : 2); sfx.pickup(); u.cd = PK[u.k].cd ?? 45; }
   }
 }
 
@@ -4528,6 +4539,7 @@ function missionLine() {
     case 'deliver': line = mission.stage ? `Deliver the case · P(bomb) ${Math.round(mission.bomb * 100)}%` : 'Pick up the briefcase'; break;
     case 'steal': line = mission.stage ? 'Bring the coupe to the garage' : 'Steal the pink coupe'; break;
     case 'hit': line = 'Take out the man in pink'; break;
+    case 'deadline': line = `Get the student to Božetěchova by 23:59 · now ${hhmm(dayT * 24)}`; break;
     case 'race': line = `Checkpoint ${mission.stage + 1}/${mission.pts.length}`; break;
     case 'wreck': line = `Wreck cars ${mission.count}/${mission.need}`; break;
     case 'entangle': line = 'Wreck the near cyan twin'; break;
@@ -4541,8 +4553,9 @@ function missionLine() {
 }
 function missionTarget() {
   if (NET.role === 'guest') return NET.mt ? { x: NET.mt[0], y: NET.mt[1] } : ringing;
-  if (!mission) return lab ? lab.target : ringing;
+  if (!mission) return lab ? lab.target : eggTarget(true) || ringing || eggTarget();
   switch (mission.type) {
+    case 'deadline': return mission;
     case 'steal': return mission.stage === 0 ? mission.car : mission;
     case 'hit': return mission.ped;
     case 'escort': return mission.stage === 0 ? mission.ped : mission;
@@ -4589,6 +4602,7 @@ function cleanupMission(m) {
     m.ped.vip = false;
     if (m.stage === 1 && !peds.includes(m.ped)) { const s = (m.car && sideSpot(m.car)) || pp(); m.ped.x = s.x; m.ped.y = s.y; m.ped.flee = 4; m.ped.fx = s.x; m.ped.fy = s.y; peds.push(m.ped); }
   }
+  if (m.type === 'deadline' && m.ped) { m.ped.vip = false; if (!peds.includes(m.ped)) { const s = (m.car && sideSpot(m.car)) || pp(); m.ped.x = s.x; m.ped.y = s.y; peds.push(m.ped); } if (EA && EA.fitDoor && d2(m.ped.x, m.ped.y, EA.fitDoor.x, EA.fitDoor.y) < 80 * 80) pedGo(m.ped, EA.fitDoor.x, EA.fitDoor.y); }
   if (m.type === 'cz' && m.q) { m.q.mission = false; m.q.qubit = false; }
   if (m.type === 'qkd' && m.eve) { m.eve.mission = false; if (m.eve.driver === 'eve') { m.eve.driver = 'ai'; m.eve.ln = null; } }
 }
@@ -4776,7 +4790,7 @@ function pedDensity(x, y) {
   const fh = PD_HOME[h0] * (1 - f) + PD_HOME[h1] * f, fa = PD_ACT[h0] * (1 - f) + PD_ACT[h1] * f;
   const gx = clamp(x / T / PD.cs - 0.5, 0, PD.gw - 1.001), gy = clamp(y / T / PD.cs - 0.5, 0, PD.gh - 1.001), ix = gx | 0, iy = gy | 0, u = gx - ix, v = gy - iy, i = iy * PD.gw + ix;
   const at = F => (F[i] * (1 - u) + F[i + 1] * u) * (1 - v) + (F[i + PD.gw] * (1 - u) + F[i + PD.gw + 1] * u) * v;
-  return fh * at(PD.home) + fa * at(PD.act);
+  return fh * at(PD.home) + fa * at(PD.act) + (EGG.boosts.length ? eggBoost(x, y) : 0); // (and the crowds of the moment: see updateEggs)
 }
 // how many people there should be round the cameras, and the busiest spot among them (to place newcomers by)
 function pedWant() {
@@ -4803,7 +4817,7 @@ function manageSpawns(dt) {
   spawnT = 0.25;
   const views = m => allCams().map(c => viewRect(m, c)), far = views(800), farP = views(650), farS = views(1300), seen = views(120);
   const out = (o, rs) => rs.every(r => o.x < r.x0 || o.x > r.x1 || o.y < r.y0 || o.y > r.y1);
-  cars = cars.filter(c => c === player.car || c.driver === 'player' || c.mission || c.heldBy || c.jackHold || c.fire > 0 || ((c.driver === 'ai' && c.ai.np > 12) || (c.recall && c.driver === 'police') ? out(c, seen) ? false : !out(c, far) : !out(c, far))
+  cars = cars.filter(c => c === player.car || (c.egg && !c.dead) || c.driver === 'player' || c.mission || c.heldBy || c.jackHold || c.fire > 0 || ((c.driver === 'ai' && c.ai.np > 12) || (c.recall && c.driver === 'police') ? out(c, seen) ? false : !out(c, far) : !out(c, far))
     || (c.parked && !c.dead && !c.moved && c.driver === null && !(c.spot && out(c, farS))));
   peds = peds.filter(p => p.target || p.vip || (!p.gone && !out(p, farP) && !(p.dead && p.deadT > 40)));
   fillSpots(false);
@@ -4829,10 +4843,10 @@ function manageSpawns(dt) {
       if (!p) { const q = spawnOutside(DISTRICTS[rg].beach ? [WALK, PLAZA, SAND] : [WALK, PLAZA], null, BRNO ? 260 : 420); if (q) p = { x: q.x + rand(-8, 8), y: q.y + rand(-8, 8) }; } // (in Brno just round the corner, so that more of them come into view)
       if (p && BRNO && Math.random() * want.top > pedDensity(p.x, p.y)) p = null; // (fewer of them where it's quieter)
     }
-    if (p) makePed(p.x, p.y, { cop: Math.random() < 0.08 });
+    if (p) eggNewPed(makePed(p.x, p.y, { cop: Math.random() < 0.08 }));
   }
   if (BRNO && have > want.n * 1.25 + 3) { // (and as the streets empty, those out of sight go indoors)
-    const sv = views(60), q = peds.find(p => !p.dead && !p.tp && !p.cop && !p.target && !p.vip && !p.car && !p.held && !(p.flee > 0) && out(p, sv));
+    const sv = views(60), q = peds.find(p => !p.dead && !p.tp && !p.cop && !p.target && !p.vip && !p.monk && !p.car && !p.held && !(p.flee > 0) && out(p, sv));
     if (q) q.gone = true;
   }
   if (heat >= 1 && policeCd <= 0 && !player.down) {
@@ -4860,20 +4874,22 @@ function placeParked() {
   for (const s of parkSpots) { s.c = null; s.tried = false; }
   for (const s of BOAT_SPOTS) { s.c = null; s.tried = false; }
   for (const s of MIL_SPOTS) { s.c = null; s.tried = false; }
+  for (const s of EGG_SPOTS) { s.c = null; s.tried = false; }
   for (const f of fixedParked) { const c = makeCar(f.type, f.x, f.y, f.a, null); c.parked = true; }
 }
 function fillSpots(force) {
   const near = viewRect(900), vis = viewRect(60), farS = viewRect(1300);
   const inR = (o, r) => o.x > r.x0 && o.x < r.x1 && o.y > r.y0 && o.y < r.y1;
-  for (const spots of [parkSpots, BOAT_SPOTS, MIL_SPOTS]) for (const sp of spots) {
+  for (const spots of [parkSpots, BOAT_SPOTS, MIL_SPOTS, EGG_SPOTS]) for (const sp of spots) {
     if (sp.c) { if (!inR(sp, farS) && (sp.c.moved || sp.c.dead || sp.c.driver !== null || !cars.includes(sp.c))) { sp.c = null; sp.tried = false; } continue; }
     if (sp.tried || !inR(sp, near) || (!force && inR(sp, vis))) continue;
     sp.tried = true;
-    if (Math.random() < (sp.mil ? 1 : sp.boat ? 0.8 : 0.55) && !cars.some(c => d2(c.x, c.y, sp.x, sp.y) < 20 * 20)) {
+    if (Math.random() < (sp.mil || sp.always ? 1 : sp.boat ? 0.8 : 0.55) && !cars.some(c => d2(c.x, c.y, sp.x, sp.y) < 20 * 20)) {
       const c = makeCar(sp.type || pick(['compact', 'sedan', 'sedan', 'sports', 'taxi']), sp.x, sp.y, sp.a, null);
       if (sp.color) c.color = sp.color;
       if (sp.mil) c.mil = true;
       c.parked = true; c.spot = sp; sp.c = c;
+      if (!sp.boat && !sp.mil) eggParked(c); // (round Mendel's abbey: his peas' colours)
     }
   }
 }
@@ -6398,7 +6414,7 @@ function drawWantedHUD() {
 function updateWorld(dt) {
   time += dt;
   heatCd -= dt;
-  dayT = (dayT + dt / DAY_LEN) % 1;
+  { const nd = dayT + dt / DAY_LEN; if (nd >= 1) dayN++; dayT = nd % 1; } // (and the days go by: see weekday)
   flight.t -= dt;
   if (!flight.on && flight.t <= 0) Object.assign(flight, { on: true, x: AIRPORT.rx0 + 30, v: 0, alt: 0 });
   if (flight.on) {
@@ -6482,6 +6498,7 @@ function updateWorld(dt) {
     if (Q.note) { Q.note.t -= dt; if (Q.note.t <= 0 || hit('KeyN')) Q.note = null; }
     updateCamera(dt);
   });
+  if (BRNO) updateEggs(dt);
   manageSpawns(dt);
   if (NET.guest) { asGuest(() => manageSpawns(dt)); for (const k in NET.guest.pressed) delete NET.guest.pressed[k]; } // (each press counts once)
   for (const m of msgs) m.t -= dt;
@@ -8516,6 +8533,7 @@ function drawMarkers() {
   for (const u of pickups) {
     if (u.cd > 0 || (u.k === 'ent' && heat >= 8)) continue;
     const pk = PK[u.k], bob = Math.sin(time * 4 + u.x) * 2;
+    if (pk.draw) { pk.draw(u.x, u.y + bob * 0.5); continue; }
     ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(u.x - 7, u.y - 4, 14, 12);
     ctx.fillStyle = pk.c; ctx.fillRect(u.x - 8, u.y - 9 + bob, 16, 16);
     ctx.fillStyle = '#111'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(pk.l, u.x, u.y + 3 + bob);
@@ -8532,7 +8550,10 @@ function drawPed(p, isPlayer) {
   ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(1.5, 1.5, 4.5, 6, 0, 0, TAU); ctx.fill();
   ctx.fillStyle = p.pants || '#2c3e50';
   ctx.fillRect(sw - 2, -3.5, 4, 2.6); ctx.fillRect(-sw - 2, 1, 4, 2.6);
+  if (p.suit && !isPlayer) { ctx.strokeStyle = '#222'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(-1, 5); ctx.lineTo(-4, 6.5); ctx.stroke(); ctx.fillStyle = p.suit; rrect(-10.5, 4.2, 7, 4.6, 1); } // (a suitcase in tow)
   ctx.fillStyle = p.shirt; ctx.beginPath(); ctx.ellipse(0, 0, 3.4, 5.6, 0, 0, TAU); ctx.fill();
+  if (p.monk) { ctx.beginPath(); ctx.ellipse(-0.8, 0, 4.8, 6.4, 0, 0, TAU); ctx.fill(); ctx.strokeStyle = '#b9ae98'; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.moveTo(-0.5, -5.2); ctx.lineTo(-0.5, 5.2); ctx.stroke(); } // (a white habit)
+  if (p.fan) { ctx.fillStyle = p.shirt === '#f4f4f4' ? '#1d4fa0' : '#f4f4f4'; ctx.fillRect(-0.9, -5.4, 1.8, 10.8); } // (and a scarf in the other colour)
   if (isPlayer && player.weapon) { ctx.fillStyle = '#111'; ctx.fillRect(3, 1.5, player.weapon === 'rocket' ? 11 : 7, player.weapon === 'rocket' ? 3 : 2); }
   else if (p.cop) { ctx.fillStyle = '#111'; ctx.fillRect(3, 1.5, p.swat ? 9 : 6, p.swat ? 2.6 : 2); }
   ctx.fillStyle = p.skin; ctx.beginPath(); ctx.arc(0.5, 0, 3, 0, TAU); ctx.fill();
@@ -8561,6 +8582,7 @@ function carGloss(l, w) {
 function drawCar(c) {
   const t = CT[c.type], l = t.l, w = t.w;
   if (t.boat) { drawBoat(c); return; }
+  if (t.draw) { t.draw(c); return; } // (Birk's wheel, the Formula Student car)
   ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.angle);
   if (!c.ghost) { ctx.fillStyle = 'rgba(0,0,0,.35)'; rrect(-l / 2 + 2, -w / 2 + 3, l, w, t.bike ? 3 : 4); }
   if (t.bike) {
@@ -8852,9 +8874,11 @@ function drawWorld() {
   drawDecals(v);
   drawWantedGround(v);
   drawMarkers();
+  drawEggs(v, 0);
   for (const p of peds) if (p.dead && onScreen(p.x, p.y)) drawPed(p);
   for (const p of peds) if (!p.dead && onScreen(p.x, p.y)) drawPed(p);
-  if (!player.car && !player.hidden && !(player.down && player.downKind === 'busted')) drawPed(player, true);
+  drawEggs(v, 1);
+  if (!player.car && !player.hidden && !player.cellar && !(player.down && player.downKind === 'busted')) drawPed(player, true);
   drawFishing();
   drawTow();
   const oth = otherPlayer();
@@ -8873,6 +8897,7 @@ function drawWorld() {
   if (heli && SUN.on) { ctx.fillStyle = `rgba(12,18,40,${0.25 * (1 - NIGHT)})`; ctx.beginPath(); ctx.ellipse(heli.x + SUN.sx * 70, heli.y + SUN.sy * 70, 22, 14, heli.angle, 0, TAU); ctx.fill(); }
   drawLighting(v);
   drawBuildings(v);
+  drawEggs(v, 2);
   drawTrees(v);
   drawTurbines(v);
   drawParts(true);
@@ -9066,9 +9091,10 @@ const MAP_LABELS = BRNO ? [['FIT BUT', ...geo(49.2285, 16.5955), 'hi'],
 function drawHUD() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   const small = W < 600, s = small ? 0.8 : 1;
+  drawEggsHUD();
   txt(fmt(player.cash), W - 16, 40 * s, 32 * s, '#ffd54a', 'right', true);
   txt(`x${player.mult}  ${'♥'.repeat(Math.max(0, player.lives))}`, W - 16, 64 * s, 16 * s, '#ff8a8a', 'right');
-  txt(`ψ×${Q.psi}  ε×${Q.ent}`, W - 16, 86 * s, 15 * s, '#c9b3ff', 'right');
+  txt(`${eggBadges()}ψ×${Q.psi}  ε×${Q.ent}`, W - 16, 86 * s, 15 * s, '#c9b3ff', 'right');
   const stars = Math.floor(heat), flash = heat >= 1 && belief.seen && Math.sin(time * 8) > 0;
   for (let i = 0; i < 5; i++) star(W / 2 - 60 + i * 30, 26, 11, i < stars, flash ? '#fff' : '#ffd54a');
   const WLv = WL[Math.min(10, stars)];
@@ -9161,15 +9187,16 @@ function drawHUD() {
     if (heat >= 8) for (const e of eprPhones()) dot(e.x, e.y, Math.sin(time * 6) > 0 ? '#3cf0ff' : '#fff', full ? 4.5 : 3.5);
     if (HQ.drone) dot(HQ.drone.x, HQ.drone.y, '#b388ff', 2); if (HQ.blimp) dot(HQ.blimp.x, HQ.blimp.y, '#ef5350', 3.5);
     if (Q.decoy) dot(Q.decoy.x, Q.decoy.y, '#3cf0ff', 2.5);
+    for (const e of eggDots()) dot(e.x, e.y, e.c, full ? 4 : 3);
     const tg = missionTarget(); if (tg) dot(tg.x, tg.y, '#ffe14d', 3.5);
     const oth = otherPlayer(); if (oth && !oth.hidden) dot(oth.x, oth.y, oth.color, full ? 4 : 3);
     dot(P.x, P.y, '#fff', full ? 4 : 3);
     ctx.restore();
     if (full) txt(`${BRNO ? 'Brno · map data © OpenStreetMap contributors' : 'the island'} · M to close`, W / 2, my - 10, 13, '#ddd', 'center');
     else {
-      txt(streetName(P.x, P.y) || placeName(P.x, P.y), mx, my + sh + 16, 12, '#ddd');
+      txt(hxs(streetName(P.x, P.y) || placeName(P.x, P.y)), mx, my + sh + 16, 12, '#ddd');
       const hh = Math.floor(dayT * 24), mi = Math.floor((dayT * 24 - hh) * 60);
-      txt(`${String(hh).padStart(2, '0')}:${String(mi).padStart(2, '0')}`, mx, my + sh + 32, 12, darkness() > 0.3 ? '#9fb7ff' : '#ffe08a');
+      txt(`${BRNO ? WDAYS[weekday()] + ' ' : ''}${String(hh).padStart(2, '0')}:${String(mi).padStart(2, '0')}`, mx, my + sh + 32, 12, darkness() > 0.3 ? '#9fb7ff' : '#ffe08a');
     }
   }
   const tg = missionTarget();
@@ -9182,7 +9209,7 @@ function drawHUD() {
     ctx.restore();
     txt(`${Math.round(d / T)}m`, ax + 40, ay + 5, 12, '#fff', 'left');
   }
-  const ml = NET.role === 'guest' ? NET.mx : missionLine();
+  const ml = NET.role === 'guest' ? NET.mx : missionLine() || eggLine();
   if (ml) {
     if (ml.arc) txt(ml.arc, W - 16, 156 * s, 12 * s, '#c9b3ff', 'right');
     txt(ml.line, W - 16, 110 * s, 15 * s, '#ffe14d', 'right');
@@ -9509,6 +9536,698 @@ function drawOver() {
   if (Math.sin(time * 4) > -0.3) txt('PRESS ENTER / TAP TO PLAY AGAIN', W / 2, H * 0.62, 20, '#ffd54a', 'center', true);
 }
 
+// ============================================================ Brno's easter eggs
+// The old town: the orloj's marble at eleven and Petrov ringing noon an hour early (the Swedes, 1645), the dragon in the
+// Old Town Hall's passage and Birk's wheel, the little man on St James's, Špilberk's cells, the cellars under the old
+// town. The city: the new main station that keeps its distance, Mendel's peas, Kometa's nights, the cows on Kraví hora,
+// the Bren gun from Zbrojovka, Hantec. And BUT: the Carthusians at FIT, the duck from U Kachničky, a project due at
+// 23:59, the Formula Student car, the students' Friday train home. (Both Brno maps; in online co-op the host's alone.)
+const PXM = B5 ? T / 5 : T / 15; // px a metre
+const WDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+let dayN = 0; // whole days since the game began (on a Friday)
+const weekday = () => (5 + dayN) % 7;
+const EGG_SPOTS = []; // (kept in their places like the army's: the Formula Student car)
+// (what the eggs add to the game's tables: Birk's wheel and the Formula Student car, the Bren gun)
+CT.wheel = { label: "Birk's Wheel", w: 6, l: 22, max: 175, acc: 85, turn: 2.8, hp: 600, mass: 0.5, colors: ['#8a5a2e'], draw: drawWheelCar };
+CT.formula = { label: 'Formula Student Car', w: 13, l: 28, max: 470, acc: 360, turn: 3.5, hp: 110, mass: 0.6, colors: ['#f2f2f2'], draw: drawFormula };
+WEAPONS.bren = { name: 'Bren Gun', rate: 0.12, dmg: 30, spd: 1000, spread: 0.035, life: 0.8 };
+WORDER.splice(2, 0, 'bren');
+const EA = BRNO ? (() => {
+  const mpt = B5 ? 5 : 15, P = (lat, lon) => geo(lat, lon).map(v => v * T);
+  const nearT = (x, y, ok, Rm = 150) => { // the nearest tile it likes, ring by ring
+    const tx = Math.floor(x / T), ty = Math.floor(y / T), R = Math.ceil(Rm / mpt);
+    const at = (i, j) => i > 0 && j > 0 && i < MW - 1 && j < MH - 1 && ok(map[j * MW + i], i, j);
+    for (let r = 0; r <= R; r++) {
+      for (let dx = -r; dx <= r; dx++) for (const dy of r ? [-r, r] : [0]) if (at(tx + dx, ty + dy)) return { x: (tx + dx + 0.5) * T, y: (ty + dy + 0.5) * T };
+      for (let dy = -r + 1; dy < r; dy++) for (const dx of [-r, r]) if (at(tx + dx, ty + dy)) return { x: (tx + dx + 0.5) * T, y: (ty + dy + 0.5) * T };
+    }
+    return null;
+  };
+  const foot = t => t === WALK || t === PLAZA, open = t => t === WALK || t === PLAZA || t === GRASS;
+  const reach = new Map(); // (is this tile out in the open city, not in a closed courtyard? a flood fill that gives up once it is big)
+  const outside = (i, j) => {
+    const k0 = j * MW + i; if (reach.has(k0)) return reach.get(k0);
+    const seen = new Set([k0]), q = [k0]; let h = 0;
+    while (h < q.length && seen.size < 3000) { const k = q[h++], x = k % MW, y = (k / MW) | 0; for (let d = 0; d < 4; d++) { const nx = x + DX[d], ny = y + DY[d], n = ny * MW + nx; if (nx < 1 || ny < 1 || nx >= MW - 1 || ny >= MH - 1 || seen.has(n) || solidT(map[n])) continue; seen.add(n); q.push(n); } }
+    const r = seen.size >= 3000; for (const k of q) reach.set(k, r); return r;
+  };
+  const byRoad = (i, j) => { for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (tile(i + dx, j + dy) === ROAD) return true; return false; };
+  const mid = s => s && { x: (s.x0 + s.x1 + 1) / 2 * T, y: (s.y0 + s.y1 + 1) / 2 * T };
+  const nearProp = (k, x, y, r, f) => { let b = null, bd = r * r; for (const p of props) if (p.k === k && (!f || f(p))) { const d = d2(p.x, p.y, x, y); if (d < bd) { bd = d; b = p; } } return b; };
+  // a place to leave a vehicle: on paving or grass clear of walls and of the road, facing the longest way out
+  const park = (x, y, type, Rm, inside) => {
+    const t = CT[type], R = Rm * PXM; let best = null, bs = 1e9;
+    const ok = (px, py) => !solidAt(px, py) && tileAtP(px, py) !== WATER;
+    const free = (cx, cy, a) => { const ca = Math.cos(a), sa = Math.sin(a);
+      for (let u = -t.l / 2 - 5; u <= t.l / 2 + 5; u += 5) for (let v = -t.w / 2 - 5; v <= t.w / 2 + 5; v += 5) { const px = cx + ca * u - sa * v, py = cy + sa * u + ca * v; if (!ok(px, py) || tileAtP(px, py) === ROAD || (inside && !inside(px, py))) return false; }
+      return true; };
+    const run = (cx, cy, a) => { const ca = Math.cos(a), sa = Math.sin(a); let d = 0; for (; d < 150; d += 6) for (const v of [-t.w / 2, 0, t.w / 2]) { const px = cx + ca * (t.l / 2 + 4 + d) - sa * v, py = cy + sa * (t.l / 2 + 4 + d) + ca * v; if (!ok(px, py)) return d; } return d; };
+    for (let py = y - R; py <= y + R; py += 8) for (let px = x - R; px <= x + R; px += 8) {
+      const dd = Math.hypot(px - x, py - y); if (dd > R || dd - 75 > bs) continue;
+      for (let q = 0; q < 8; q++) { const a = q * Math.PI / 4; if (!free(px, py, a)) continue; const r = run(px, py, a); if (r < 40) continue; const s = dd - Math.min(r, 120) * 0.6; if (s < bs) { bs = s; best = { x: px, y: py, a }; } }
+    }
+    return best;
+  };
+  const A = { hatches: [], cloister: [], grass: [] };
+  const oj = props.find(p => p.k === 'orloj'); A.orloj = oj ? { x: oj.x, y: oj.y } : null;
+  A.petrov = mid(siteRect('Katedrála sv. Petra a Pavla')) || (([x, y]) => ({ x, y }))(P(49.1910, 16.6073));
+  A.hall = nearT(...P(49.19314, 16.60870), (t, i, j) => (foot(t) || t === ROAD) && outside(i, j), 90); // (the gate under the tower, on Radnická)
+  // the market on Zelný trh: a calfskin full of lime by the stalls, and the fountains the dragon would drink from
+  const mk = nearProp('market', ...P(49.1922, 16.6089), 260 * PXM);
+  A.lime = mk ? nearT(mk.x + 27, mk.y + 24, (t, i, j) => foot(t) && outside(i, j), 30) : nearT(...P(49.1920, 16.6088), (t, i, j) => foot(t) && outside(i, j), 80);
+  A.drink = props.filter(p => p.k === 'fountain' && A.hall && d2(p.x, p.y, A.hall.x, A.hall.y) < (700 * PXM) ** 2).map(p => ({ x: p.x, y: p.y }));
+  // the cellars under the old town: a hatch by each of four real ways down (the Labyrinth under Zelný trh, the Capuchin
+  // crypt, the ossuary under St James's, the Mint Master's cellar by the New Town Hall), each leading on to the next
+  for (const [name, la, lo] of [['Zelný trh', 49.19291, 16.60938], ['Kapucínské náměstí', 49.19111, 16.60986], ['Jakubské náměstí', 49.19632, 16.60799], ['Dominikánské náměstí', 49.19430, 16.60600]]) {
+    const q = nearT(...P(la, lo), (t, i, j) => foot(t) && outside(i, j) && !(A.lime && d2((i + 0.5) * T, (j + 0.5) * T, A.lime.x, A.lime.y) < 60 * 60) && !(A.orloj && d2((i + 0.5) * T, (j + 0.5) * T, A.orloj.x, A.orloj.y) < 60 * 60), 90);
+    if (q && !A.hatches.some(h => d2(h.x, h.y, q.x, q.y) < 120 * 120)) A.hatches.push({ name, x: q.x, y: q.y });
+  }
+  if (A.hatches.length < 2) A.hatches = [];
+  A.spil = siteRect('Hrad Špilberk') && !B5 ? besideSite('Hrad Špilberk', 0.5, 1.1) : nearT(...P(49.19440, 16.59950), (t, i, j) => foot(t) && outside(i, j), 150); // (by the castle's gate)
+  // the little man on St James's: in the window arch of the bell tower's first floor, on its south face (toward Náměstí
+  // Svobody), baring his backside at Petrov (the detailed map has the church as it stands)
+  if (B5) {
+    const [px, py] = P(49.19640, 16.60792), inB = (b, x, y) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h && (!b.wr || inRings(b.wr, x, y));
+    let tw = buildings.find(b => inB(b, px, py)), bd = (5 * T) ** 2; // (the tower: the piece the point is in, else the nearest)
+    if (!tw) for (const b of buildings) { const dx = Math.max(b.x - px, 0, px - b.x - b.w), dy = Math.max(b.y - py, 0, py - b.y - b.h), d = dx * dx + dy * dy; if (d < bd) { bd = d; tw = b; } }
+    if (tw) {
+      const tx = inB(tw, px, py) ? px : tw.x + tw.w / 2, ty = inB(tw, px, py) ? py : tw.y + tw.h / 2;
+      let d = 0; while (d < 400 && buildings.some(b => inB(b, tx, ty + d))) d += 2;
+      A.jakub = { x: tx, y: ty + d - 1, z: 0.22, a: Math.atan2(A.petrov.y - ty, A.petrov.x - tx) };
+    }
+  }
+  const clear = (i, j, rx, ry) => { for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) { const t = tile(i + dx, j + dy), k = (j + dy) * MW + i + dx; if (solidT(t) || t === ROAD || LCG[k] === LC_RAIL || RAILT && RAILT[k]) return false; } return true; };
+  A.board = nearT(...P(49.18238, 16.61548), (t, i, j) => (t === GRASS || t === PLAZA || t === WALK) && clear(i, j, B5 ? 4 : 2, B5 ? 3 : 1), 400);
+  A.mendel = (([x, y]) => ({ x, y }))(P(49.19130, 16.59380));
+  { const tramNear = (x, y) => TL.some(R => !R.train && x > R.bb[0] - 30 && x < R.bb[2] + 30 && y > R.bb[1] - 30 && y < R.bb[3] + 30 && R.pts.some((q, k) => k && segPtD(x, y, R.pts[k - 1][0], R.pts[k - 1][1], q[0], q[1]) < 26));
+    const taken = [];
+    for (let k = 0; k < 10; k++) {
+      const a = k * TAU / 10, r = (60 + (k % 3) * 45) * PXM, q = park(A.mendel.x + Math.cos(a) * r, A.mendel.y + Math.sin(a) * r, 'sedan', 45, (x, y) => !tramNear(x, y) && !taken.some(o => d2(o.x, o.y, x, y) < 40 * 40));
+      if (q && !taken.some(o => d2(o.x, o.y, q.x, q.y) < 40 * 40)) { EGG_SPOTS.push({ x: q.x, y: q.y, a: q.a, type: pick(['compact', 'sedan', 'sedan', 'sports']), mendel: true, mi: taken.length, always: true, c: null, tried: false }); taken.push(q); }
+    } }
+  const ro = siteRect('Hala Rondo'); A.rondo = mid(ro) || (([x, y]) => ({ x, y }))(P(49.18544, 16.60205));
+  A.rondo.door = nearT(...P(49.18578, 16.60294), (t, i, j) => foot(t) && outside(i, j), 160) || A.rondo; // (its entrance)
+  const st = siteRect('Hlavní nádraží'); A.station = mid(st) || (([x, y]) => ({ x, y }))(P(49.19060, 16.61300));
+  A.station.door = nearT(A.station.x, A.station.y, foot, 160) || A.station;
+  // Kraví hora: the grass round the observatory, where the cows graze
+  const ob = mid(siteRect('Hvězdárna a planetárium')) || (([x, y]) => ({ x, y }))(P(49.20400, 16.58380));
+  A.kravi = ob;
+  { const R = Math.ceil(260 / mpt), tx = Math.floor(ob.x / T), ty = Math.floor(ob.y / T);
+    for (let j = ty - R; j <= ty + R; j++) for (let i = tx - R; i <= tx + R; i++) if (tile(i, j) === GRASS && (i - tx) ** 2 + (j - ty) ** 2 <= R * R && !solidAt((i + 0.5) * T, (j + 0.5) * T)) A.grass.push({ x: (i + 0.5) * T, y: (j + 0.5) * T });
+    if (A.grass.length > 600) A.grass = A.grass.filter((_, i) => i % Math.ceil(A.grass.length / 600) === 0); }
+  // FIT: the cloister of the Carthusian monastery (the open ground in the faculty's grounds with walls all round), the
+  // duck outside the students' club U Kachničky, and the faculty's door
+  const fs = siteRect('FIT BUT');
+  if (fs) {
+    A.fit = mid(fs);
+    const L = B5 ? 14 : 3, wall = (i, j, dx, dy) => { for (let k = 1; k <= L; k++) if (tile(i + dx * k, j + dy * k) === BUILD) return true; return false; };
+    const all = [];
+    for (let j = fs.y0; j <= fs.y1; j++) for (let i = fs.x0; i <= fs.x1; i++) { const t = tile(i, j); if (!open(t) || solidAt((i + 0.5) * T, (j + 0.5) * T)) continue; all.push({ x: (i + 0.5) * T, y: (j + 0.5) * T }); if (wall(i, j, 1, 0) && wall(i, j, -1, 0) && wall(i, j, 0, 1) && wall(i, j, 0, -1)) A.cloister.push(all[all.length - 1]); }
+    if (A.cloister.length < 6) A.cloister = all;
+    const bench = nearProp('bench', A.fit.x, A.fit.y, 40 * T, p => p.x > (fs.x0 - 6) * T && p.x < (fs.x1 + 7) * T && p.y > (fs.y0 - 6) * T && p.y < (fs.y1 + 7) * T);
+    const flag = nearProp('flag', A.fit.x, A.fit.y, 40 * T, p => p.c === '#00a9e0');
+    A.duck = nearT(...P(49.22653, 16.59511), (t, i, j) => foot(t) && outside(i, j), 120) || (bench ? { x: bench.x, y: bench.y } : null); // (outside the club, in the old brewery's wing)
+    A.fitDoor = (bench || flag) ? nearT((bench || flag).x, (bench || flag).y + 6, foot, 40) : nearT(A.fit.x, A.fit.y, foot, 200);
+  }
+  // the BUT dorms Pod Palackého vrchem on Kolejní (by block A02, the reception), where the student with the late project waits
+  A.dorm = nearT(...P(49.23168, 16.56956), (t, i, j) => foot(t) && byRoad(i, j) && outside(i, j), 220) || nearT(...P(49.23168, 16.56956), (t, i, j) => open(t) && byRoad(i, j) && outside(i, j), 600);
+  // the Formula Student car outside the mechanical engineering faculty; the Bren gun at the old Zbrojovka works
+  { const q = park(...P(49.22412, 16.57734), 'formula', 160); if (q) EGG_SPOTS.push({ x: q.x, y: q.y, a: q.a, type: 'formula', color: '#f2f2f2', always: true, c: null, tried: false }); } // (by FSI's main entrance, tower A1)
+  A.bren = nearT(...P(49.20591, 16.63367), (t, i, j) => open(t) && !byRoad(i, j) && outside(i, j), 250) || nearT(...P(49.20591, 16.63367), open, 300);
+  // Birk's wheel: where the road from Lednice comes in at the edge of the map
+  if (A.hall) {
+    const [lx, ly] = geo(48.8000, 16.8000), hx = A.hall.x / T, hy = A.hall.y / T, m = Math.ceil(250 / mpt), dl = Math.hypot(lx - hx, ly - hy);
+    let ex = hx, ey = hy; for (let k = 0; k < 5000; k++) { const nx = ex + (lx - hx) / dl, ny = ey + (ly - hy) / dl; if (nx < m || ny < m || nx > MW - m || ny > MH - m) break; ex = nx; ey = ny; }
+    const q = park(ex * T, ey * T, 'wheel', 400); if (q) A.wheel = q;
+  }
+  // somewhere for the dragon to drink, failing a fountain: the nearest water
+  if (A.hall) A.water = nearT(A.hall.x, A.hall.y, t => t === WATER, 2500);
+  return A;
+})() : null;
+const EGG = { h: null, told: {}, crowdT: 0, marble: null, dragon: null, slain: -1, wheel: null, wheelSt: 'wait', wheelDay: -1, cows: [], cowT: 0, monks: [], student: null, deadDay: -1, roarT: 20, leaveT: 0, boosts: [] };
+function eggReset() {
+  Object.assign(EGG, { h: null, told: {}, marble: null, dragon: null, slain: -1, wheel: null, wheelSt: 'wait', wheelDay: -1, cows: [], monks: [], student: null, deadDay: -1, boosts: [] });
+  player.marble = false; player.lime = false; player.cellar = null;
+}
+const eggOnce = (k, text, t = 4) => { if (EGG.told[k]) return false; EGG.told[k] = 1; msg(text, t); return true; };
+const gameH = h => (((h % 24) + 24) % 24); // (hours since midnight)
+const hhmm = h => { h = gameH(h); const hh = Math.floor(h), mi = Math.floor((h - hh) * 60); return `${String(hh).padStart(2, '0')}:${String(mi).padStart(2, '0')}`; };
+Object.assign(sfx, {
+  bells: () => { for (let i = 0; i < 6; i++) { const w = now() + i * 1.3; for (const [f, v] of [[196, 0.05], [392, 0.09], [469, 0.05], [587, 0.035], [784, 0.025]]) tone(f, 2.6, 'sine', v, 0, w); } },
+  roar: () => { noise(2.4, 650, 'bandpass', 0.35, 0.4); [0, 0.45, 0.9, 1.35].forEach(w => tone(233, 0.35, 'sawtooth', 0.03, 0, now() + w)); },
+  moo: () => { tone(150, 1.0, 'sawtooth', 0.05, 105); tone(151, 1.0, 'triangle', 0.06, 106); },
+  quack: () => { tone(640, 0.13, 'square', 0.05, 380); tone(610, 0.13, 'square', 0.05, 360, now() + 0.17); },
+  clink: () => { tone(2600, 0.3, 'sine', 0.07); tone(3950, 0.2, 'sine', 0.035, 0, now() + 0.06); },
+  hatch: () => { noise(0.5, 300, 'lowpass', 0.4); tone(90, 0.4, 'triangle', 0.1, 60); },
+});
+// ---- the calfskin, the duck and the gun lying about
+Object.assign(PK, {
+  lime: { c: '#d9c9a3', l: '', label: 'A calfskin stuffed with quicklime. The dragon prowls the old town after midnight.', give: () => { player.lime = true; }, can: () => !player.lime, cd: 20, draw: drawLime },
+  duck: { c: '#ffd83d', l: '', label: 'A rubber duck from the FIT students\' club U Kachničky.', cd: 30, draw: drawDuck, give: () => {
+    sfx.quack();
+    if (!DBG.duck) { DBG.duck = true; try { localStorage.setItem('qta.duck', '1'); } catch (e) { /* storage unavailable */ } }
+    msg('Rubber-duck debugging: press ` (backquote) any time and tell the duck what\'s wrong.', 6);
+  } },
+  bren: { c: '#6b6f4a', l: 'B', label: 'Bren gun +120: BRno and ENfield. Zbrojovka\'s ZB vz. 26, built under licence at Enfield.', give: () => give('bren', 120) },
+});
+function eggPickups() {
+  if (!EA) return;
+  if (EA.lime) pickups.push({ x: EA.lime.x, y: EA.lime.y, k: 'lime', cd: 0 });
+  if (EA.duck) pickups.push({ x: EA.duck.x, y: EA.duck.y, k: 'duck', cd: 0 });
+  if (EA.bren) pickups.push({ x: EA.bren.x, y: EA.bren.y, k: 'bren', cd: 0 });
+}
+// ---- the people: the crowd round the orloj, Kometa's fans, the students with their suitcases
+function eggBoost(x, y) { let s = 0; for (const b of EGG.boosts) { const d = d2(x, y, b.x, b.y); if (d < 9 * b.r * b.r) s += b.a * Math.exp(-d / (b.r * b.r)); } return s; }
+const matchDay = () => { const w = weekday(); return w === 0 || w === 2 || w === 5; }; // (Kometa at home: Tuesdays, Fridays, Sundays)
+function eggNewPed(p) {
+  if (!EA || p.cop || lab) return p;
+  const h = dayT * 24, w = weekday();
+  if (matchDay() && h >= 16.25 && h < 20.9 && d2(p.x, p.y, EA.rondo.x, EA.rondo.y) < (650 * PXM) ** 2 && Math.random() < 0.7) {
+    p.fan = true; p.shirt = Math.random() < 0.72 ? '#1d4fa0' : '#f4f4f4';
+    if (h < 17.6 && pedGo(p, EA.rondo.door.x + rand(-12, 12), EA.rondo.door.y + rand(-12, 12))) p.eg = 'in';
+    return p;
+  }
+  const fri = w === 5 && h >= 12 && h < 18.5, sun = w === 0 && h >= 16 && h < 22;
+  if (fri || sun) {
+    const ds = d2(p.x, p.y, EA.station.x, EA.station.y) < (600 * PXM) ** 2;
+    if (Math.random() < (ds ? 0.55 : 0.22)) {
+      p.suit = pick(['#2c3e50', '#8e2c2c', '#1f5f8b', '#555b61', '#6d4c41', '#3d6b3d']);
+      if (fri && ds && pedGo(p, EA.station.door.x + rand(-14, 14), EA.station.door.y + rand(-14, 14))) p.eg = 'in';
+    }
+  }
+  return p;
+}
+function eggArrive(p) { // (where an egg's pedestrian was headed: there)
+  const k = p.eg; p.eg = null;
+  if (k === 'orloj' && EA.orloj) { p.idle = Math.max(2, (11.03 - dayT * 24) / 24 * DAY_LEN) + rand(0, 4); p.chatWith = null; p.angle = Math.atan2(EA.orloj.y - p.y, EA.orloj.x - p.x); return true; }
+  if (k === 'in') { p.entering = 0.7; return true; } // (in through the doors: to the match, to the train)
+  return false;
+}
+// ---- every frame
+function updateEggs(dt) {
+  if (!EA || lab || NET.role === 'guest') return;
+  const h = dayT * 24, h0 = EGG.h ?? h; EGG.h = h;
+  const at = H => h0 <= h ? h0 < H && h >= H : h0 < H || h >= H; // (the clock passed H just now)
+  const P0 = pp(), you = !player.hidden && !player.down;
+  const near = (o, r) => !!o && d2(o.x, o.y, P0.x, P0.y) < r * r;
+  EGG.boosts.length = 0;
+  if (player.cellar) updateCellar(dt);
+  // the orloj: a crowd from twenty to eleven, the marble at eleven into one of its four holes; Petrov's noon
+  const O = EA.orloj;
+  if (O) {
+    const nearO = near(O, 900 * PXM);
+    if (h >= 10.5 && h < 11.03) {
+      EGG.boosts.push({ x: O.x, y: O.y, r: 60 * PXM, a: 1.6 * clamp((h - 10.5) * 4, 0, 1) });
+      EGG.crowdT -= dt;
+      if (nearO && h < 11 && EGG.crowdT <= 0) {
+        EGG.crowdT = 0.35; let n = 0;
+        for (const p of peds) {
+          if (n >= 3) break;
+          if (p.dead || p.cop || p.eg || p.tp || p.vip || p.target || p.monk || p.flee > 0 || p.held || p.idle > 0 || p.entering || d2(p.x, p.y, O.x, O.y) > 420 * 420 || d2(p.x, p.y, O.x, O.y) < 46 * 46) continue;
+          const a = rand(TAU), r = rand(17, 44), sx = O.x + Math.cos(a) * r, sy = O.y + Math.sin(a) * r;
+          if (!solidAt(sx, sy) && pedGo(p, sx, sy)) { p.eg = 'orloj'; n++; }
+        }
+      }
+      if (you && !player.car && near(O, 300) && h >= 10.7) if (eggOnce('orloj' + dayN, 'At eleven the orloj drops a glass marble out of one of its openings.', 6)) msg('Wait by one, on foot, and you might catch it.', 6);
+    }
+    if (at(11)) {
+      const k = randi(0, 3), a = Math.PI / 4 + k * Math.PI / 2;
+      EGG.marble = { x: O.x + Math.cos(a) * 9, y: O.y + Math.sin(a) * 9, vx: Math.cos(a) * 16, vy: Math.sin(a) * 16, t: 0, a };
+      if (near(O, 500)) sfx.clink();
+      eggBells(P0, you);
+    }
+    const m = EGG.marble;
+    if (m) {
+      m.t += dt; if (m.t < 0.8) { m.x += m.vx * dt; m.y += m.vy * dt; }
+      if (you && !player.car && !player.cellar && d2(m.x, m.y, P0.x, P0.y) < 17 * 17) {
+        EGG.marble = null;
+        if (player.marble) msg('Another marble: you hand it to a child in the crowd. You already carry one.', 3);
+        else { player.marble = true; bigText('THE ORLOJ\'S MARBLE', '#9fe8ff', 3.5, 'You caught it: it will get you out of one arrest'); sfx.good(); }
+      } else if (m.t > 1.7) { EGG.marble = null; if (near(O, 260) && peds.some(p => !p.dead && d2(p.x, p.y, O.x, O.y) < 60 * 60)) msg('Someone in the crowd caught the marble.', 3); }
+    }
+  }
+  updateDragon(dt, h, at, P0, you, near);
+  updateBirk(dt, h, at, P0, you, near);
+  // the little man on St James's; the billboard where the new main station is to be
+  if (you && EA.jakub && near(EA.jakub, 140)) if (eggOnce('jakub', 'On St James\'s tower a little stone man bares his backside at Petrov.', 6)) msg('The story goes it was its builders\' answer to the cathedral\'s.', 6);
+  if (you && EA.board && near(EA.board, 170)) if (eggOnce('board', 'The new main station is to stand here. Brno has argued about the move since 1901.', 6)) msg('The opening date stays twenty years away: watch it slip a year every day.', 6);
+  // the hatches into the cellars: what each is
+  if (you && !player.car && !player.cellar) {
+    const i = eggHatchAt(P0.x, P0.y);
+    if (i !== EGG.hatchHint && i >= 0) msg(`A hatch into the old town's cellars. ${touchOn() ? '⇄' : 'Enter'}: climb down, out at ${EA.hatches[(i + 1) % EA.hatches.length].name}.`, 3);
+    EGG.hatchHint = i;
+  }
+  // Kometa at home: the fans in blue and white stream to Hala Rondo, the hall roars, and after the match they pour out
+  if (matchDay()) {
+    const R = EA.rondo;
+    if (at(16)) msg('Kometa plays at home tonight: Hala Rondo, face-off at 17:30.', 5);
+    if (h >= 16.4 && h < 21) EGG.boosts.push({ x: R.x, y: R.y, r: 300 * PXM, a: h < 17.5 ? 1.3 : h < 20 ? 0.3 : 1.7 });
+    if (h >= 17.5 && h < 20 && near(R, 900 * PXM)) {
+      EGG.roarT -= dt;
+      if (EGG.roarT <= 0) { EGG.roarT = rand(30, 75); sfx.roar(); msg(pick(['A roar from Hala Rondo: Kometa scores!', 'Drums and horns from Hala Rondo.', 'Hala Rondo groans: the visitors score.', 'A roar from Hala Rondo: Kometa scores!']), 2.5); }
+    }
+    if (h >= 20 && h < 20.8 && near(R, 700 * PXM) && peds.length < 260) {
+      EGG.leaveT -= dt;
+      if (EGG.leaveT <= 0) { EGG.leaveT = 0.3; const d = EA.rondo.door, p = makePed(d.x + rand(-10, 10), d.y + rand(-10, 10)); if (!solidAt(p.x, p.y)) Object.assign(p, { fan: true, shirt: Math.random() < 0.72 ? '#1d4fa0' : '#f4f4f4' }); else p.gone = true; }
+    }
+  }
+  // Friday: the students go home for the weekend, suitcases to the main station; Sunday evening they come back
+  const w = weekday();
+  if (w === 5 && h >= 13 && h < 18.5) EGG.boosts.push({ x: EA.station.x, y: EA.station.y, r: 220 * PXM, a: 0.9 });
+  if (w === 0 && h >= 17 && h < 22) EGG.boosts.push({ x: EA.station.x, y: EA.station.y, r: 220 * PXM, a: 0.8 });
+  if (w === 5 && at(12)) msg('Friday: the students head home for the weekend, suitcases and all, to the main station.', 5);
+  if (w === 0 && at(16)) msg('Sunday evening: the students are coming back to Brno.', 4);
+  updateCows(dt, P0, near);
+  updateMonks(dt, h, near);
+  updateDeadline(dt, h, at, P0, you, near);
+}
+// ---- the bells of Petrov at eleven: in 1645 the Swedes were to give up if Brno held out until noon; the bells rang noon
+// an hour early, and they went. Wanted round here at eleven, up to five stars, the police take the hint too
+function eggBells(P0, you) {
+  if (d2(EA.petrov.x, EA.petrov.y, P0.x, P0.y) > (1500 * PXM) ** 2) return;
+  sfx.bells();
+  if (!you) return;
+  const stars = Math.floor(heat);
+  if (stars >= 1 && stars <= 5) {
+    heat = Math.max(0, heat - 2); if (heat < 1) { heat = 0; caller = null; }
+    bigText('NOON AT ELEVEN', '#ffd27a', 4.5, heat < 1 ? 'Petrov rings noon an hour early, as in 1645: the police lift the siege' : 'Petrov rings noon an hour early, as in 1645: the siege eases');
+  } else if (stars >= 6) msg('Petrov rings noon at eleven, but the state isn\'t as easily fooled as the Swedes were in 1645.', 4);
+  else msg('Petrov rings noon at eleven, as it has since the Swedes gave up their siege of Brno in 1645.', 4);
+}
+// ---- the Brno dragon: past midnight the crocodile in the Old Town Hall's passage crawls out and hunts the old town. Bullets
+// glance off it; what killed it in the legend was a calfskin stuffed with lime: it swallowed it, drank, and burst
+function updateDragon(dt, h, at, P0, you, near) {
+  const L = EA.hall; if (!L) return;
+  const night = h < 4;
+  let d = EGG.dragon;
+  if (!d) {
+    if (night && EGG.slain !== dayN && you && near(L, 1700)) {
+      d = EGG.dragon = { x: L.x, y: L.y, a: rand(TAU), st: 'prowl', t: 0, tg: null, tgT: 0, bite: 0, eat: 0, hitT: 0, sway: 0, wx: L.x, wy: L.y, wT: 0, stuck: 0, told: false };
+      if (near(L, 900) && eggOnce('dragon' + dayN, 'Past midnight the Brno dragon crawls out of the Old Town Hall passage.', 6)) msg('Bullets won\'t hurt it. The legend used a calfskin full of lime (the market on Zelný trh).', 6);
+    }
+    return;
+  }
+  if (!near(d, 3600)) { EGG.dragon = null; return; }
+  d.t += dt; d.bite -= dt; d.hitT -= dt; d.sway += dt * (d.st === 'thirst' ? 14 : 8);
+  if (!night && d.st === 'prowl') { d.st = 'home'; d.t = 0; if (near(d, 700)) msg('Dawn: the dragon crawls back into the Old Town Hall passage.', 3); }
+  const head = () => [d.x + Math.cos(d.a) * 21, d.y + Math.sin(d.a) * 21];
+  let gx = d.wx, gy = d.wy, sp = 58;
+  if (d.eat > 0) { d.eat -= dt; sp = 0; }
+  else if (d.st === 'prowl') {
+    d.tgT -= dt;
+    if (d.tgT <= 0) { // (whoever is nearest, within its patch of the old town)
+      d.tgT = 0.5; d.tg = null; let bd = 270 * 270;
+      const leash = (450 * PXM) ** 2;
+      if (you && !player.cellar && d2(P0.x, P0.y, L.x, L.y) < leash) { const dd = d2(P0.x, P0.y, d.x, d.y) * 0.8; if (dd < bd) { bd = dd; d.tg = 'you'; } }
+      for (const p of peds) if (!p.dead && !p.held && !p.vip && d2(p.x, p.y, L.x, L.y) < leash) { const dd = d2(p.x, p.y, d.x, d.y); if (dd < bd) { bd = dd; d.tg = p; } }
+    }
+    if (d.tg === 'you') { gx = P0.x; gy = P0.y; sp = 112; }
+    else if (d.tg) { if (d.tg.dead || !peds.includes(d.tg)) d.tg = null; else { gx = d.tg.x; gy = d.tg.y; sp = 112; } }
+    if (!d.tg) { d.wT -= dt; if (d.wT <= 0 || d2(d.x, d.y, d.wx, d.wy) < 30 * 30) { d.wT = rand(5, 9); for (let i = 0; i < 12; i++) { const a = rand(TAU), r = rand(40, 300 * PXM), x = L.x + Math.cos(a) * r, y = L.y + Math.sin(a) * r; if (!solidAt(x, y)) { d.wx = x; d.wy = y; break; } } } }
+  } else if (d.st === 'thirst') {
+    let w = null, wd = 1e18; for (const q of [...EA.drink, ...(EA.water ? [EA.water] : [])]) { const dd = d2(q.x, q.y, d.x, d.y); if (dd < wd) { wd = dd; w = q; } }
+    if (w) { gx = w.x; gy = w.y; }
+    sp = 150;
+    if ((w && wd < 34 * 34) || d.t > 9) { eggDragonBurst(d); return; }
+  } else if (d.st === 'home') { gx = L.x; gy = L.y; sp = 80; if (d2(d.x, d.y, L.x, L.y) < 24 * 24 || d.t > 30 || !near(d, 1100)) { EGG.dragon = null; return; } }
+  // crawl: along the streets to where it is going (it can't go through buildings), straight at it once in sight
+  if (sp > 0) {
+    d.pT = (d.pT || 0) - dt;
+    if (d.pT <= 0 || !d.path) { d.pT = 0.8; d.path = los(d.x, d.y, gx, gy) ? [] : eggPath(d.x, d.y, gx, gy) || []; }
+    while (d.path.length && d2(d.path[0].x, d.path[0].y, d.x, d.y) < 14 * 14) d.path.shift();
+    while (d.path.length > 1 && los(d.x, d.y, d.path[1].x, d.path[1].y)) d.path.shift();
+    const tx = d.path.length ? d.path[0].x : gx, ty = d.path.length ? d.path[0].y : gy;
+    d.a += clamp(wrapA(Math.atan2(ty - d.y, tx - d.x) - d.a), -4 * dt, 4 * dt);
+    const px = d.x, py = d.y, f = Math.max(0.35, Math.cos(wrapA(Math.atan2(ty - d.y, tx - d.x) - d.a))); // (slows to turn)
+    moveFree(d, Math.cos(d.a) * sp * f, Math.sin(d.a) * sp * f, dt, 6);
+    if (Math.hypot(d.x - px, d.y - py) < sp * f * dt * 0.2) { d.stuck = (d.stuck || 0) + dt; if (d.stuck > 1) { d.stuck = 0; d.path = null; d.wT = 0; d.tgT = 0; d.a += rand(-2, 2); } } else d.stuck = 0;
+  }
+  // its jaws
+  const [hx, hy] = head();
+  if (d.tg && d.tg !== 'you' && d2(hx, hy, d.tg.x, d.tg.y) < 13 * 13 && !d.tg.dead) { killPed(d.tg, 'dragon'); d.eat = 1.4; d.tg = null; sfx.bite(); }
+  if (you && !player.cellar) {
+    if (player.lime && d2(hx, hy, P0.x, P0.y) < 46 * 46 && d.st === 'prowl') {
+      player.lime = false; d.st = 'thirst'; d.t = 0; d.eat = 0.8; sfx.bite();
+      msg('The dragon snapped up the calfskin and swallowed it, lime and all. Now it burns with thirst…', 4);
+    } else if (d.st === 'prowl' && d.bite <= 0) {
+      if (!player.car && d2(hx, hy, P0.x, P0.y) < 15 * 15) { hurtPlayer(22); d.bite = 1.1; shake = Math.max(shake, 0.6); sfx.bite(); }
+      else if (player.car && d2(d.x, d.y, P0.x, P0.y) < 34 * 34) { damageCar(player.car, 30, null); d.bite = 1.3; shake = Math.max(shake, 0.8); sfx.bite(); }
+    }
+  }
+  // cars that hit it: they come off worse
+  if (d.hitT <= 0) for (const c of cars) {
+    if (c.dead || c.lay === 1 || CT[c.type].boat || c.tram || d2(c.x, c.y, d.x, d.y) > 30 * 30) continue;
+    const dx = c.x - d.x, dy = c.y - d.y, l = Math.hypot(dx, dy) || 1, sp0 = Math.abs(c.speed);
+    c.x += dx / l * 6; c.y += dy / l * 6; c.speed *= -0.3; c.vx = dx / l * 60; c.vy = dy / l * 60;
+    if (sp0 > 30) damageCar(c, 10 + sp0 * 0.12, null);
+    moveFree(d, -dx / l * 120, -dy / l * 120, 0.05, 7); d.hitT = 0.4;
+    if (c === player.car) { shake = Math.max(shake, 0.5); if (!d.told) { d.told = true; msg('Its hide is like armour: the dragon shrugs off cars and bullets.', 3); } }
+    sfx.crash(); break;
+  }
+  // bullets glance off its scales; a rocket's blast just rocks it
+  for (const b of bullets) {
+    if (b.life <= 0) continue;
+    const qx = b.x - b.vx * dt, qy = b.y - b.vy * dt, vx = b.x - qx, vy = b.y - qy, L2 = vx * vx + vy * vy || 1, u = clamp(((d.x - qx) * vx + (d.y - qy) * vy) / L2, 0, 1);
+    if (d2(qx + vx * u, qy + vy * u, d.x, d.y) > 16 * 16) continue;
+    const ix = qx + vx * u, iy = qy + vy * u;
+    if (b.rocket) explode(ix, iy, 40, b.owner); else { for (let i = 0; i < 4; i++) addPart(ix, iy, rand(-120, 120), rand(-120, 120), 0.15, 1.5, '#ffe9a0'); }
+    b.life = 0; if (b.owner === 'player' && !d.told) { d.told = true; msg('The bullets glance off its scales. The legend used lime.', 3); }
+  }
+}
+// (the way there through the streets: a BFS over open tiles, as waypoints)
+function eggPath(x0, y0, x1, y1, maxD = 120) {
+  const sx = Math.floor(x0 / T), sy = Math.floor(y0 / T), gx = Math.floor(x1 / T), gy = Math.floor(y1 / T), g = gy * MW + gx;
+  if (sx < 1 || sy < 1 || sx >= MW - 1 || sy >= MH - 1) return null;
+  const st = ++bfsStamp, s0 = sy * MW + sx; let h = 0, tl = 0, best = s0, bd = 1e18; bfsQ[tl++] = s0; bfsSeen[s0] = st; bfsPrev[s0] = -1; bfsD[s0] = 0;
+  while (h < tl) {
+    const i = bfsQ[h++], d = bfsD[i], x = i % MW, y = (i / MW) | 0, dd = (x - gx) ** 2 + (y - gy) ** 2;
+    if (dd < bd) { bd = dd; best = i; } if (i === g) break; if (d >= maxD) continue;
+    for (let k = 0; k < 4; k++) { const nx = x + DX[k], ny = y + DY[k], j = ny * MW + nx; if (nx < 1 || ny < 1 || nx >= MW - 1 || ny >= MH - 1 || bfsSeen[j] === st || solidT(map[j])) continue; bfsSeen[j] = st; bfsPrev[j] = i; bfsD[j] = d + 1; bfsQ[tl++] = j; }
+  }
+  const path = []; for (let i = best; i !== s0 && i >= 0; i = bfsPrev[i]) path.push({ x: (i % MW + 0.5) * T, y: (((i / MW) | 0) + 0.5) * T });
+  return path.reverse();
+}
+function eggDragonBurst(d) {
+  for (let i = 0; i < 60; i++) addPart(d.x + rand(-14, 14), d.y + rand(-8, 8), rand(-160, 160), rand(-160, 160), rand(0.5, 1.2), rand(2, 5), pick(['#3f5a2a', '#5b7a3a', '#e8e4d8', '#9aa08a', '#2c4220']), 4, true);
+  addDecal({ k: 'scorch', x: d.x, y: d.y, r: 14 }); sfx.boom(); shake = Math.max(shake, 1);
+  EGG.dragon = null; EGG.slain = dayN;
+  const P0 = pp();
+  if (d2(d.x, d.y, P0.x, P0.y) < 1200 * 1200) { earn(5000); bigText('DRAGON SLAIN', '#7dff7a', 4.5, 'Lime, then water: it burst, as in the legend · +$5,000'); sfx.good(); }
+}
+// ---- Birk's wheel. In 1636 the wheelwright Jiří Birk bet he could fell a tree, make a wheel and roll it from Lednice to
+// Brno between dawn and dusk, and won: the wheel hangs in the Old Town Hall's passage. It waits at the edge of town from
+// five in the morning; roll it to the Old Town Hall before eight in the evening
+function updateBirk(dt, h, at, P0, you, near) {
+  const S = EA.wheel; if (!S || !EA.hall) return;
+  let c = EGG.wheel;
+  if (c && (!cars.includes(c) || c.dead)) { if (EGG.wheelSt === 'roll') { msg('Birk\'s wheel is lost: the wager with it.', 3); EGG.wheelSt = 'lost'; } c = EGG.wheel = null; }
+  if (c) c.roll = (c.roll || 0) + c.speed * dt;
+  if (EGG.wheelDay < 0 || at(5)) { // a new day: a new wheel at the edge of town
+    EGG.wheelDay = dayN;
+    if (EGG.wheelSt !== 'roll') {
+      if (c && player.car !== c && !onScreen(c.x, c.y, 100)) { cars.splice(cars.indexOf(c), 1); c = EGG.wheel = null; }
+      if (!c) { c = EGG.wheel = makeCar('wheel', S.x, S.y, S.a, null); c.parked = true; c.egg = 'wheel'; }
+      EGG.wheelSt = 'wait';
+    }
+  }
+  const day = h >= 5 && h < 20;
+  if (c && player.car === c && EGG.wheelSt === 'wait') {
+    if (day) { EGG.wheelSt = 'roll'; bigText('BIRK\'S WAGER', '#e0b070', 3.5, 'Roll the wheel to the Old Town Hall before sunset (20:00)'); msg('In 1636 the wheelwright Jiří Birk bet he could fell a tree and make a wheel of it,', 7); msg('then roll it from Lednice to Brno, all between dawn and dusk. He won.', 7); }
+    else eggOnce('birknight' + dayN, 'Birk set out at dawn: the wager starts between five in the morning and eight in the evening.', 4);
+  }
+  if (EGG.wheelSt === 'roll') {
+    if (!day) { EGG.wheelSt = 'lost'; bigText('SUNSET', '#e67e22', 3, 'Birk lost the wager'); sfx.bad(); }
+    else if (c && d2(c.x, c.y, EA.hall.x, EA.hall.y) < 64 * 64) {
+      EGG.wheelSt = 'won'; earn(4000); sfx.good();
+      bigText('BIRK WINS THE WAGER', '#ffd27a', 4.5, 'The wheel hangs in the Old Town Hall passage to this day · +$4,000');
+      if (player.car === c) { player.car = null; const s = sideSpot(c) || c; player.x = s.x; player.y = s.y; }
+      cars.splice(cars.indexOf(c), 1); EGG.wheel = null;
+    }
+  }
+}
+// ---- the cellars under the old town: down a hatch, through the dark, up at the next one; the police lose you there
+const eggHatchAt = (x, y) => EA ? EA.hatches.findIndex(q => d2(q.x, q.y, x, y) < 16 * 16) : -1;
+function enterCellar(i) {
+  const H = EA.hatches, q = H[i];
+  player.cellar = { t: 2.6, to: (i + 1) % H.length }; player.moving = false; sfx.hatch();
+  if (heat >= 1) Object.assign(belief, { x: q.x, y: q.y, vx: 0, vy: 0, sig: Math.max(belief.sig, 300), seen: false, seeT: 1.5 });
+}
+function updateCellar(dt) {
+  const c = player.cellar; c.t -= dt; belief.seen = false;
+  if (c.t > 0) return;
+  const q = EA.hatches[c.to]; player.cellar = null;
+  player.x = q.x; player.y = q.y; player.angle = faceOpen(q.x, q.y); updateCamera(0, true); sfx.hatch();
+  msg(`You climb out at ${q.name}.`, 2.5);
+}
+// ---- the cows on Kraví hora ("Cow Hill"): they graze round the observatory, and moo at whoever bumps them
+function updateCows(dt, P0, near) {
+  const K = EA.kravi;
+  if (!A_GRASS().length) return;
+  if (near(K, 1500)) { if (!EGG.cows.length) for (let i = 0; i < 5; i++) { const g = pick(A_GRASS()); EGG.cows.push({ x: g.x + rand(-8, 8), y: g.y + rand(-8, 8), a: rand(TAU), t: rand(0, 6), g: null, vx: 0, vy: 0, hit: 0, s: randi(0, 9999) }); } }
+  else if (EGG.cows.length && !near(K, 2400)) EGG.cows = [];
+  for (const w of EGG.cows) {
+    w.hit -= dt;
+    if (Math.abs(w.vx) + Math.abs(w.vy) > 2) { moveFree(w, w.vx, w.vy, dt, 5); w.vx *= Math.exp(-dt * 4); w.vy *= Math.exp(-dt * 4); }
+    else if (w.t > 0) w.t -= dt;
+    else {
+      if (!w.g) { let b = null; for (let i = 0; i < 12; i++) { const g = pick(A_GRASS()); if (d2(g.x, g.y, w.x, w.y) < 110 * 110) { b = g; break; } } w.g = b || pick(A_GRASS()); }
+      const dx = w.g.x - w.x, dy = w.g.y - w.y, l = Math.hypot(dx, dy);
+      if (l < 4) { w.g = null; w.t = rand(4, 12); }
+      else { w.a += clamp(wrapA(Math.atan2(dy, dx) - w.a), -dt, dt); const px = w.x, py = w.y; moveFree(w, Math.cos(w.a) * 9, Math.sin(w.a) * 9, dt, 5); if (Math.abs(w.x - px) + Math.abs(w.y - py) < 0.02) { w.g = null; w.t = rand(1, 3); } }
+    }
+    if (w.hit <= 0) for (const c of cars) {
+      if (c.dead || c.lay === 1 || CT[c.type].boat || c.tram || d2(c.x, c.y, w.x, w.y) > 20 * 20) continue;
+      const dx = w.x - c.x, dy = w.y - c.y, l = Math.hypot(dx, dy) || 1, sp = Math.abs(c.speed);
+      w.vx = dx / l * (40 + sp * 0.4); w.vy = dy / l * (40 + sp * 0.4); w.hit = 1; w.t = rand(2, 4); w.g = null;
+      c.speed *= 0.45; if (sp > 60) damageCar(c, 6 + sp * 0.04, null);
+      if (onScreen(w.x, w.y)) sfx.moo();
+      if (c === player.car) eggOnce('cow', 'Moo. Kraví hora means Cow Hill.', 2.5);
+      break;
+    }
+  }
+}
+const A_GRASS = () => EA.grass;
+// ---- the Carthusians at FIT: the faculty's old monastery has its monks back at night, walking the cloister. They have
+// taken a vow of silence: whatever they see, they won't call the police
+function updateMonks(dt, h, near) {
+  if (!EA.fit || !EA.cloister.length) return;
+  const night = h >= 21.5 || h < 5;
+  EGG.monks = EGG.monks.filter(m => peds.includes(m) && !m.dead && !m.gone);
+  EGG.monkT = (EGG.monkT || 0) - dt;
+  if (night && near(EA.fit, 1500) && EGG.monks.length < 4 && EGG.monkT <= 0) { // (one at a time, out of sight where it can)
+    EGG.monkT = 1.5; let q = null;
+    for (let i = 0; i < 8; i++) { q = pick(EA.cloister); if (!onScreen(q.x, q.y, 10)) break; }
+    const m = makePed(q.x, q.y); Object.assign(m, { monk: true, shirt: '#ece6d6', hair: '#ddd5c6', pants: '#e4ddcc', speed: 15, mt: null, skin: pick(SKINS) });
+    EGG.monks.push(m);
+  } else if (!night) for (const m of EGG.monks) if (!onScreen(m.x, m.y, 40)) m.gone = true;
+}
+function monkStep(p, dt) {
+  if (p.idle > 0) { p.idle -= dt; p.moving = false; return; }
+  if (!p.mt || d2(p.x, p.y, p.mt.x, p.mt.y) < 9) {
+    if (p.mt) { p.mt = null; p.idle = rand(2, 7); p.moving = false; return; }
+    let q = null; for (let i = 0; i < 10; i++) { const c = pick(EA.cloister); if (d2(c.x, c.y, p.x, p.y) < 150 * 150 && los(p.x, p.y, c.x, c.y)) { q = c; break; } }
+    p.mt = q || pick(EA.cloister);
+  }
+  const a = Math.atan2(p.mt.y - p.y, p.mt.x - p.x); p.angle = a; p.moving = true; p.anim += dt * 5;
+  const px = p.x, py = p.y; moveFree(p, Math.cos(a) * p.speed, Math.sin(a) * p.speed, dt, 3);
+  if (Math.abs(p.x - px) + Math.abs(p.y - py) < 0.02) p.mt = null;
+}
+// ---- the project due at 23:59: from a quarter to eleven at night a FIT student waits outside the dorms on Kolejní with
+// a laptop. Stop by them, and get them to Božetěchova before midnight
+const DL0 = 22.75, DL1 = 23 + 59 / 60;
+function updateDeadline(dt, h, at, P0, you, near) {
+  if (!EA.dorm || !EA.fitDoor) return;
+  const s = EGG.student, m = mission;
+  if (m && m.type === 'deadline') {
+    if (player.car !== m.car) failMission('You left the student behind.');
+    else if (h >= DL1 || h < 5) failMission('23:59 has passed: zero points.');
+    else if (near(m, 40) && Math.abs(player.car.speed) < 160) {
+      const late = hhmm(h); completeMission(1, 'SUBMITTED'); msg(`"Uploaded at ${late}. Thank you!"`, 3);
+    }
+    return;
+  }
+  const on = h >= DL0 && h < DL1 && EGG.deadDay !== dayN;
+  if (on && !s) {
+    if (at(DL0) || near(EA.dorm, 2600)) {
+      const p = EGG.student = makePed(EA.dorm.x, EA.dorm.y); Object.assign(p, { vip: true, student: true, shirt: '#00a9e0', hp: 40 });
+      if (near(EA.dorm, 30000)) msg('A FIT student at the Kolejní dorms needs a lift to Božetěchova: the project is due at 23:59.', 6);
+    }
+  } else if (s && (!on || s.dead || !peds.includes(s))) {
+    if (s.dead || !peds.includes(s)) EGG.deadDay = dayN; else s.vip = false;
+    EGG.student = null; return;
+  }
+  if (s && !mission && player.car && !player.car.tram && !CT[player.car.type].boat && !CT[player.car.type].bike && player.car.type !== 'wheel' && near(s, 46) && Math.abs(player.car.speed) < 40) {
+    peds.splice(peds.indexOf(s), 1); EGG.student = null; EGG.deadDay = dayN;
+    mission = { type: 'deadline', stage: 1, ped: s, car: player.car, x: EA.fitDoor.x, y: EA.fitDoor.y, reward: 3000 + randi(0, 4) * 250, timer: 0, arc: null };
+    msg('"Božetěchova, please, and fast: the project is due at 23:59 and the upload is still running!"', 5); sfx.pickup();
+  }
+}
+const eggTarget = wager => { // (where the arrow points, with no job on: the wager's goal first, then the student)
+  if (!EA || NET.role === 'guest') return null;
+  if (EGG.wheelSt === 'roll' && EA.hall) return EA.hall;
+  if (wager) return null;
+  if (EGG.student && !EGG.student.dead) return EGG.student;
+  return null;
+};
+const eggLine = () => {
+  if (!EA || EGG.wheelSt !== 'roll') return null;
+  return { line: `Birk's wager: the wheel to the Old Town Hall by 20:00 · ${hhmm(dayT * 24)}`, arc: '', timer: 0 };
+};
+// (round Mendel's abbey the parked cars come in green and yellow, three to one: his peas' colours, in his ratio)
+function eggParked(c) {
+  if (!EA || d2(c.x, c.y, EA.mendel.x, EA.mendel.y) > (320 * PXM) ** 2) return;
+  const yellow = c.spot && c.spot.mendel ? c.spot.mi % 4 === 3 : Math.random() >= 0.75; // (in his own spots, exactly three to one)
+  c.color = yellow ? '#e8c62e' : '#3f8f3a'; c.mendel = true;
+}
+function eggGetIn(c) {
+  if (!EA) return;
+  if (c.mendel && eggOnce('mendel', c.color === '#e8c62e' ? 'A yellow one: recessive.' : 'A green one: dominant.', 6)) msg('Round Mendel\'s abbey the parked cars come green and yellow, three to one, like his peas.', 6);
+  if (c.type === 'formula') eggOnce('formula', 'A Formula Student car from the mechanical engineering faculty: the fastest thing in town.', 4);
+}
+// ---- drawing
+function drawEggs(v, pass) {
+  if (!EA) return;
+  const inV = (o, m = 60) => o && o.x > v.x0 - m && o.x < v.x1 + m && o.y > v.y0 - m && o.y < v.y1 + m;
+  if (pass === 0) {
+    for (const q of EA.hatches) if (inV(q)) { // an iron hatch in the paving
+      ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(q.x - 7, q.y - 6, 15, 15);
+      ctx.fillStyle = '#4a4d52'; ctx.fillRect(q.x - 8, q.y - 8, 16, 16); ctx.strokeStyle = '#2c2e32'; ctx.lineWidth = 1.2; ctx.strokeRect(q.x - 8, q.y - 8, 16, 16);
+      ctx.beginPath(); ctx.moveTo(q.x - 8, q.y); ctx.lineTo(q.x + 8, q.y); ctx.moveTo(q.x, q.y - 8); ctx.lineTo(q.x, q.y + 8); ctx.stroke();
+      ctx.fillStyle = '#8a8d92'; for (const [a, b] of [[-5, -5], [5, -5], [-5, 5], [5, 5]]) ctx.fillRect(q.x + a - 0.7, q.y + b - 0.7, 1.4, 1.4);
+    }
+    if (EA.orloj && inV(EA.orloj)) { // the orloj's four holes, and the marble rolling out of one
+      const O = EA.orloj; ctx.fillStyle = '#050506';
+      for (let k = 0; k < 4; k++) { const a = Math.PI / 4 + k * Math.PI / 2; ctx.beginPath(); ctx.arc(O.x + Math.cos(a) * 8, O.y + Math.sin(a) * 8, 1.4, 0, TAU); ctx.fill(); }
+      const m = EGG.marble;
+      if (m) { const g = ctx.createRadialGradient(m.x - 0.6, m.y - 0.6, 0.2, m.x, m.y, 2.2); g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#9fe8ff'); g.addColorStop(1, '#2f7fa0'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(m.x, m.y, 2.2, 0, TAU); ctx.fill(); }
+    }
+    if (EA.board && inV(EA.board, 80)) drawBoard(EA.board);
+  } else if (pass === 1) {
+    for (const w of EGG.cows) if (inV(w, 30)) drawCow(w);
+    if (EGG.dragon && inV(EGG.dragon, 80)) drawDragon(EGG.dragon);
+  } else if (pass === 2 && EA.jakub && inV(EA.jakub, 120)) { // (high on the wall: where the walls are drawn, lifted)
+    const J = EA.jakub, k = 1 + J.z, x = cam.x + (J.x - cam.x) * k, y = cam.y + (J.y - cam.y) * k;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(J.a); ctx.scale(1.8, 1.8);
+    ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(-2.5, -2, 5, 5);
+    ctx.fillStyle = '#cdbfa6'; ctx.beginPath(); ctx.ellipse(-1, 0, 2.4, 1.8, 0, 0, TAU); ctx.fill(); // (bent over)
+    ctx.fillStyle = '#e2d6bf'; ctx.beginPath(); ctx.arc(1.5, -1, 1.25, 0, TAU); ctx.arc(1.5, 1, 1.25, 0, TAU); ctx.fill(); // (its bare backside, toward Petrov)
+    ctx.fillStyle = '#b7a98f'; ctx.beginPath(); ctx.arc(-3.2, 0, 1.2, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+}
+function drawBoard(B) { // a billboard on two legs: the new main station, opening (always) twenty years from now
+  const x = B.x, y = B.y;
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(x - 30, y + 2, 64, 10);
+  ctx.fillStyle = '#5a5e64'; ctx.fillRect(x - 20, y + 2, 3, 9); ctx.fillRect(x + 17, y + 2, 3, 9);
+  ctx.fillStyle = '#1f4e8c'; ctx.fillRect(x - 32, y - 14, 64, 20); ctx.fillStyle = '#e8c43a'; ctx.fillRect(x - 32, y + 4, 64, 2);
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+  ctx.font = 'bold 6px sans-serif'; ctx.fillText('NOVÉ HLAVNÍ NÁDRAŽÍ', x, y - 6);
+  ctx.font = 'bold 7px sans-serif'; ctx.fillText(`OTEVŘENÍ ${new Date().getFullYear() + 20 + dayN}`, x, y + 2);
+  ctx.textAlign = 'left';
+}
+function drawDragon(d) { // a crocodile seen from above: tail sweeping, legs paddling, its eyes catching the light
+  ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.a);
+  const s = Math.sin(d.sway), mv = d.eat > 0 ? 0 : 1;
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(2, 3, 26, 9, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#2f4a22';
+  for (const [lx, ly, ph] of [[8, -7, 0], [8, 7, Math.PI], [-8, -7, Math.PI], [-8, 7, 0]]) { const o = Math.sin(d.sway + ph) * 3 * mv; ctx.beginPath(); ctx.ellipse(lx + o, ly + Math.sign(ly) * 2, 3.2, 2, 0.4 * Math.sign(ly), 0, TAU); ctx.fill(); }
+  ctx.beginPath(); ctx.moveTo(-10, -5); // the tail, swinging
+  for (let i = 1; i <= 6; i++) ctx.lineTo(-10 - i * 4.6, Math.sin(d.sway - i * 0.7) * i * 0.9 * mv - 5 + i * 0.8);
+  for (let i = 6; i >= 1; i--) ctx.lineTo(-10 - i * 4.6, Math.sin(d.sway - i * 0.7) * i * 0.9 * mv + 5 - i * 0.8);
+  ctx.lineTo(-10, 5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#4d6e33'; ctx.beginPath(); ctx.ellipse(0, 0, 14, 6.5, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#577a3a'; ctx.beginPath(); ctx.moveTo(10, -4.5); ctx.lineTo(25, -2.2); ctx.lineTo(26, 0); ctx.lineTo(25, 2.2); ctx.lineTo(10, 4.5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#26391b'; for (let x = -24; x < 10; x += 3.4) ctx.fillRect(x, -0.8, 1.8, 1.6); // (the ridge of its back)
+  if (d.eat > 0 || d.bite > 0.8) { ctx.fillStyle = '#f2efe4'; for (let x = 15; x < 25; x += 2.2) { ctx.fillRect(x, -2.6, 0.9, 0.9); ctx.fillRect(x, 1.7, 0.9, 0.9); } }
+  ctx.fillStyle = NIGHT > 0.3 ? '#ffe25a' : '#c9a227'; ctx.beginPath(); ctx.arc(12.5, -3.2, 1.3, 0, TAU); ctx.arc(12.5, 3.2, 1.3, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+function drawCow(w) {
+  ctx.save(); ctx.translate(w.x, w.y); ctx.rotate(w.a);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(2, 2, 9, 5, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#f4f1ea'; ctx.beginPath(); ctx.ellipse(0, 0, 9, 5, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#1e1e1e'; for (let i = 0; i < 3; i++) { const r = ((w.s >> (i * 3)) & 7) / 7; ctx.beginPath(); ctx.ellipse(-5 + i * 4.5, (r - 0.5) * 5, 2.2, 1.7, r * 3, 0, TAU); ctx.fill(); }
+  const g = w.t > 0 ? Math.sin(time * 3 + w.s) * 0.8 : 0;
+  ctx.fillStyle = '#e9e4d8'; ctx.beginPath(); ctx.ellipse(10 + g, 0, 3.4, 2.6, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#d99a9a'; ctx.beginPath(); ctx.ellipse(12.6 + g, 0, 1.4, 1.9, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#2a2a2a'; ctx.fillRect(8.5 + g, -3.8, 1.6, 1.4); ctx.fillRect(8.5 + g, 2.4, 1.6, 1.4);
+  ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(-12, Math.sin(time * 2 + w.s) * 1.5); ctx.stroke();
+  ctx.restore();
+}
+function drawWheelCar(c) { // Birk's wheel, seen from above: the rim on edge, the hub out to both sides, and whoever rolls it
+  ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.angle);
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; rrect(-9, -1, 22, 6, 3);
+  if (c.driver === 'player') {
+    const sw = Math.sin((c.roll || 0) * 0.12) * 3;
+    ctx.fillStyle = player.pants || '#2c3e50'; ctx.fillRect(-17 + sw, -3.5, 4, 2.4); ctx.fillRect(-17 - sw, 1.1, 4, 2.4);
+    ctx.fillStyle = player.shirt; ctx.beginPath(); ctx.ellipse(-15, 0, 3.4, 5.6, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = player.skin; ctx.fillRect(-13, -4.2, 4, 1.6); ctx.fillRect(-13, 2.6, 4, 1.6);
+    ctx.beginPath(); ctx.arc(-14.5, 0, 3, 0, TAU); ctx.fill(); ctx.fillStyle = player.hair; ctx.beginPath(); ctx.arc(-15.5, 0, 3, Math.PI * 0.5, Math.PI * 1.5); ctx.fill();
+  }
+  ctx.fillStyle = c.dead ? '#2a2018' : '#6b4423'; rrect(-11, -2.6, 22, 5.2, 2.6);
+  ctx.fillStyle = '#3e2914'; const ph = ((c.roll || 0) % 5.5 + 5.5) % 5.5; for (let x = -11 + ph; x < 11; x += 5.5) ctx.fillRect(x, -2.6, 1.1, 5.2); // (the felloes' joints rolling by)
+  ctx.fillStyle = '#4a3018'; ctx.fillRect(-2.2, -5, 4.4, 10); ctx.fillStyle = '#2b2b2b'; ctx.fillRect(-1, -5.5, 2, 11);
+  ctx.restore();
+}
+function drawFormula(c) { // an open-wheeler: wings front and back, the wheels out in the air, the driver's helmet
+  ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.angle);
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; rrect(-12, -5, 28, 12, 3);
+  ctx.fillStyle = '#141414'; for (const [x, y, l, w] of [[8, -6.8, 5.5, 3.2], [8, 3.6, 5.5, 3.2], [-9.5, -7.4, 6.5, 3.8], [-9.5, 3.6, 6.5, 3.8]]) ctx.fillRect(x - l / 2, y, l, w);
+  const col = c.dead ? '#242424' : c.color;
+  ctx.fillStyle = c.dead ? '#1a1a1a' : '#c0392b'; ctx.fillRect(12, -6.5, 2.6, 13); ctx.fillRect(-15, -6, 3, 12);
+  ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(5, -3); ctx.lineTo(-4, -3.4); ctx.lineTo(-6, -5.6); ctx.lineTo(-11, -5.6); ctx.lineTo(-13, -2.5); ctx.lineTo(-13, 2.5); ctx.lineTo(-11, 5.6); ctx.lineTo(-6, 5.6); ctx.lineTo(-4, 3.4); ctx.lineTo(5, 3); ctx.closePath(); ctx.fill();
+  if (!c.dead) { ctx.fillStyle = '#1f5fbf'; ctx.fillRect(-2, -0.7, 15, 1.4); ctx.fillStyle = '#111'; ctx.beginPath(); ctx.ellipse(-3.5, 0, 3.6, 2.4, 0, 0, TAU); ctx.fill(); }
+  if (c.driver && !c.dead) { ctx.fillStyle = c.driver === 'player' ? '#ffd23f' : '#e0e0e0'; ctx.beginPath(); ctx.arc(-3.5, 0, 2.1, 0, TAU); ctx.fill(); }
+  ctx.restore();
+}
+function drawLime(x, y) { // a calfskin, stitched up round its load of quicklime
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(x + 2, y + 2, 8, 5, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#b08a5a'; ctx.beginPath(); ctx.ellipse(x, y, 8, 5, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#6e5232'; ctx.beginPath(); ctx.ellipse(x - 2, y - 1, 2.5, 1.6, 0.3, 0, TAU); ctx.ellipse(x + 3, y + 1.5, 2.2, 1.3, -0.2, 0, TAU); ctx.fill();
+  ctx.strokeStyle = '#f2eee2'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(x - 6, y); for (let i = -5; i <= 6; i += 2) ctx.lineTo(x + i, y + (i & 2 ? -1 : 1)); ctx.stroke();
+}
+function drawDuck(x, y) { // a yellow rubber duck
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(x + 1.5, y + 2, 6, 4, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#ffd83d'; ctx.beginPath(); ctx.ellipse(x - 1, y + 1, 6, 4.2, 0, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.arc(x + 3.5, y - 2.5, 3.2, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#ff8a1f'; ctx.beginPath(); ctx.moveTo(x + 6, y - 3.2); ctx.lineTo(x + 9, y - 2.4); ctx.lineTo(x + 6, y - 1.4); ctx.fill();
+  ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 4.2, y - 3.4, 0.7, 0, TAU); ctx.fill();
+}
+function drawEggsHUD() {
+  if (player.cellar) { // in the dark under the old town: a candle, the vaults
+    const c = player.cellar, f = clamp(Math.min(2.6 - c.t, c.t) * 3, 0, 1);
+    ctx.fillStyle = `rgba(6,5,4,${0.93 * f})`; ctx.fillRect(0, 0, W, H);
+    const g = ctx.createRadialGradient(W / 2, H / 2, 4, W / 2, H / 2, 160 + Math.sin(time * 9) * 6); g.addColorStop(0, `rgba(255,190,90,${0.35 * f})`); g.addColorStop(1, 'rgba(255,190,90,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = f; txt('Through the cellars under the old town…', W / 2, H / 2 + 60, 16, '#e8d2a8', 'center'); ctx.globalAlpha = 1;
+  }
+}
+const eggBadges = () => (player.marble ? '◉ ' : '') + (player.lime ? 'lime ' : '') + (DBG.duck ? '🦆 ' : '');
+const eggDots = () => { const o = []; if (!EA) return o; if (EGG.dragon) o.push({ x: EGG.dragon.x, y: EGG.dragon.y, c: '#7dff7a' }); if (EGG.student) o.push({ x: EGG.student.x, y: EGG.student.y, c: '#00a9e0' }); if (EGG.wheelSt === 'roll' && EA.hall) o.push({ x: EA.hall.x, y: EA.hall.y, c: '#e0b070' }); return o; };
+
+// ---- Hantec, Brno's own slang: type "hantec" (or "hantec" in the debug console) and the game's messages speak it. The
+// big words and the commonest messages whole (some put together from the dictionaries' words), elsewhere the words and
+// the places as Brno says them: šalina, švestky, fáro, štatl, Svoboďák, Zelňák, Špilas, Rola, Prýgl, Monte Bú... (from
+// the Czech Wikipedia's Hantec, Wiktionary, hantec.cz and the like)
+var HANTEC_ON = (() => { try { return localStorage.getItem('qta.hantec') === '1'; } catch (e) { return false; } })();
+const hxw = (s, f = 'giu') => new RegExp(`(?<![\\p{L}\\p{N}])(?:${s})(?![\\p{L}\\p{N}])`, f);
+const HX_WHOLE = [
+  [/^WASTED$/, 'JE TO V KAKÁČU'], [/^BUSTED$/, 'ŠÓPLI TĚ DO KAMEŇA'], [/^JOB DONE$/, 'HOKNA HOTOVÁ'], [/^JOB FAILED$/, 'JE TO KRÉN'],
+  [/^CITY CONQUERED$/, 'ŠTATL JE TVOJE'], [/^ARC COMPLETE$/, 'ŠPICA!'],
+  [/^You got wasted\.$/, 'Zgebnuls.'], [/^You got busted\.$/, 'Čapli tě.'], [/^Out of time\.$/, 'Pozdě, je to v kakáču.'],
+  [/^Fine (\$[\d,]+) · weapons confiscated$/, 'Flastr $1 · bóchačky sebrali'],
+  [/^Carjacked an? (.+)!$/, 'Čórnuls $1!'], [/^You jacked a cop car\. Bold\.$/, 'Čórnuls fáro švestkám. Špica!'],
+  [/^Welcome to (.+)\. Find a ride, any ride\.$/, '$1: čau! Čórni si nějaký fáro.'],
+  [/^A witness called the police\.$/, 'Svědek zavolal švestky.'], [/^Someone saw that and is calling the police\.$/, 'Někdo to viděl a volá švestky.'],
+  [/^Your car is on fire\. Get out!$/, 'Fáro hoří. Vypadni, pila pali!'],
+  [/^Next stop: /, 'Příští štace: '], [/^Job: /, 'Hokna: '], [/^JOB /, 'HOKNA '],
+];
+const HX_WORD = [ // [regex, Hantec]: the case of the first letter is kept
+  [hxw('the police'), 'švestky'], [hxw('police'), 'švestky'], [hxw('cops'), 'hémoni'], [hxw('cop'), 'hémon'],
+  [hxw('trams'), 'šaliny'], [hxw('tram'), 'šalina'], [hxw('city'), 'štatl'], [hxw('cars'), 'fára'], [hxw('car'), 'fáro'],
+  [hxw('kids'), 'šropi'], [hxw('kid|child'), 'kindoš'], [hxw('hospital'), 'špitál'], [hxw('prison|jail'), 'kameň'], [hxw('beer'), 'škopek'],
+  [hxw('money'), 'love'], [hxw('wallet'), 'šrajtofla'], [hxw('reservoir'), 'Prýgl'], [hxw('fine'), 'flastr'], [hxw('nice one'), 'špica'],
+  // the places, as Brno calls them
+  [hxw('(?:Brno )?[Hh]lavní nádraží', 'gu'), 'Rola'], [hxw('[Nn]áměstí Svobody', 'gu'), 'Svoboďák'], [hxw('Zelný trh', 'gu'), 'Zelňák'],
+  [hxw('Moravské náměstí', 'gu'), 'Moravák'], [hxw('Mendlovo náměstí', 'gu'), 'Mendlák'], [hxw('Malinovského náměstí', 'gu'), 'Maliňák'],
+  [hxw('(?:Hrad )?Špilberk', 'gu'), 'Špilas'], [hxw('Brněnská přehrada', 'gu'), 'Prýgl'], [hxw('Lužánky', 'gu'), 'Augec'],
+  [hxw('Kraví hora', 'gu'), 'Monte Bú'], [hxw('Královo Pole', 'gu'), 'Kénig'], [hxw('Černá Pole', 'gu'), 'Blekfíld'],
+  [hxw('Židenice', 'gu'), 'Šimice'], [hxw('Komárov', 'gu'), 'Komec'], [hxw('Bystrc', 'gu'), 'Bástr'], [hxw('Žabovřesky', 'gu'), 'Žabiny'],
+  [hxw('Kohoutovice', 'gu'), 'Kohótky'], [hxw('Česká', 'gu'), 'Čára'], [hxw('Pisárky', 'gu'), 'Šrajbec'], [hxw('Staré Brno', 'gu'), 'Oltec'],
+  [hxw('Výstaviště', 'gu'), 'Výstec'], [hxw('Zvonařka', 'gu'), 'Zvonec'], [hxw('Zbrojovka', 'gu'), 'Flinta'], [hxw('Prague', 'gu'), 'Prágl'],
+];
+const hxCase = (m, to) => m.length > 1 && m === m.toUpperCase() && m !== m.toLowerCase() ? to.toUpperCase() : m[0] !== m[0].toLowerCase() ? to[0].toUpperCase() + to.slice(1) : to;
+function hx(s) {
+  if (!s) return s;
+  for (const [re, to] of HX_WHOLE) s = s.replace(re, to);
+  for (const [re, to] of HX_WORD) s = s.replace(re, m => hxCase(m, to));
+  return s;
+}
+const hxs = s => HANTEC_ON && s ? hx(s) : s;
+function hantecToggle() {
+  HANTEC_ON = !HANTEC_ON; try { localStorage.setItem('qta.hantec', HANTEC_ON ? '1' : '0'); } catch (e) { /* storage unavailable */ }
+  msg(HANTEC_ON ? 'Hantec: špica! The štatl speaks Brno now (type "hantec" again to stop).' : 'Hantec off.', 5);
+}
+
 // ============================================================ online co-op: two browsers, one world
 // The host's browser runs the whole simulation; the guest's sends its keys and draws what the host sends back about
 // 15 times a second. Rooms are found through PeerJS's public broker, loaded only when someone opens the co-op menu.
@@ -9567,7 +10286,7 @@ function hostSnap() {
   const TR = trams.filter(inV).map(t => [t.id, t.R.i, Math.round(t.s), t.prev ? t.prev.i : -1, TRAM_MODELS.indexOf(t.m), (t.doors > 0.3 ? 1 : 0) | (t.dead ? 2 : 0), Math.round(t.v)]);
   const tg = missionTarget(), ml = missionLine(), gq = g.Q;
   const pk = pickups.map(u => u.cd > 0 ? 0 : 1).join('');
-  const snap = { t: 's', time: +time.toFixed(2), dayT: +dayT.toFixed(5), heat: +heat.toFixed(2), bel: [belief.x | 0, belief.y | 0, belief.sig | 0, belief.seen ? 1 : 0],
+  const snap = { t: 's', time: +time.toFixed(2), dayT: +dayT.toFixed(5), dn: dayN, heat: +heat.toFixed(2), bel: [belief.x | 0, belief.y | 0, belief.sig | 0, belief.seen ? 1 : 0],
     fl: flight.on ? [flight.x | 0, +flight.alt.toFixed(2)] : 0, TR, he: heli ? [heli.x | 0, heli.y | 0, +heli.angle.toFixed(2), +heli.rot.toFixed(2), heli.dead ? 1 : 0, +(heli.fall || 0).toFixed(2), heli.army ? 1 : 0] : 0, C, P, B, hq: HQ,
     me: [gp.x | 0, gp.y | 0, +gp.angle.toFixed(2), gp.hp | 0, gp.car ? nid(gp.car) : 0, gp.weapons, gp.weapon, gp.cash | 0, gp.lives, gp.mult, +gp.down.toFixed(2), gp.downKind, gp.moving ? 1 : 0, +gp.anim.toFixed(1), gq.psi, gq.ent, gq.link ? nid(gq.link) : 0, gq.branches ? gq.branches.map(b => [b.x | 0, b.y | 0, +b.angle.toFixed(2), b.tint, +(b.amp || 0).toFixed(2)]) : 0],
     ho: [player.x | 0, player.y | 0, +player.angle.toFixed(2), player.car ? nid(player.car) : 0, player.hidden || (player.down && player.downKind === 'busted') ? 1 : 0, player.moving ? 1 : 0, +player.anim.toFixed(1), player.down && player.downKind === 'wasted' ? 1 : 0],
@@ -9608,7 +10327,7 @@ function onGuestData(d) {
   if (d.t === 's') NET.queued.push(d);
 }
 function guestApply(d) {
-  time = d.time; dayT = d.dayT; heat = d.heat;
+  time = d.time; dayT = d.dayT; heat = d.heat; if (d.dn !== undefined) dayN = d.dn;
   [belief.x, belief.y, belief.sig] = d.bel; belief.seen = !!d.bel[3];
   flight.on = !!d.fl; if (d.fl) { flight.x = d.fl[0]; flight.alt = d.fl[1]; }
   if (d.he) { heli = heli || { vx: 0, vy: 0, hp: 1, snd: 0 }; [heli.x, heli.y, heli.angle, heli.rot] = d.he; heli.dead = !!d.he[4]; heli.fall = d.he[5]; heli.army = !!d.he[6]; } else heli = null;
@@ -9761,7 +10480,7 @@ try { const pj = sessionStorage.getItem('qta.join'); if (pj) { sessionStorage.re
 // ============================================================ game flow
 function resetWorld() {
   cars = []; peds = []; bullets = []; parts = []; decals = []; heli = null;
-  seed = 4242; placeParked(); placePickups(); initTrams(); HQ = hqNew(); tankerCars = []; caller = null;
+  seed = 4242; eggReset(); placeParked(); placePickups(); initTrams(); HQ = hqNew(); tankerCars = []; caller = null;
 }
 let startSel = 0; // which of STARTS a new game begins in (chosen on the title screen)
 // the maps are generated when the page loads, so switching map reloads it (and remembers the choice)
@@ -9773,9 +10492,9 @@ function switchMap() {
 function newGame() {
   resetWorld();
   const at = STARTS[startSel];
-  Object.assign(player, { hp: 100, car: null, weapons: {}, weapon: null, cash: 0, lives: 5, mult: 1, down: 0, bust: 0, hidden: false, x: at.p.x, y: at.p.y, angle: faceOpen(at.p.x, at.p.y), inPsi: false, fish: null, tow: null, fishHint: null });
+  Object.assign(player, { hp: 100, car: null, weapons: {}, weapon: null, cash: 0, lives: 5, mult: 1, down: 0, bust: 0, hidden: false, x: at.p.x, y: at.p.y, angle: faceOpen(at.p.x, at.p.y), inPsi: false, fish: null, tow: null, fishHint: null, marble: false, marbleT: 0, lime: false, cellar: null });
   Object.assign(Q, { psi: 1, ent: 2, link: null, linkT: 0, decoy: null, decoyT: 0, branches: null, note: null, slow: false, bb: null });
-  lab = null; labCars = []; labFlags = {}; arcProg = DISTRICTS.map(() => 0); dayT = 17 / 24; aodPaid.clear(); aodSolved.clear();
+  lab = null; labCars = []; labFlags = {}; arcProg = DISTRICTS.map(() => 0); dayT = 17 / 24; aodPaid.clear(); aodSolved.clear(); dayN = 0;
   heat = 0; belief.sig = 0; mission = null; ringing = null; ringCd = 3; won = false; curDistrict = -1; msgs = []; overlay = null;
   updateCamera(0, true);
   fillSpots(true);
@@ -9808,7 +10527,7 @@ function showVersionPicker() {
 // Type "debug" while playing (or paused): a command line opens at the top of the screen. "help" lists the commands:
 // tp <place> or tp <x> <y> teleports you (tiles; on the Brno maps also latitude and longitude), wanted, car, god...
 // Esc closes it. Not in a co-op game you joined.
-const DBG = { buf: '', box: null, inp: null, out: null, god: false, stats: false, ft: 0, places: null, hist: [], hi: 0 };
+const DBG = { duck: (() => { try { return localStorage.getItem('qta.duck') === '1'; } catch (e) { return false; } })(), buf: '', box: null, inp: null, out: null, god: false, stats: false, ft: 0, places: null, hist: [], hi: 0 };
 const dbgOpen = () => !!(DBG.box && DBG.box.style.display !== 'none');
 const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 function dbgSay(s) { DBG.out.textContent = (DBG.out.textContent + '\n' + s).split('\n').slice(-14).join('\n').replace(/^\n/, ''); }
@@ -9839,8 +10558,10 @@ function dbgShow(on) {
 }
 addEventListener('keydown', e => {
   if (dbgOpen() || !e.key || e.key.length !== 1) return;
-  DBG.buf = (DBG.buf + e.key.toLowerCase()).slice(-5);
-  if (DBG.buf === 'debug' && (state === 'play' || state === 'pause') && NET.role !== 'guest') { DBG.buf = ''; dbgShow(true); }
+  if (e.code === 'Backquote' && DBG.duck && (state === 'play' || state === 'pause') && NET.role !== 'guest') { e.preventDefault(); dbgShow(true); dbgSay('🦆 Quack. Tell me what\'s wrong.'); sfx.quack(); return; } // (the duck from U Kachničky listens)
+  DBG.buf = (DBG.buf + e.key.toLowerCase()).slice(-6);
+  if (DBG.buf.endsWith('debug') && (state === 'play' || state === 'pause') && NET.role !== 'guest') { DBG.buf = ''; dbgShow(true); }
+  else if (DBG.buf === 'hantec' && BRNO) { DBG.buf = ''; hantecToggle(); } // (Brno's own slang)
 });
 // every place with a name: where you start, sites and landmarks, districts, streets, tram stops, faculties and more
 function dbgPlaces() {
@@ -9860,6 +10581,15 @@ function dbgPlaces() {
   SPRAYS.forEach((h, i) => add('spray shop ' + (i + 1), h.x, h.y)); FISH_SPOTS.forEach((h, i) => add('jetty ' + (i + 1), h.x, h.y));
   if (ATOM_LAB) add('atom array lab', ATOM_LAB.con.x, ATOM_LAB.con.y);
   try { eprPhones().forEach((e, i) => add('payphone ' + (i + 1), e.x, e.y)); } catch (e) { /* (none on this map) */ }
+  if (EA) { // (the easter eggs)
+    const e = EA, f = EGG_SPOTS.find(q => q.type === 'formula');
+    if (e.orloj) add('orloj', e.orloj.x, e.orloj.y + 40); if (e.hall) { add('dragon', e.hall.x, e.hall.y); add('Old Town Hall gate', e.hall.x, e.hall.y); }
+    if (e.wheel) add('wheel', e.wheel.x + 30, e.wheel.y + 30); e.hatches.forEach((q, i) => add('hatch ' + (i + 1), q.x, q.y + 26));
+    if (e.jakub) add('little man', e.jakub.x, e.jakub.y); if (e.board) add('new station', e.board.x, e.board.y + 40); add('mendel', e.mendel.x, e.mendel.y);
+    add('rondo', e.rondo.door.x, e.rondo.door.y); add('cows', e.kravi.x, e.kravi.y); if (e.cloister.length) add('cloister', e.cloister[0].x, e.cloister[0].y);
+    if (e.duck) add('duck', e.duck.x, e.duck.y + 26); if (e.dorm) add('dorms', e.dorm.x, e.dorm.y); if (e.bren) add('bren', e.bren.x, e.bren.y + 26); if (e.lime) add('lime', e.lime.x, e.lime.y + 26);
+    if (f) add('formula', f.x, f.y + 40); if (e.spil) add('Špilberk cells', e.spil.x, e.spil.y);
+  }
   return (DBG.places = L);
 }
 function dbgFind(q) {
@@ -9889,7 +10619,7 @@ function dbgRun(line) {
       'car <type>        a vehicle by you, and you in it (car list: the types)',
       'god               toggle: no damage, no arrest',
       'stats             toggle: frame time and what is simulated',
-      'cash <n> · time <hour> · charges (refill ψ and ε) · wind <deg> · close'].join('\n');
+      'cash <n> · time <hour> · day <mon..sun> · charges (refill ψ and ε) · wind <deg> · hantec · close'].join('\n');
     case 'close': case 'exit': dbgShow(false); return '';
     case 'tp': case 'teleport': case 'goto': {
       if (!a.length) return 'tp <place> or tp <x> <y>';
@@ -9922,7 +10652,9 @@ function dbgRun(line) {
     case 'god': DBG.god = !DBG.god; return 'god mode ' + (DBG.god ? 'on' : 'off');
     case 'stats': DBG.stats = !DBG.stats; return 'stats ' + (DBG.stats ? 'on' : 'off');
     case 'cash': player.cash = num[0] || 0; return `cash $${player.cash}`;
-    case 'time': dayT = ((num[0] || 0) % 24) / 24; return `time ${num[0] || 0}:00`;
+    case 'day': { const i = WDAYS.findIndex(d => d.toLowerCase() === (a[0] || '').slice(0, 3).toLowerCase()); if (i < 0) return 'day <mon|tue|wed|thu|fri|sat|sun>'; dayN += ((i - weekday()) % 7 + 7) % 7; EGG.h = null; return `it is ${WDAYS[i]}`; }
+    case 'hantec': hantecToggle(); return 'Hantec ' + (HANTEC_ON ? 'on' : 'off');
+    case 'time': dayT = ((num[0] || 0) % 24) / 24; EGG.h = null; return `time ${num[0] || 0}:00`;
     case 'charges': Q.psi = 9; Q.ent = 9; return 'ψ 9 · ε 9';
     case 'wind': WIND = (num[0] || 0) * Math.PI / 180; return `the wind blows to ${num[0] || 0}° (0 east, 90 south)`;
     default: return `unknown: ${cmd} ("help" lists the commands)`;
@@ -10007,7 +10739,7 @@ function frame(nowT) {
 }
 requestAnimationFrame(frame);
 // debug/test hook
-window.__gridlock = { BOAT_SPOTS, WBN, boatShore, spawnBoat, enterExit, updateWorld, updateCamera, get WIND() { return WIND; }, set WIND(v) { WIND = v; }, get HQ() { return HQ; }, eprPhones, teleport, get tankerCars() { return tankerCars; }, get trams() { return trams; }, dbgRun, dbgShow, DBG, get tramsFar() { return tramsFar; }, TL, TRAM_STOPS, get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
+window.__gridlock = { get EGG() { return EGG; }, EA, EGG_SPOTS, get dayN() { return dayN; }, set dayN(v) { dayN = v; }, enterCellar, eggHatchAt, get HANTEC_ON() { return HANTEC_ON; }, hx, BOAT_SPOTS, WBN, boatShore, spawnBoat, enterExit, updateWorld, updateCamera, get WIND() { return WIND; }, set WIND(v) { WIND = v; }, get HQ() { return HQ; }, eprPhones, teleport, get tankerCars() { return tankerCars; }, get trams() { return trams; }, dbgRun, dbgShow, DBG, get tramsFar() { return tramsFar; }, TL, TRAM_STOPS, get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
   newGame, startLab, setupLesson, makeCar, superpose, collapse, entangle, startMission, bb84, keys, pressed, labFlags: () => labFlags, arcProg: () => arcProg,
   NET, netAttach, faceOpen, TUNNELS, RAMPS, tunT, OVERS, OVRAMPS, ovT, oE, carDeckZ, FISH, FISH_SPOTS, startFishing, castDist, ZONES, CONSOLES, get ATOM_LAB() { return ATOM_LAB; }, grabTow, dropTow, towBase, RB_R, aodOpen, aodToggle, aodShift, aodGo, aodPulse, aodPointer, aodSolved, AOD_LV, get AOD() { return AOD; }, hostSnap, hostNet, joinNet, MAP_ID, geo, LCG, taken, dR, mm, trees, props, FIELDS, STARTS, REG, SITE_PSI, HOSPITALS, POLICE_POSTS, get startSel() { return startSel; }, set startSel(v) { startSel = v; }, get showMap() { return showMap; }, set showMap(v) { showMap = v; } };
 })();

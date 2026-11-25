@@ -270,3 +270,38 @@ scale a car, a street and a building are their real size.
   Svitava.
 - It takes about 9 s to load and about 500 MB of memory. The data is built by `tools/brno5/build.sh` (from
   OpenStreetMap, © OpenStreetMap contributors, ODbL) into `brno5_data.js`, which `index.html` loads only for this map.
+
+### Easter eggs (spoilers)
+
+On both Brno maps (in online co-op, for the host). The clock now keeps weekdays too: a game starts on a Friday.
+
+- **The orloj's marble**: from about 10:40 a crowd gathers round the astronomical clock on Náměstí Svobody. At 11:00 a
+  glass marble rolls out of one of its openings: catch it on foot, and it gets you out of one arrest.
+- **Noon at eleven**: in 1645 the Swedes were to give up their siege if Brno held out until noon, and Petrov rang noon an
+  hour early. Its bells ring at 11:00; wanted (up to five stars) within earshot, you lose two stars.
+- **The Brno dragon**: past midnight the crocodile from the Old Town Hall's passage prowls the old town and eats whoever
+  it catches. Bullets and cars don't hurt it. Take the calfskin stuffed with lime from the market on Zelný trh and let
+  it snatch it: it runs to drink and bursts ($5,000).
+- **Birk's wheel**: in 1636 the wheelwright Jiří Birk bet he could make a wheel and roll it from Lednice to Brno
+  between dawn and dusk. The wheel waits where the road from Lednice comes in; roll it to the Old Town Hall before
+  20:00 ($4,000).
+- **The little man on St James's** bares his backside at Petrov from the bell tower (on the detailed map).
+- **Špilberk**: busted in Brno, you're let out of the old "prison of nations".
+- **The cellars under the old town**: hatches at the Labyrinth under Zelný trh, the Capuchin crypt, the ossuary under St
+  James's and the Mint Master's cellar, each leading on to the next (Enter). Down there the police lose you.
+- **The new main station**: a billboard where it is to stand. The opening is always twenty years away, and slips a year
+  every day.
+- **Mendel's peas**: round his abbey the parked cars come green and yellow, three to one.
+- **Kometa**: on Tuesday, Friday and Sunday evenings the fans in blue and white stream to Hala Rondo, the hall roars
+  during the match, and they pour out after it.
+- **Kraví hora** (Cow Hill) has cows.
+- **The Bren gun** (BRno + ENfield) lies in the old Zbrojovka works.
+- **Hantec**: type `hantec` and the messages speak Brno's slang (šalina, švestky, fáro, Svoboďák, Špilas, Rola...).
+- **The Carthusians**: at night monks in white walk FIT's old monastery cloister. They keep their vow of silence: whatever
+  they see, they don't call the police.
+- **The duck** from the FIT students' club U Kachničky: pick it up and the debug console opens with ` (backquote).
+- **The project due at 23:59**: from 22:45 a FIT student waits outside the Pod Palackého vrchem dorms. Stop by them, and
+  get them to Božetěchova before midnight.
+- **The Formula Student car** outside the mechanical engineering faculty is the fastest thing in town.
+- **The Friday train home**: on Friday afternoons students with suitcases head for the main station; on Sunday evenings
+  they come back.
