@@ -222,6 +222,25 @@ scale a car, a street and a building are their real size.
   bell. Only the trams in your part of the city (round what you see) are simulated in full; the rest run on along
   their lines at a tram's average pace and are put on the track in full as they come near. The cars and people are
   only ever simulated round you, too.
+- **Trains** on every passenger route through the map that OpenStreetMap has: the S2, S3, S4, S41 and S6 suburban
+  lines, the regional and fast trains (R8, R9, R11, R12, R13, R19) and the expresses (EuroCity, EuroNight, railjet),
+  each along its own track. The S lines run CityElefants and RegioPanters, the regional trains InterPanters or a
+  locomotive and coaches (RegioJet's yellow on the R8), the expresses a locomotive and a long string of coaches. An S
+  train stops at every station it passes (the main station, Královo Pole, Lesná, Židenice, Černovice, Horní Heršpice),
+  a regional train at the main ones, an express at the main station only. People wait on the platforms, get off and
+  on at the doors on the platform's side. The trains run through the Královo Pole, Husovice, Cacovice and Obřany
+  tunnels and over the viaducts above the streets, at up to about 90 km/h, and brake like trains: whatever is on the
+  track when one comes is hit. A train whose route ends at the main station runs on afterwards, out of service, over
+  the points to a through track and out of town. Take one over at its front like a tram (Space sounds the horn).
+  Like the trams, only those round you are simulated in full.
+- **Where the people are**: how many are out round you, and where, follows what the city is built of: the floor space
+  round about, by what it is for (homes; shops, offices, schools, stations and the like), the squares and pedestrian
+  streets, the parks and the stops. The centre, the main station and the campuses fill by day, the estates in the
+  morning and evening, and by night the streets empty, the centre last. (An in-game day lasts 24 minutes: an hour a
+  minute.)
+- **The University of Defence** on Kounicova keeps the army's vehicles in its yard: a T-72 (Space fires its gun), a
+  Pandur, Tatra trucks and Land Rovers. Take one and the army wants it back: four stars for the armour, three for the
+  rest. They're back in the yard by the time you return.
 - **The real buildings**: 51,972 outlines from OpenStreetMap (multi-part ones with their courtyards included), each
   at its real angle and in its real shape: a rectangle at any angle, an L, U or T in its own turned frame, or any
   polygon, with walls along every edge and collisions that follow them exactly. Each keeps its number of floors where

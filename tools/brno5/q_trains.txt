@@ -1,0 +1,9 @@
+[out:json][timeout:180];
+rel["route"="train"](49.166,16.500,49.242,16.654)->.r;
+.r out geom(49.160,16.490,49.248,16.664);
+node(r.r)(49.160,16.490,49.248,16.664);
+out;
+way["railway"~"^(rail|light_rail|narrow_gauge)$"](49.160,16.490,49.248,16.664);
+out tags geom;
+node["railway"~"^(station|halt)$"](49.160,16.490,49.248,16.664);
+out;

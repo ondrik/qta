@@ -1016,7 +1016,7 @@ function genMap() {
       for (const q of b.p) {
         const o = b5Style(b, (q.lb[2] - q.lb[0]) / T, (q.lb[3] - q.lb[1]) / T, single, dist, q);
         if (b.circus) Object.assign(o, b.circus);
-        o.sd = sd; o.grp = grp;
+        o.sd = sd; o.grp = grp; o.bk = B5K[b.k]; o.lv = b.lv;
         if (b.nm && q === big) o.bname = b.nm;
         mkP(q, o);
       }
@@ -2193,6 +2193,30 @@ const TRAM_MODELS = [ // Brno's fleet: section lengths (px, 6.4 to the metre), t
 ];
 const TRAM_V = 105, TRAM_ACC = 45, TRAM_BRK = 70, TRAM_EBRK = 170; // px/s, px/s² (cruising at about 60 km/h)
 const TRAM_GAP = 12500; // px of route between one tram of a route and the next (about 2 km)
+const TRAM_VAVG = 58; // px/s (what the full simulation averages round the centre)
+const TRAM_K = { V: TRAM_V, acc: TRAM_ACC, brk: TRAM_BRK, ebrk: TRAM_EBRK, gap: TRAM_GAP, vavg: TRAM_VAVG, w: TRAM_W };
+// Brno's trains (on the detailed map) run on the trams' machinery: along OpenStreetMap's train routes, stopping at the
+// stations (S trains at every one, the regional trains at the main ones, the expresses at the main station), through the
+// tunnels and over the viaducts (no passenger line in the map crosses a street on the level). Each kind its pace: top speed, acceleration,
+// braking (service and emergency), the route between one train and the next, the pace when out of your sector
+const TRAIN_W = 19; // (3 m)
+const TRAIN_KIND = {
+  s: { V: 140, acc: 7, brk: 8, ebrk: 14, gap: 30000, vavg: 95, w: TRAIN_W, col: '#1a5fb4' }, // (about 80 km/h; 0.1 g)
+  r: { V: 160, acc: 5.5, brk: 7, ebrk: 13, gap: 45000, vavg: 115, w: TRAIN_W, col: '#c64600' },
+  x: { V: 175, acc: 4.5, brk: 6.5, ebrk: 12, gap: 70000, vavg: 130, w: TRAIN_W, col: '#4a4f57' },
+};
+// the fleet: each car's length (px, 6.4 to the metre), the gap at the couplings, livery; loco: the first car is a
+// locomotive; dd: double deck; op: only that operator's
+const TRAIN_MODELS = [
+  { name: '471 CityElefant', kind: 's', secs: [169, 169, 169], gap: 5, body: '#eceff1', roof: '#8d959c', band: '#1d4fa0', dd: true, p: 0.45 },
+  { name: '650 RegioPanter', kind: 's', secs: [138, 138], gap: 4, body: '#f1f3f4', roof: '#959ca2', band: '#2a6ec6', p: 0.3 },
+  { name: '640 RegioPanter', kind: 's', secs: [134, 134, 134], gap: 4, body: '#f1f3f4', roof: '#959ca2', band: '#2a6ec6', p: 0.25 },
+  { name: '660 InterPanter', kind: 'r', secs: [173, 173, 173, 173, 173], gap: 4, body: '#eceff1', roof: '#8d959c', band: '#1d4fa0', p: 0.45 },
+  { name: '362 and coaches', kind: 'r', loco: '#1f4f9e', secs: [108, 169, 169, 169, 169], gap: 6, body: '#2b5aa8', roof: '#7f868c', band: '#e8ecef', p: 0.55 },
+  { name: 'RegioJet', kind: 'r', op: 'rj', loco: '#f2c300', secs: [120, 169, 169, 169, 169, 169], gap: 6, body: '#f5c800', roof: '#6b6f73', band: '#262626', p: 1 },
+  { name: '380 and EuroCity coaches', kind: 'x', loco: '#2357b0', secs: [120, 169, 169, 169, 169, 169, 169], gap: 6, body: '#2d4f8f', roof: '#7a8187', band: '#e8ecef', p: 0.6 },
+  { name: 'railjet', kind: 'x', loco: '#7a1b23', secs: [123, 169, 169, 169, 169, 169, 169, 169], gap: 5, body: '#7a1b23', roof: '#55595e', band: '#d9d9d9', p: 0.4 },
+];
 const TL = B5 && BRNO_DATA.tl ? BRNO_DATA.tl.map(([ref, col, dest, f, st, lv, next, fl], i) => {
   const pts = [], cs = [0];
   for (let k = 0; k < f.length; k += 2) pts.push([f[k] * T, f[k + 1] * T]);
@@ -2200,8 +2224,39 @@ const TL = B5 && BRNO_DATA.tl ? BRNO_DATA.tl.map(([ref, col, dest, f, st, lv, ne
   const stops = []; for (let k = 0; k < st.length; k += 2) stops.push({ s: st[k] * T, name: BRNO_DATA.tsn[st[k + 1]] });
   const lvs = []; for (let k = 0; k < lv.length; k += 3) lvs.push([lv[k] * T, lv[k + 1] * T, lv[k + 2]]);
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
-  return { i, ref, col, dest, pts, cs, len: cs[cs.length - 1], stops, lv: lvs, next, edgeIn: !!(fl & 1), edgeOut: !!(fl & 2), fed: !!(fl & 4), lights: [], bb: [x0, y0, x1, y1], spawnT: 0 };
+  return { i, ref, col, dest, pts, cs, len: cs[cs.length - 1], stops, lv: lvs, next, edgeIn: !!(fl & 1), edgeOut: !!(fl & 2), fed: !!(fl & 4), lights: [], bb: [x0, y0, x1, y1], spawnT: 0, K: TRAM_K };
 }) : [];
+if (B5 && BRNO_DATA.trn) for (const [ref, kind, op, col, dest, f, st, lv, fl] of BRNO_DATA.trn) { // (the trains: see TRAIN_KIND)
+  const pts = [], cs = [0];
+  for (let k = 0; k < f.length; k += 2) pts.push([f[k] * T, f[k + 1] * T]);
+  for (let k = 1; k < pts.length; k++) cs.push(cs[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+  const stops = []; for (let k = 0; k < st.length; k += 2) stops.push({ s: st[k] * T, name: BRNO_DATA.trsn[st[k + 1]] });
+  const lvs = []; for (let k = 0; k < lv.length; k += 3) lvs.push([lv[k] * T, lv[k + 1] * T, lv[k + 2]]);
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  // (where the map's data has a street meet the railway on the level, it is an underpass or a bridge whose level the data
+  // doesn't tell: the train goes over the street there, clear of the traffic, a car's length either side)
+  for (const e of EDGES) {
+    if (e.tunnel || e.over) continue;
+    const P = e.pts;
+    for (let i = 1; i < P.length; i++) {
+      const c0 = P[i - 1], c1 = P[i];
+      if (Math.max(c0[0], c1[0]) < x0 || Math.min(c0[0], c1[0]) > x1 || Math.max(c0[1], c1[1]) < y0 || Math.min(c0[1], c1[1]) > y1) continue;
+      for (let k = 1; k < pts.length; k++) {
+        const a = pts[k - 1], b = pts[k];
+        if (Math.max(a[0], b[0]) < Math.min(c0[0], c1[0]) || Math.min(a[0], b[0]) > Math.max(c0[0], c1[0]) || Math.max(a[1], b[1]) < Math.min(c0[1], c1[1]) || Math.min(a[1], b[1]) > Math.max(c0[1], c1[1])) continue;
+        const cr = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]), d1 = cr(a, b, c0), d2_ = cr(a, b, c1), d3 = cr(c0, c1, a), d4 = cr(c0, c1, b);
+        if (!(d1 * d2_ < 0 && d3 * d4 < 0)) continue;
+        const f = d3 / (d3 - d4), s = cs[k - 1] + f * (cs[k] - cs[k - 1]);
+        if (lvs.some(([u, w, v]) => v && s >= u && s <= w)) continue;
+        const m = (e.wd || 64) / 2 + 100; lvs.push([Math.max(0, s - m), s + m, 1]);
+      }
+    }
+  }
+  lvs.sort((a, b) => a[0] - b[0]);
+  for (let k = lvs.length - 1; k > 0; k--) if (lvs[k][2] === lvs[k - 1][2] && lvs[k][0] <= lvs[k - 1][1] + 1) { lvs[k - 1][1] = Math.max(lvs[k - 1][1], lvs[k][1]); lvs.splice(k, 1); }
+  TL.push({ i: TL.length, ref: ref.split('/')[0], refs: ref, col: col || TRAIN_KIND[kind].col, dest, pts, cs, len: cs[cs.length - 1], stops, lv: lvs, next: [], edgeIn: !!(fl & 1), edgeOut: !!(fl & 2), fed: false,
+    lights: [], bb: [x0, y0, x1, y1], spawnT: 0, train: true, kind, op, K: TRAIN_KIND[kind] });
+}
 // a point on a route at arc length s, and the heading there (straight on beyond either end)
 function tramPt(R, s) {
   const cs = R.cs, P = R.pts, n = P.length;
@@ -2220,8 +2275,9 @@ for (const R of TL) {
   R.vmax = new Float32Array(Math.ceil(R.len / 8) + 1);
   for (let k = 0; k < R.vmax.length; k++) {
     const k0 = tramPt(R, k * 8 - 24)[2], k1 = tramPt(R, k * 8 + 24)[2], kap = Math.abs(wrapA(k1 - k0)) / 48;
-    R.vmax[k] = kap > 1e-4 ? Math.min(TRAM_V, Math.max(28, Math.sqrt(38 / kap))) : TRAM_V;
+    R.vmax[k] = kap > 1e-4 ? Math.min(R.K.V, Math.max(R.train ? 40 : 28, Math.sqrt((R.train ? 30 : 38) / kap))) : R.K.V;
   }
+  if (R.train) continue; // (a train meets no traffic lights: the level crossings close for it)
   // red lights: where the route comes into a signalised junction along one of its streets, the tram waits at the stop
   // line with that street's traffic (crossing a junction on its own track, it has its own signal: it goes)
   for (const n of LIGHT_NODES) {
@@ -2243,12 +2299,48 @@ for (const R of TL) {
   }
   R.lights.sort((a, b) => a.s - b.s);
 }
+// a train whose route ends inside the map (at the main station, mostly) would stand on a through track: after its stop it
+// runs on, out of service, along a route that goes on from there the same way (over that track, or the next one: it
+// crosses over to it at the points), and out over the map's edge
+function routeProj(R, x, y) {
+  let bs = 0, bd = 1e9;
+  for (let k = 1; k < R.pts.length; k++) {
+    const [ax, ay] = R.pts[k - 1], [bx, by] = R.pts[k], dx = bx - ax, dy = by - ay, f = clamp(((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1), 0, 1), d = Math.hypot(ax + dx * f - x, ay + dy * f - y);
+    if (d < bd) { bd = d; bs = R.cs[k - 1] + f * (R.cs[k] - R.cs[k - 1]); }
+  }
+  return [bs, bd];
+}
+for (const R of TL) {
+  if (!R.train || R.edgeOut) continue;
+  const [ex, ey, eh] = tramPt(R, R.len);
+  for (const Q of TL) {
+    if (!Q.train || Q === R || !Q.edgeOut || ex < Q.bb[0] - 10 || ex > Q.bb[2] + 10 || ey < Q.bb[1] - 10 || ey > Q.bb[3] + 10) continue;
+    const [sq, d] = routeProj(Q, ex, ey);
+    if (d > 60 || Math.cos(tramPt(Q, sq)[2] - eh) < 0.9) continue;
+    let ok = true;
+    for (let b = 40; b <= 1250 && ok && sq - b > 0 && R.len - b > 0; b += 60) { const [ax, ay] = tramPt(Q, sq - b), [bx, by] = tramPt(R, R.len - b); if (Math.hypot(ax - bx, ay - by) > 60) ok = false; }
+    if (ok && (!R.cont || d < R.cont[2] - 4 || (d < R.cont[2] + 4 && Q.len - sq > R.cont[0].len - R.cont[1]))) R.cont = [Q, sq, d];
+  }
+}
 // the stops: a sign on the pavement beside each (people wait there), and the tunnels' portals
 const TRAM_STOPS = [], TRAM_PORTALS = [];
+// the stations' platforms as OpenStreetMap draws them (outlines, or lines along their middle), in px
+const PLATS = B5 && BRNO_DATA.plat ? BRNO_DATA.plat.map(f => { const r = []; for (let k = 0; k < f.length; k += 2) r.push([f[k] * T, f[k + 1] * T]); const xs = r.map(q => q[0]), ys = r.map(q => q[1]);
+  return { r, closed: r.length > 3 && Math.hypot(r[0][0] - r[r.length - 1][0], r[0][1] - r[r.length - 1][1]) < 2, bb: [Math.min(...xs) - 8, Math.min(...ys) - 8, Math.max(...xs) + 8, Math.max(...ys) + 8] }; }) : [];
+const onPlat = (x, y) => PLATS.some(P => x > P.bb[0] && x < P.bb[2] && y > P.bb[1] && y < P.bb[3] && (P.closed ? inRings([P.r.flat()], x, y) : P.r.some((q, k) => k && segPtD(x, y, P.r[k - 1][0], P.r[k - 1][1], q[0], q[1]) < 7)));
+// a train's stop: its middle by the station's point, the platform shared by the trains that stop there on that track
+function trainPlat(R, st) {
+  const [x, y, h] = tramPt(R, st.s);
+  st.pl = TRAM_STOPS.find(o => o.train && o.name === st.name && Math.hypot(o.tx - x, o.ty - y) < 120 && Math.cos(o.a - h) > 0.5);
+  if (st.pl) return;
+  st.pl = { name: st.name, tx: x, ty: y, x, y, a: h, R, s: st.s, cap: randi(6, 16), last: -rand(60, 400), spots: null, train: true, side: 1 };
+  TRAM_STOPS.push(st.pl);
+}
 for (const R of TL) {
   for (const st of R.stops) {
+    if (R.train) { trainPlat(R, st); continue; }
     const [x, y, h] = tramPt(R, st.s), nx = -Math.sin(h), ny = Math.cos(h); // (the right-hand side: the doors open there)
-    const same = TRAM_STOPS.find(o => o.name === st.name && Math.hypot(o.tx - x, o.ty - y) < 40 && Math.cos(o.a - h) > 0.5);
+    const same = TRAM_STOPS.find(o => !o.train && o.name === st.name && Math.hypot(o.tx - x, o.ty - y) < 40 && Math.cos(o.a - h) > 0.5);
     if (same) { st.pl = same; continue; }
     let at = null;
     for (let o = 16; o <= 64 && !at; o += 4) { const px = x + nx * o, py = y + ny * o, k = Math.floor(py / T) * MW + Math.floor(px / T); if (px > 0 && py > 0 && px < MW * T && py < MH * T && map[k] === WALK) at = [px, py, k]; }
@@ -2259,11 +2351,14 @@ for (const R of TL) {
   for (const [a, b, v] of R.lv) if (v < 0) for (const [s, into] of [[a, 1], [b, -1]]) {
     if (s < 2 || s > R.len - 2) continue;
     const [x, y, h] = tramPt(R, s);
-    TRAM_PORTALS.push({ x, y, a: into > 0 ? h : h + Math.PI });
+    if (!TRAM_PORTALS.some(o => Math.hypot(o.x - x, o.y - y) < 12)) TRAM_PORTALS.push({ x, y, a: into > 0 ? h : h + Math.PI, w: R.K.w + 10 });
   }
 }
-// (no car parked on a tram track)
-if (TL.length) for (const arr of [parkSpots, fixedParked]) for (let i = arr.length - 1; i >= 0; i--) { const o = arr[i]; if (TL.some(R => o.x > R.bb[0] - 20 && o.x < R.bb[2] + 20 && o.y > R.bb[1] - 20 && o.y < R.bb[3] + 20 && R.pts.some((q, k) => k && segPtD(o.x, o.y, R.pts[k - 1][0], R.pts[k - 1][1], q[0], q[1]) < 18))) arr.splice(i, 1); }
+// (no car parked on a tram track, or on the railway)
+const RAILT = TL.some(R => R.train) ? new Uint8Array(MW * MH) : null;
+if (RAILT) for (const R of TL) if (R.train) for (let s = 0; s < R.len; s += 8) { const [x, y] = tramPt(R, s); for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const tx = Math.floor((x + i * 14) / T), ty = Math.floor((y + j * 14) / T); if (tx >= 0 && ty >= 0 && tx < MW && ty < MH) RAILT[ty * MW + tx] = 1; } }
+if (RAILT) for (const arr of [parkSpots, fixedParked]) for (let i = arr.length - 1; i >= 0; i--) { const o = arr[i]; if (RAILT[Math.floor(o.y / T) * MW + Math.floor(o.x / T)]) arr.splice(i, 1); }
+if (TL.length) for (const arr of [parkSpots, fixedParked]) for (let i = arr.length - 1; i >= 0; i--) { const o = arr[i]; if (TL.some(R => !R.train && o.x > R.bb[0] - 20 && o.x < R.bb[2] + 20 && o.y > R.bb[1] - 20 && o.y < R.bb[3] + 20 && R.pts.some((q, k) => k && segPtD(o.x, o.y, R.pts[k - 1][0], R.pts[k - 1][1], q[0], q[1]) < 18))) arr.splice(i, 1); }
 for (const d of DOORS) if (!pedSpot[d.ty * MW + d.tx]) pedSpot[d.ty * MW + d.tx] = 1;
 const LANDMARKS = [
   ...(BRNO ? [] : [{ name: AIRPORT.name, x0: 76, y0: 76, x1: 96, y1: 96 }]),
@@ -2405,6 +2500,7 @@ const sfx = {
   jet: () => { noise(1.8, 600, 'lowpass', 0.7, 0.7); tone(200, 1.5, 'sawtooth', 0.05, 45); },
   siren: () => [0, 0.32, 0.64].forEach(w => { tone(880, 0.16, 'square', 0.05, 0, now() + w); tone(660, 0.16, 'square', 0.05, 0, now() + w + 0.16); }),
   tram: () => [0, 0.2].forEach(w => { tone(2150, 0.18, 'triangle', 0.06, 0, now() + w); tone(3230, 0.12, 'sine', 0.025, 0, now() + w); }), // (the bell: ding-ding)
+  train: () => [[0, 0.55], [0.7, 0.9]].forEach(([w, d]) => { tone(311, d, 'sawtooth', 0.045, 0, now() + w); tone(392, d, 'sawtooth', 0.035, 0, now() + w); tone(466, d, 'square', 0.02, 0, now() + w); }), // (the horn: two blasts)
 };
 
 // ---- car radio: tiny procedural stations
@@ -2490,11 +2586,14 @@ const CT = {
   dozer:   { label: 'Armoured Bulldozer', w: 28, l: 46, max: 175, acc: 110, turn: 1.6, hp: 2400, mass: 10, colors: ['#d4a017'] },
   tanker:  { label: 'Fuel Tanker',    w: 20, l: 60, max: 200, acc: 90, turn: 1.6, hp: 400, mass: 3.4, colors: ['#e9ecef'] },
   tram:    { label: 'Tram',           w: 16, l: 62, max: 150, acc: 63, turn: 0, hp: 1500, mass: 40, colors: ['#d3202a'] }, // (only the cab you drive: see the trams)
+  train:   { label: 'Train',          w: 19, l: 169, max: 200, acc: 10, turn: 0, hp: 3000, mass: 200, colors: ['#eceff1'] }, // (likewise)
   speedboat: { label: 'Speedboat',   w: 12, l: 34, max: 330, acc: 150, turn: 2.1, hp: 190, mass: 1.0, colors: ['#f4f4f4', '#1e5aa8', '#c0392b', '#f1c40f', '#1b1b1b'], boat: 'motor' },
   rowboat: { label: 'Rowing Boat',    w: 9, l: 20, max: 75, acc: 55, turn: 1.9, hp: 80, mass: 0.4, colors: ['#a0522d', '#8b5a2b', '#2e86c1', '#27ae60'], boat: 'row' },
   sailboat: { label: 'Sailing Dinghy', w: 11, l: 26, max: 150, acc: 50, turn: 1.7, hp: 110, mass: 0.6, colors: ['#f4f4f4', '#e8e0d0', '#1e5aa8'], boat: 'sail' },
   policeboat: { label: 'Police Boat', w: 14, l: 38, max: 340, acc: 170, turn: 2.1, hp: 360, mass: 1.5, colors: ['#f2f2f2'], boat: 'motor' },
   tractor: { label: 'Tractor',        w: 17, l: 27, max: 150, acc: 120, turn: 2.6, hp: 340, mass: 2.0, colors: ['#2e7d32', '#c62828', '#1565c0', '#e0a800'], offroad: true },
+  armytruck: { label: 'Army Tatra',   w: 22, l: 54, max: 240, acc: 120, turn: 1.8, hp: 800, mass: 3.2, colors: ['#4b5320'], offroad: true },
+  jeep:    { label: 'Army Land Rover', w: 16, l: 30, max: 320, acc: 230, turn: 2.9, hp: 360, mass: 1.5, colors: ['#556b2f'], offroad: true },
 };
 const CIV_RURAL = ['compact', 'sedan', 'sedan', 'truck', 'truck', 'tractor', 'bike', 'sports', 'taxi'];
 const CIV = ['compact', 'compact', 'sedan', 'sedan', 'sedan', 'sports', 'truck', 'taxi', 'bike', 'bike', 'bus'];
@@ -2517,7 +2616,7 @@ let state = 'title', time = 0, heat = 0, lastCrime = -99, shake = 0, overlay = n
 let showMap = 1, helpPage = 0, won = false, mission = null, ringing = null, ringCd = 4, ringBeep = 0;
 let rbCd = 6, spawnT = 0, policeCd = 0, heatCd = 0, curDistrict = -1, sprayCd = 0, serviceCd = 0;
 let dayT = 17 / 24, tapAt = null, lab = null, labFlags = {}, labCars = [], labRect = null;
-const DAY_LEN = 480; // seconds per in-game day
+const DAY_LEN = 1440; // seconds per in-game day (24 minutes: an hour of the day a minute)
 const flight = { t: 8, x: 0, v: 0, alt: 0, on: false };
 let best = 0; try { best = +localStorage.getItem('gridlock.best') || 0; } catch (e) { /* storage unavailable */ }
 let cam = { x: 0, y: 0, zoom: 1 };
@@ -3676,7 +3775,7 @@ function enterExit() {
       player.x = s.x; player.y = s.y; player.angle = Math.atan2(s.y - c.y, s.x - c.x); player.car = null; c.driver = null;
       boatLanded(); return;
     }
-    if (Math.abs(c.speed) > 90 || (c.tram && Math.abs(c.speed) > 25)) { msg(c.tram ? 'Stop the tram first.' : 'Slow down to bail out!', 1.5); return; }
+    if (Math.abs(c.speed) > 90 || (c.tram && Math.abs(c.speed) > 25)) { msg(c.tram ? `Stop the ${c.tram.train ? 'train' : 'tram'} first.` : 'Slow down to bail out!', 1.5); return; }
     if (c.lay === 1) { msg('Not in the tunnel: drive out first.', 1.5); return; }
     if (c.lay === 3) { msg('Not up on the overpass: drive off it first.', 1.5); return; }
     if (player.tow) dropTow();
@@ -3752,6 +3851,11 @@ function pullOut(c, x, y) {
 }
 // in the driver's seat at last (jacked: its driver was dragged out already)
 function getIn(c, jacked, across) {
+  if (c.mil && !lab) { // (one of the army's, from the University of Defence)
+    c.mil = false; const armour = c.type === 'tank' || c.type === 'apc', want = armour ? 4.05 : 3.05;
+    if (heat < want) addHeat(want - heat, true);
+    msg(armour ? `You took the army's ${c.type === 'tank' ? 'T-72' : 'Pandur'} from the University of Defence. They want it back.` : `You drove off in an army ${CT[c.type].label.replace('Army ', '')}. The military police are on their way.`, 3.5); sfx.bad();
+  }
   if (CT[c.type].boat) { // (from the bank: remember where you put out; climbing across from another boat it stays)
     if (!across) player.putOut = { x: player.x, y: player.y };
     if (!c.toldBoat) msg(c.type === 'sailboat' ? `A dinghy: the wind drives it (the red pennant shows where to), never straight into it. ${touchOn() ? '⇄' : 'Enter'} at a bank gets you out.` : `${CT[c.type].label}: ${touchOn() ? '▲ ▼' : '↑ ↓'} throttle and reverse. ${touchOn() ? '⇄' : 'Enter'} at a bank gets you out.`, 4);
@@ -4067,7 +4171,7 @@ function updatePlayer(dt) {
     player.fishHint = fs;
   }
   if (hit('KeyQ', 'Tab')) { cycleWeapon(); msg(player.weapon ? WEAPONS[player.weapon].name : 'Fists', 1.2); }
-  if (player.car && player.car.tram) { if (hit('KeyX') || hit('KeyT') || hit('KeyG')) msg('A tram keeps to its rails: no quantum tricks aboard, and no tweezer.', 2); }
+  if (player.car && player.car.tram) { if (hit('KeyX') || hit('KeyT') || hit('KeyG')) msg(`A ${player.car.tram.train ? 'train' : 'tram'} keeps to its rails: no quantum tricks aboard, and no tweezer.`, 2); }
   else if (boatOf(player.car)) { if (hit('KeyX') || hit('KeyG')) msg('Out on the water the waves keep measuring you: no superposition, and no tweezer. (T still entangles you with another boat.)', 3); if (hit('KeyT')) entangle(); }
   else {
     if (hit('KeyX')) superpose();
@@ -4597,8 +4701,8 @@ function viewRect(m = 0, c = cam) {
 // every camera that matters: yours, and in online co-op the guest's too (the host keeps both areas alive)
 const allCams = () => NET.guest ? [NET.hostCam, NET.guest.cam] : [cam];
 function onScreen(x, y, m = 40) { const v = viewRect(m); return x > v.x0 && x < v.x1 && y > v.y0 && y < v.y1; }
-function spawnOutside(types, check) {
-  const v = viewRect(48), o = viewRect(420);
+function spawnOutside(types, check, far = 420) {
+  const v = viewRect(48), o = viewRect(far);
   for (let i = 0; i < 25; i++) {
     const x = rand(o.x0, o.x1), y = rand(o.y0, o.y1);
     if (x > v.x0 && x < v.x1 && y > v.y0 && y < v.y1) continue;
@@ -4623,6 +4727,63 @@ function spawnTraffic(type, driver) {
     return c;
   }
   return null;
+}
+// where people are in Brno: a map of how many are about, from what the city is built of. Floor space counts by what it is
+// for (homes; shops, offices, schools, stations and the like), and so do the squares and pedestrian streets, the parks
+// and the tram stops; spread over a couple of hundred metres (people walk), and weighed through the day: by night the
+// estates are empty and the centre goes quiet, by day the centre, the campuses and the stations fill
+const PD = { cs: 0, gw: 0, gh: 0, home: null, act: null };
+const PD_HOME = [0.05, 0.03, 0.03, 0.03, 0.05, 0.15, 0.4, 0.7, 0.6, 0.45, 0.45, 0.5, 0.55, 0.5, 0.5, 0.6, 0.75, 0.85, 0.8, 0.65, 0.5, 0.35, 0.2, 0.1];
+const PD_ACT = [0.12, 0.08, 0.05, 0.04, 0.04, 0.08, 0.25, 0.6, 0.85, 0.9, 0.95, 1, 1, 1, 0.95, 0.95, 1, 0.95, 0.8, 0.6, 0.45, 0.35, 0.25, 0.18];
+function pdBuild() {
+  const mpt = B5 ? 5 : 15, cs = B5 ? 8 : 3, gw = Math.ceil(MW / cs), gh = Math.ceil(MH / cs), m2 = (mpt / T) ** 2; // (m² in a px²)
+  const H = new Float32Array(gw * gh), A = new Float32Array(gw * gh);
+  const add = (x, y, h, a) => { const i = Math.min(gh - 1, Math.max(0, Math.floor(y / T / cs))) * gw + Math.min(gw - 1, Math.max(0, Math.floor(x / T / cs))); H[i] += h; A[i] += a; };
+  // per m² of floor: [home, activity]
+  const KW = { yes: [0.6, 0.5], house: [1, 0.05], flats: [1, 0.1], shed: [0, 0], industry: [0, 0.1], shop: [0.05, 1.5], civic: [0, 1.2], church: [0, 0.4],
+    hospital: [0.2, 1], school: [0, 1.2], station: [0, 3], castle: [0, 1], sport: [0, 0.5], hotel: [0.5, 0.8], tower: [0, 0] };
+  const SK = { old: ['yes', 4, 2], tenement: ['flats', 5, 1.2], panel: ['flats', 9, 1], villa: ['house', 2, 1], industrial: ['industry', 2, 1], village: ['house', 2, 1] }; // (a made-up building: its kind, floors, and the busier streets of the old town)
+  for (const b of buildings) {
+    if (b.canopy) continue;
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2, st = (DISTRICTS[REG[Math.floor(cy / T) * MW + Math.floor(cx / T)]] || {}).style;
+    const sk = SK[st] || SK.village, kind = b.bk || sk[0], fl = b.bk ? Math.max(1, b.lv) : sk[1];
+    const area = (b.lb ? (b.lb[2] - b.lb[0]) * (b.lb[3] - b.lb[1]) : b.w * b.h) * m2 * fl, w = KW[kind] || KW.yes, boost = st === 'old' ? 2 : st === 'tenement' ? 1.2 : 1;
+    add(cx, cy, area * w[0] * (b.bk ? 1 : 0.5), area * w[1] * boost); // (the made-up blocks fill more of the ground than the real ones)
+  }
+  for (let k = 0; k < MW * MH; k++) { // the ground: squares and pedestrian streets, parks, sports grounds
+    const c = LCG[k], a = c === LC_PLAZA ? 2.5 : c === LC_GREEN ? 0.08 : c === LC_PITCH ? 0.1 : 0;
+    if (a && map[k] !== BUILD && map[k] !== WATER) add((k % MW + 0.5) * T, (((k / MW) | 0) + 0.5) * T, 0, a * mpt * mpt);
+  }
+  for (const p of TRAM_STOPS) add(p.x, p.y, 0, 2500);
+  for (const p of BUS_STOPS) add(p.x, p.y, 0, 800);
+  // spread it: three box blurs of about 120 m each way
+  const r = Math.max(1, Math.round(120 / (cs * mpt))), tmp = new Float32Array(gw * gh);
+  const blur = F => { for (let n = 0; n < 3; n++) {
+    for (let y = 0; y < gh; y++) { let s = 0; for (let x = -r; x < gw + r; x++) { if (x + r < gw) s += F[y * gw + x + r]; if (x - r - 1 >= 0) s -= F[y * gw + x - r - 1]; if (x >= 0 && x < gw) tmp[y * gw + x] = s / (2 * r + 1); } }
+    for (let x = 0; x < gw; x++) { let s = 0; for (let y = -r; y < gh + r; y++) { if (y + r < gh) s += tmp[(y + r) * gw + x]; if (y - r - 1 >= 0) s -= tmp[(y - r - 1) * gw + x]; if (y >= 0 && y < gh) F[y * gw + x] = s / (2 * r + 1); } }
+  } };
+  blur(H); blur(A);
+  // the busiest places by day (the top 1 % of the cells) come out at about 1
+  const D = []; for (let i = 0; i < gw * gh; i++) { const d = 0.5 * H[i] + A[i]; if (d > 0) D.push(d); }
+  D.sort((a, b) => a - b); const top = D[Math.floor(D.length * 0.99)] || 1;
+  for (let i = 0; i < gw * gh; i++) { H[i] /= top; A[i] /= top; }
+  Object.assign(PD, { cs, gw, gh, home: H, act: A });
+}
+// how busy a spot is now (about 1 in the busiest places at midday; smoothly between cells, and between the hours)
+function pedDensity(x, y) {
+  if (!PD.home) pdBuild();
+  const h = dayT * 24, h0 = Math.floor(h) % 24, h1 = (h0 + 1) % 24, f = h - Math.floor(h);
+  const fh = PD_HOME[h0] * (1 - f) + PD_HOME[h1] * f, fa = PD_ACT[h0] * (1 - f) + PD_ACT[h1] * f;
+  const gx = clamp(x / T / PD.cs - 0.5, 0, PD.gw - 1.001), gy = clamp(y / T / PD.cs - 0.5, 0, PD.gh - 1.001), ix = gx | 0, iy = gy | 0, u = gx - ix, v = gy - iy, i = iy * PD.gw + ix;
+  const at = F => (F[i] * (1 - u) + F[i + 1] * u) * (1 - v) + (F[i + PD.gw] * (1 - u) + F[i + PD.gw + 1] * u) * v;
+  return fh * at(PD.home) + fa * at(PD.act);
+}
+// how many people there should be round the cameras, and the busiest spot among them (to place newcomers by)
+function pedWant() {
+  let sum = 0, n = 0, top = 0;
+  for (const c of allCams()) { const r = viewRect(300, c); for (let y = r.y0; y <= r.y1; y += 160) for (let x = r.x0; x <= r.x1; x += 160) { const d = pedDensity(x, y); sum += d; n++; if (d > top) top = d; } }
+  const m = n ? sum / n : 0;
+  return { n: Math.round(clamp((B5 ? 160 : 110) * Math.pow(Math.min(m, 1.2), 0.6), m > 0.004 ? 2 : 0, B5 ? 190 : 130)), top };
 }
 function manageSpawns(dt) {
   spawnT -= dt; policeCd -= dt; serviceCd -= dt;
@@ -4654,16 +4815,25 @@ function manageSpawns(dt) {
     const cop = Math.random() < (city ? 0.07 : 0.04);
     spawnTraffic(cop ? 'police' : pick(city ? CIV : CIV_RURAL), cop ? 'police' : 'ai');
   }
-  if (peds.filter(p => !p.dead && !p.tp).length < (city ? 55 : town ? 34 : 6)) {
+  // in Brno, as many people as live and work round here at this hour, and more of them where it's busier
+  const want = BRNO ? pedWant() : { n: city ? 55 : town ? 34 : 6, top: 0 }, have = peds.filter(p => !p.dead && !p.tp).length;
+  for (let k = Math.min(3, Math.ceil((want.n - have) / 12)); k > 0; k--) {
     let p = null;
-    if (Math.random() < 0.35) { // someone comes out of a building
-      for (let i = 0; i < 20 && !p; i++) {
-        const d = pick(DOORS), x = (d.tx + 0.5) * T, y = (d.ty + 0.5) * T;
-        if (onScreen(x, y, -20) && !peds.some(o => d2(o.x, o.y, x, y) < 30 * 30)) p = { x: x + DX[d.d] * 10, y: y + DY[d.d] * 10 };
+    for (let tries = 0; tries < (BRNO ? 6 : 1) && !p; tries++) {
+      if (Math.random() < 0.35) { // someone comes out of a building
+        for (let i = 0; i < 20 && !p; i++) {
+          const d = pick(DOORS), x = (d.tx + 0.5) * T, y = (d.ty + 0.5) * T;
+          if (onScreen(x, y, -20) && !peds.some(o => d2(o.x, o.y, x, y) < 30 * 30)) p = { x: x + DX[d.d] * 10, y: y + DY[d.d] * 10 };
+        }
       }
+      if (!p) { const q = spawnOutside(DISTRICTS[rg].beach ? [WALK, PLAZA, SAND] : [WALK, PLAZA], null, BRNO ? 260 : 420); if (q) p = { x: q.x + rand(-8, 8), y: q.y + rand(-8, 8) }; } // (in Brno just round the corner, so that more of them come into view)
+      if (p && BRNO && Math.random() * want.top > pedDensity(p.x, p.y)) p = null; // (fewer of them where it's quieter)
     }
-    if (!p) { const q = spawnOutside(DISTRICTS[rg].beach ? [WALK, PLAZA, SAND] : [WALK, PLAZA]); if (q) p = { x: q.x + rand(-8, 8), y: q.y + rand(-8, 8) }; }
     if (p) makePed(p.x, p.y, { cop: Math.random() < 0.08 });
+  }
+  if (BRNO && have > want.n * 1.25 + 3) { // (and as the streets empty, those out of sight go indoors)
+    const sv = views(60), q = peds.find(p => !p.dead && !p.tp && !p.cop && !p.target && !p.vip && !p.car && !p.held && !(p.flee > 0) && out(p, sv));
+    if (q) q.gone = true;
   }
   if (heat >= 1 && policeCd <= 0 && !player.down) {
     const stars = Math.floor(heat), n = t => cars.filter(c => c.type === t && c.driver === 'police' && c.chase && !c.block).length;
@@ -4689,18 +4859,20 @@ function manageSpawns(dt) {
 function placeParked() {
   for (const s of parkSpots) { s.c = null; s.tried = false; }
   for (const s of BOAT_SPOTS) { s.c = null; s.tried = false; }
+  for (const s of MIL_SPOTS) { s.c = null; s.tried = false; }
   for (const f of fixedParked) { const c = makeCar(f.type, f.x, f.y, f.a, null); c.parked = true; }
 }
 function fillSpots(force) {
   const near = viewRect(900), vis = viewRect(60), farS = viewRect(1300);
   const inR = (o, r) => o.x > r.x0 && o.x < r.x1 && o.y > r.y0 && o.y < r.y1;
-  for (const spots of [parkSpots, BOAT_SPOTS]) for (const sp of spots) {
+  for (const spots of [parkSpots, BOAT_SPOTS, MIL_SPOTS]) for (const sp of spots) {
     if (sp.c) { if (!inR(sp, farS) && (sp.c.moved || sp.c.dead || sp.c.driver !== null || !cars.includes(sp.c))) { sp.c = null; sp.tried = false; } continue; }
     if (sp.tried || !inR(sp, near) || (!force && inR(sp, vis))) continue;
     sp.tried = true;
-    if (Math.random() < (sp.boat ? 0.8 : 0.55) && !cars.some(c => d2(c.x, c.y, sp.x, sp.y) < 20 * 20)) {
+    if (Math.random() < (sp.mil ? 1 : sp.boat ? 0.8 : 0.55) && !cars.some(c => d2(c.x, c.y, sp.x, sp.y) < 20 * 20)) {
       const c = makeCar(sp.type || pick(['compact', 'sedan', 'sedan', 'sports', 'taxi']), sp.x, sp.y, sp.a, null);
       if (sp.color) c.color = sp.color;
+      if (sp.mil) c.mil = true;
       c.parked = true; c.spot = sp; sp.c = c;
     }
   }
@@ -4801,15 +4973,27 @@ function updateLab() {
 
 // ============================================================ main update
 // ============================================================ trams
+const trainPool = R => { // (an operator's own trains; on a route shared with another operator's line, both)
+  const own = TRAIN_MODELS.filter(q => q.op && q.op === R.op); if (own.length) return own;
+  const mine = TRAIN_MODELS.filter(q => q.kind === R.kind && !q.op);
+  return /(^|\/)R8(\/|$)/.test(R.refs || '') ? mine.concat(TRAIN_MODELS.filter(q => q.op === 'rj')) : mine;
+};
 function newTram(R, s, prev, m) {
-  if (!m) { let r = Math.random(); m = TRAM_MODELS.find(q => (r -= q.p) < 0) || TRAM_MODELS[0]; }
-  const len = m.secs.reduce((a, b) => a + b, 0) + m.gap * (m.secs.length - 1);
-  const t = { id: tramId++, R, s, v: 0, prev: prev || null, m, len, si: 0, li: 0, dwell: 0, doors: 0, bell: 0, wait: 0, hp: 1500, dead: false, fire: 0,
-    sec: [], cab: null, left: false, gone: false, blockBy: null, endT: 0 };
+  if (!m) { const pool = R.train ? trainPool(R) : TRAM_MODELS; let r = Math.random() * pool.reduce((a, q) => a + q.p, 0); m = pool.find(q => (r -= q.p) < 0) || pool[0]; }
+  const len = m.secs.reduce((a, b) => a + b, 0) + m.gap * (m.secs.length - 1), hp = R.train ? 3000 : 1500;
+  const t = { id: tramId++, R, s, v: 0, prev: prev || null, m, len, si: 0, li: 0, dwell: 0, doors: 0, bell: 0, wait: 0, hp, hp0: hp, dead: false, fire: 0,
+    sec: [], cab: null, left: false, gone: false, blockBy: null, endT: 0, w: R.K.w, train: !!R.train, dside: 1 };
   tramIdx(t); placeTram(t); return t;
 }
+// a train at the end of its route goes on out of service (see R.cont)
+function trainOn(t) {
+  const R = t.R, [Q, sq] = R.cont, was = t.sec.map(S => [S.x, S.y]);
+  t.s = sq + (t.s - R.len); t.R = Q; t.prev = null; t.ns = true; t.si = Q.stops.length; t.li = 0; t.endT = 0; t.pax = null;
+  t.sh = null; placeTram(t); if (t.sec.length === was.length) { t.sh = t.sec.map((S, i) => [was[i][0] - S.x, was[i][1] - S.y]); t.shK = 1; placeTram(t); } // (it slides across over a few seconds)
+}
+const stopAt = (t, st) => t.train ? Math.min(st.s + t.len / 2, t.R.len - 3) : st.s; // (where its front comes to a stop: a train's middle by the platform's)
 function tramIdx(t) { // the next stop and the next light from where the tram is
-  t.si = t.R.stops.findIndex(q => q.s > t.s - 4); if (t.si < 0) t.si = t.R.stops.length;
+  t.si = t.ns ? -1 : t.R.stops.findIndex(q => stopAt(t, q) > t.s - 4); if (t.si < 0) t.si = t.R.stops.length; // (a train out of service stops nowhere)
   t.li = t.R.lights.findIndex(q => q.s > t.s - 2); if (t.li < 0) t.li = t.R.lights.length;
 }
 const tramAt = (t, s) => s < 0 && t.prev ? tramPt(t.prev, t.prev.len + s) : tramPt(t.R, s);
@@ -4823,6 +5007,7 @@ function placeTram(t) {
       lv: sm < 0 && t.prev ? tramLv(t.prev, t.prev.len + sm) : tramLv(t.R, sm) });
     o += l + t.m.gap;
   }
+  if (t.sh) { if (t.shK <= 0) t.sh = null; else t.sec.forEach((S, i) => { const e = t.shK * t.shK * (3 - 2 * t.shK); S.x += t.sh[i][0] * e; S.y += t.sh[i][1] * e; }); }
   const f = t.sec[0]; t.x = f.x; t.y = f.y; t.angle = f.a;
   if (t.cab) Object.assign(t.cab, { x: f.x, y: f.y, angle: f.a, speed: t.v, vx: Math.cos(f.a) * t.v, vy: Math.sin(f.a) * t.v, hp: t.hp });
 }
@@ -4837,14 +5022,13 @@ function tramClear(R, s0, s1) {
 function initTrams() {
   trams = []; tramsFar = [];
   for (const R of TL) {
-    R.spawnT = rand(0, TRAM_GAP / 70);
-    for (let s = 230 + rand(0, TRAM_GAP); s < R.len - 30; s += TRAM_GAP * rand(0.8, 1.2)) tramsFar.push(newTram(R, s));
+    const G = R.K.gap; R.spawnT = rand(0, G / R.K.vavg);
+    for (let s = (R.train ? 1100 : 230) + rand(0, G); s < R.len - 30; s += G * rand(0.8, 1.2)) tramsFar.push(newTram(R, s));
   }
 }
 // Only the trams in your sector (round your view, and your friend's) are simulated in full: lights, stops, whatever
 // is on the track. The others run on along their lines at a tram's average pace (stops and lights included) and are
-// put on the track in full as they come into the sector, where it is clear.
-const TRAM_VAVG = 58; // px/s (what the full simulation averages round the centre)
+// put on the track in full as they come into the sector, where it is clear. (The trains likewise, at theirs.)
 const TRAM_IN = 900, TRAM_OUT = 1250; // px round the view: into the full simulation, and out of it again
 function tramSectors(m) { return allCams().map(c => viewRect(m, c)); }
 const inRects = (rs, x, y) => rs.some(v => x > v.x0 && x < v.x1 && y > v.y0 && y < v.y1);
@@ -4855,7 +5039,7 @@ function tramFree(t) {
     for (const S of t.sec) for (const Q of o.sec) {
       if ((S.lv < 0) !== (Q.lv < 0)) continue;
       const ca = Math.cos(S.a) * S.l / 2, sa = Math.sin(S.a) * S.l / 2, cb = Math.cos(Q.a) * Q.l / 2, sb = Math.sin(Q.a) * Q.l / 2;
-      if (segSegD([S.x + ca, S.y + sa], [S.x - ca, S.y - sa], [Q.x + cb, Q.y + sb], [Q.x - cb, Q.y - sb]) < TRAM_W + 2) return false;
+      if (segSegD([S.x + ca, S.y + sa], [S.x - ca, S.y - sa], [Q.x + cb, Q.y + sb], [Q.x - cb, Q.y - sb]) < (t.w + o.w) / 2 + 2) return false;
     }
   }
   return true;
@@ -4864,9 +5048,10 @@ function updateFarTrams(dt) {
   const into = tramSectors(TRAM_IN), seen = tramSectors(40);
   for (const t of tramsFar) {
     const R = t.R;
-    if (!t.hold) t.s += TRAM_VAVG * dt;
+    if (!t.hold) t.s += R.K.vavg * dt;
     if (t.s > R.len) {
       if (R.next.length) { t.prev = R; t.R = TL[pick(R.next)]; t.s -= R.len; }
+      else if (R.cont) { trainOn(t); continue; }
       else { t.gone = true; continue; } // (out over the map's edge, or into the depot at the terminus)
     }
     if (t.prev && t.s > t.len + 10) t.prev = null;
@@ -4877,7 +5062,7 @@ function updateFarTrams(dt) {
     placeTram(t);
     if (!tramFree(t)) { if (t.hold && inRects(seen, x, y)) t.gone = true; else t.hold = true; continue; } // (wait out of sight for the track to clear)
     tramIdx(t); t.hold = false; t.dwell = 0; t.wait = 0; t.blockBy = null; t.endT = 0; t.pax = null;
-    const k = Math.round(t.s / 8); t.v = Math.min(TRAM_V * 0.75, k >= 0 && k < R.vmax.length ? R.vmax[k] : TRAM_V);
+    const k = Math.round(t.s / 8); t.v = Math.min(R.K.V * 0.75, k >= 0 && k < R.vmax.length ? R.vmax[k] : R.K.V);
     t.real = true; trams.push(t);
   }
   tramsFar = tramsFar.filter(t => !t.gone && !t.real);
@@ -4885,7 +5070,7 @@ function updateFarTrams(dt) {
 }
 // the capsules (axis and radius) of what might be on a tram's track, for its look ahead and for the cars' look ahead
 function capsOf(o) {
-  if (o.sec) return o.sec.filter(S => S.lv === 0).map(S => { const c = Math.cos(S.a) * S.l / 2, s = Math.sin(S.a) * S.l / 2; return [S.x + c, S.y + s, S.x - c, S.y - s, TRAM_W / 2, o]; });
+  if (o.sec) return o.sec.filter(S => S.lv === 0).map(S => { const c = Math.cos(S.a) * S.l / 2, s = Math.sin(S.a) * S.l / 2; return [S.x + c, S.y + s, S.x - c, S.y - s, o.w / 2, o]; });
   if (o.type) { const [a, b, r] = carCircles(o); return [[a[0], a[1], b[0], b[1], r, o]]; }
   return [[o.x, o.y, o.x, o.y, 4, o]];
 }
@@ -4904,7 +5089,7 @@ function tramAhead(c, hx, hy, look) {
   for (const t of trams) {
     if (t.cab || Math.abs(t.x - c.x) > 320 || Math.abs(t.y - c.y) > 320) continue;
     for (const [ax, ay, bx, by] of capsOf(t)) {
-      if (segSegD(a, b, [ax, ay], [bx, by]) < TRAM_W / 2 + t0.w / 2 - 1) {
+      if (segSegD(a, b, [ax, ay], [bx, by]) < t.w / 2 + t0.w / 2 - 1) {
         return t.px || (t.px = { tram: t, get x() { return t.x; }, get y() { return t.y; }, ai: { get queued() { return !(t.left || t.dead); }, dwell: 0 }, get type() { return t.left || t.dead ? 'tram' : undefined; }, get dead() { return t.left || t.dead; }, driver: null });
       }
     }
@@ -4915,23 +5100,24 @@ function tramAhead(c, hx, hy, look) {
 function tramLook(t, look, cands) {
   for (let d = 0; d <= look; d += 9) {
     const [x, y] = tramAt(t, t.s + d);
-    for (const [ax, ay, bx, by, r, o] of cands) if (segPtD(x, y, ax, ay, bx, by) < TRAM_W / 2 + r - 2) return [Math.max(0, d - r), o];
+    for (const [ax, ay, bx, by, r, o] of cands) if (segPtD(x, y, ax, ay, bx, by) < t.w / 2 + r - 2) return [Math.max(0, d - r), o];
   }
   return null;
 }
-function tramBell(t) { if (t.bell <= 0 && onScreen(t.x, t.y, 120)) { sfx.tram(); t.bell = 1.2; } }
+function tramBell(t) { if (t.bell <= 0 && onScreen(t.x, t.y, 120)) { if (t.train) { sfx.train(); t.bell = 4; } else { sfx.tram(); t.bell = 1.2; } } } // (a train sounds its horn)
 function tramStopSay(t) { const st = t.R.stops[t.si]; if (t.cab && st) msg(`Next stop: ${st.name}`, 2.5); }
 function updateTrams(dt, active) {
   if (!TL.length) return;
   // new trams where their routes come into the map (or start at a terminus, out of sight)
   for (const R of TL) {
     if (R.fed || (R.spawnT -= dt) > 0) continue;
-    const [x, y] = tramPt(R, 0);
-    if (!R.edgeIn && onScreen(x, y, 300)) { R.spawnT = 4; continue; }
-    const t = newTram(R, 0);
+    const [x, y] = tramPt(R, 0), t = newTram(R, 0), [ex, ey] = tramPt(R, t.len);
+    if (!R.edgeIn && (onScreen(x, y, 300) || onScreen(ex, ey, 300))) { R.spawnT = 4; continue; }
     t.s = t.len + 2; tramIdx(t); placeTram(t);
-    if (!inRects(tramSectors(TRAM_IN), x, y)) { tramsFar.push(t); R.spawnT = TRAM_GAP / 70 * rand(0.8, 1.2); }
-    else if (tramClear(R, 0, t.len + 60)) { trams.push(t); R.spawnT = TRAM_GAP / 70 * rand(0.8, 1.2); } else R.spawnT = 5;
+    if (t.train && !R.edgeIn && R.stops.length && R.stops[0].s < t.s + 60) { t.si = 0; t.dwell = rand(15, 45); t.dT = 0; } // (a train starting at a station boards there first)
+    const G = R.K.gap / R.K.vavg;
+    if (!inRects(tramSectors(TRAM_IN), x, y)) { tramsFar.push(t); R.spawnT = G * rand(0.8, 1.2); }
+    else if (tramClear(R, 0, t.len + 60)) { trams.push(t); R.spawnT = G * rand(0.8, 1.2); } else R.spawnT = 5;
   }
   updateFarTrams(dt);
   const outer = tramSectors(TRAM_OUT);
@@ -4942,38 +5128,39 @@ function updateTrams(dt, active) {
   if (!player.car && !player.hidden && !player.down) caps.push([player.x, player.y, player.x, player.y, 4, player]);
   const tcaps = trams.map(capsOf);
   for (const t of trams) {
-    t.bell -= dt;
-    if (t.dead) { t.v = Math.max(0, t.v - TRAM_EBRK * dt); if (t.fire > 0 && Math.random() < 0.5) { const S = pick(t.sec); addPart(S.x + rand(-20, 20), S.y + rand(-6, 6), rand(-10, 10), rand(-30, -10), 0.7, rand(3, 7), pick(['#ff9c2a', '#ffdf6b', '#ff5a1f', '#555']), 6, true); } }
+    t.bell -= dt; if (t.sh) t.shK -= dt / 5;
+    const K = t.R.K;
+    if (t.dead) { t.v = Math.max(0, t.v - K.ebrk * dt); if (t.fire > 0 && Math.random() < 0.5) { const S = pick(t.sec); addPart(S.x + rand(-20, 20), S.y + rand(-6, 6), rand(-10, 10), rand(-30, -10), 0.7, rand(3, 7), pick(['#ff9c2a', '#ffdf6b', '#ff5a1f', '#555']), 6, true); } }
     const isNear = near(t);
     if (t.cab && player.car !== t.cab) { t.cab = null; t.left = true; } // (you got off, or were wasted or busted aboard)
     const R = t.R;
     if (t.cab) { // you drive: ↑ go, ↓ brake (and slowly back), Space the bell
       const c = t.cab, up = keys.up, dn = keys.down;
-      if (up) t.v = Math.min(150, t.v + (t.v < 0 ? TRAM_EBRK : TRAM_ACC * 1.4) * dt);
-      else if (dn) t.v = t.v > 0 ? Math.max(0, t.v - TRAM_EBRK * dt) : Math.max(-40, t.v - 25 * dt);
-      else t.v -= Math.sign(t.v) * Math.min(Math.abs(t.v), 8 * dt);
-      if (keys.fire && t.bell <= 0) { sfx.tram(); t.bell = 0.6; scare(t.x, t.y, 160); }
+      if (up) t.v = Math.min(t.train ? K.V * 1.25 : 150, t.v + (t.v < 0 ? K.ebrk : K.acc * (t.train ? 1.8 : 1.4)) * dt);
+      else if (dn) t.v = t.v > 0 ? Math.max(0, t.v - K.ebrk * (t.train ? 1.5 : 1) * dt) : Math.max(t.train ? -30 : -40, t.v - (t.train ? 6 : 25) * dt);
+      else t.v -= Math.sign(t.v) * Math.min(Math.abs(t.v), (t.train ? 1.5 : 8) * dt);
+      if (keys.fire && t.bell <= 0) { if (t.train) { sfx.train(); t.bell = 1.5; scare(t.x, t.y, 260); } else { sfx.tram(); t.bell = 0.6; scare(t.x, t.y, 160); } }
       t.doors = Math.max(0, t.doors - dt * 2);
       c.brk = dn;
-    } else if (t.left || t.dead) { t.v = Math.max(0, t.v - TRAM_BRK * dt); t.doors = Math.max(0, t.doors - dt); }
+    } else if (t.left || t.dead) { t.v = Math.max(0, t.v - K.brk * dt); t.doors = Math.max(0, t.doors - dt); }
     else {
-      let target = TRAM_V;
+      let target = K.V;
       // round the bends ahead
-      const brk = t.v * t.v / (2 * TRAM_BRK) + 24;
-      for (let d = 0; d <= brk; d += 8) { const k = Math.round((t.s + d) / 8); if (k >= 0 && k < R.vmax.length) target = Math.min(target, Math.sqrt(R.vmax[k] ** 2 + 2 * TRAM_BRK * d)); }
+      const brk = t.v * t.v / (2 * K.brk) + 24;
+      for (let d = 0; d <= brk; d += 8) { const k = Math.round((t.s + d) / 8); if (k >= 0 && k < R.vmax.length) target = Math.min(target, Math.sqrt(R.vmax[k] ** 2 + 2 * K.brk * d)); }
       // the next stop: dwell there, doors open, people get on and off, then the bell and away
       const st = R.stops[t.si];
       if (st) {
-        const d = st.s - t.s;
+        const d = stopAt(t, st) - t.s;
         if (t.dwell > 0) {
           t.dwell -= dt; target = 0; t.v = 0;
           t.doors = t.dwell > 0.8 ? Math.min(1, t.doors + dt * 2) : Math.max(0, t.doors - dt * 1.5);
           t.dT = (t.dT || 0) + dt;
           if (isNear) tramPax(t, st, dt);
           if (t.dwell <= 0) { t.si++; tramBell(t); t.wait = 0; t.pax = null; if (st.pl) st.pl.last = time; }
-        } else if (d < 3 && t.v < 12) { t.dwell = rand(4.5, 7); t.dT = 0; t.v = 0; target = 0; }
+        } else if (d < 3 && t.v < 12) { t.dwell = t.train ? rand(12, 22) : rand(4.5, 7); t.dT = 0; t.v = 0; target = 0; }
         else if (d < -12) t.si++;
-        else target = Math.min(target, Math.sqrt(2 * TRAM_BRK * Math.max(0, d - 1)));
+        else target = Math.min(target, Math.sqrt(2 * K.brk * Math.max(0, d - 1)));
       }
       if (!(t.dwell > 0)) t.doors = Math.max(0, t.doors - dt * 1.5);
       // red lights
@@ -4981,21 +5168,23 @@ function updateTrams(dt, active) {
       const L = R.lights[t.li];
       if (L && L.s - t.s < 200) {
         const ph = lightPhase(L.n), d = L.s - t.s;
-        if (ph !== (L.g ? 2 : 0) && !(ph === (L.g ? 3 : 1) && t.v * t.v / (2 * TRAM_BRK) > d - 4)) target = Math.min(target, d < 2 ? 0 : Math.sqrt(2 * TRAM_BRK * Math.max(0, d - 2)));
+        if (ph !== (L.g ? 2 : 0) && !(ph === (L.g ? 3 : 1) && t.v * t.v / (2 * K.brk) > d - 4)) target = Math.min(target, d < 2 ? 0 : Math.sqrt(2 * K.brk * Math.max(0, d - 2)));
       }
       // the end of the line: on into the route it becomes, or out over the map's edge, or wait at the terminus
-      if (!R.next.length && !R.edgeOut) target = Math.min(target, Math.sqrt(2 * TRAM_BRK * Math.max(0, R.len - t.s - 2)));
-      // whatever is on the track: other trams anywhere, and near you the cars and people too
-      const look = t.v * t.v / (2 * TRAM_BRK) + 40;
+      if (!R.next.length && !R.edgeOut && !(R.cont && t.si >= R.stops.length)) target = Math.min(target, Math.sqrt(2 * K.brk * Math.max(0, R.len - t.s - 2)));
+      // whatever is on the track: other trams anywhere, and near you the cars and people too (a train sees them only
+      // when it is too late: it brakes as hard as it can, and hits them)
+      const look = t.v * t.v / (2 * K.brk) + 40, lookO = t.train ? Math.min(look, 240) : look;
       const mine = [];
-      for (let j = 0; j < trams.length; j++) { const o = trams[j]; if (o !== t && Math.abs(o.x - t.x) < look + 240 && Math.abs(o.y - t.y) < look + 240 && !(o.blockBy === t && t.id < o.id)) mine.push(...tcaps[j]); }
-      if (isNear) for (const q of caps) if (Math.abs(q[0] - t.x) < look + 60 && Math.abs(q[1] - t.y) < look + 60) mine.push(q);
+      for (let j = 0; j < trams.length; j++) { const o = trams[j]; if (o !== t && Math.abs(o.x - t.x) < look + 240 + o.len && Math.abs(o.y - t.y) < look + 240 + o.len && !(o.blockBy === t && t.id < o.id)) mine.push(...tcaps[j]); }
+      if (isNear) for (const q of caps) if (Math.abs(q[0] - t.x) < lookO + 60 && Math.abs(q[1] - t.y) < lookO + 60) mine.push(q);
       const hit = tramLook(t, look, mine);
       t.blockBy = null;
       if (hit) {
         const [d, o] = hit, free = d - 10;
-        target = Math.min(target, free < 1 ? 0 : Math.sqrt(2 * TRAM_BRK * free));
+        target = Math.min(target, free < 1 ? 0 : Math.sqrt(2 * K.brk * free));
         if (o.sec) t.blockBy = o;
+        if (t.train && !o.sec && free < look) tramBell(t);
         if (t.v < 5 && free < 30) {
           t.wait += dt;
           if (t.wait > 1.2 && !o.sec) tramBell(t);
@@ -5004,15 +5193,17 @@ function updateTrams(dt, active) {
         if (free < t.v * 0.25 && !o.sec && t.v > 40 && Math.random() < dt * 4) tramBell(t);
       } else t.wait = 0;
       // speed up gently, brake firmly (hard, if something came out right in front)
-      if (t.v < target) t.v = Math.min(target, t.v + TRAM_ACC * dt);
-      else t.v = Math.max(target, t.v - (t.v - target > 30 ? TRAM_EBRK : TRAM_BRK) * dt);
+      if (t.v < target) t.v = Math.min(target, t.v + K.acc * dt);
+      else t.v = Math.max(target, t.v - (t.v - target > (t.train ? 12 : 30) ? K.ebrk : K.brk) * dt);
     }
     t.s += t.v * dt;
     if (t.cab && t.s < t.len + 2 && !t.prev) { t.s = t.len + 2; t.v = Math.max(0, t.v); }
     if (t.s > R.len) {
       if (R.next.length) { t.prev = R; t.R = TL[pick(R.next)]; t.s -= t.prev.len; tramIdx(t); tramStopSay(t); }
+      else if (t.cab && R.cont) { trainOn(t); t.ns = false; msg(`On along the ${t.R.ref} line's track.`, 2); }
       else if (t.cab) { t.s = R.len; if (t.v > 5) msg(R.edgeOut ? 'The line runs on out of town: this is as far as it goes.' : 'End of the line.', 2); t.v = 0; }
       else if (R.edgeOut) { t.gone = true; continue; }
+      else if (R.cont) trainOn(t);
       else t.s = R.len;
     }
     if (t.prev && t.s > t.len + 10) t.prev = null;
@@ -5021,7 +5212,7 @@ function updateTrams(dt, active) {
     if (!t.cab && (t.left || t.dead || (!R.next.length && !R.edgeOut && t.s >= R.len - 4))) { t.endT += dt; if (t.endT > 12 && !near(t) && !t.fire) t.gone = true; }
     placeTram(t);
     if (isNear) tramCollide(t, active, dt);
-    if (!t.cab && !inRects(outer, t.x, t.y)) { t.gone = true; if (!t.dead && !t.left && !t.fire) { t.chk = 0; t.hold = false; t.dwell = 0; tramsFar.push(t); } }
+    if (!t.cab && !(t.train ? t.sec.some(S => inRects(outer, S.x, S.y)) : inRects(outer, t.x, t.y))) { t.gone = true; if (!t.dead && !t.left && !t.fire) { t.chk = 0; t.hold = false; t.dwell = 0; tramsFar.push(t); } }
   }
   trams = trams.filter(t => !t.gone);
   for (const t of tramsFar) t.gone = false;
@@ -5032,7 +5223,7 @@ function tramCollide(t, active, dt) {
   const src = t.cab ? 'player' : null;
   for (const S of t.sec) {
     if (S.lv) continue;
-    const ca = Math.cos(S.a), sa = Math.sin(S.a), hl = S.l / 2, hw = TRAM_W / 2, vx = ca * t.v, vy = sa * t.v;
+    const ca = Math.cos(S.a), sa = Math.sin(S.a), hl = S.l / 2, hw = t.w / 2, vx = ca * t.v, vy = sa * t.v;
     for (const c of active) {
       if (c.lay === 1 || c.lay === 3 || c.heldBy || Math.abs(c.x - S.x) > hl + 30 || Math.abs(c.y - S.y) > hl + 30) continue;
       for (const q of carCircles(c).slice(0, 2)) {
@@ -5049,11 +5240,11 @@ function tramCollide(t, active, dt) {
         if (vn < 0) {
           c.vx -= 1.3 * vn * nx; c.vy -= 1.3 * vn * ny; c.speed = c.vx * Math.cos(c.angle) + c.vy * Math.sin(c.angle);
           if (-vn > 60) {
-            damageCar(c, (-vn - 60) * 0.35, src);
+            damageCar(c, (-vn - 60) * (t.train ? 1.2 : 0.35), src); // (a train weighs a few hundred tonnes)
             if (onScreen(c.x, c.y)) sfx.crash();
             if (c === player.car) { shake = Math.min(1, -vn / 300); if (-vn > 130) hardKnock(); if (CT[c.type].bike && -vn > 120) bikeThrow(); }
             for (let k = 0; k < 4; k++) addPart(q[0] - nx * r, q[1] - ny * r, rand(-60, 60), rand(-60, 60), 0.3, 2, '#ffd27a');
-            if (!t.cab && !t.dead) { t.v *= 0.85; tramBell(t); }
+            if (!t.cab && !t.dead) { t.v *= t.train ? 0.97 : 0.85; tramBell(t); }
           }
           if (c.driver === 'police' && t.cab) bumpedCop(c, { driver: 'player' });
         }
@@ -5076,7 +5267,7 @@ function tramCollide(t, active, dt) {
     if (o === t || Math.abs(o.x - t.x) > 300 || Math.abs(o.y - t.y) > 300) continue;
     const [fx, fy] = tramAt(t, t.s + 2), [bx, by] = tramAt(t, t.s - t.len - 2);
     for (const [ax, ay, cx, cy] of capsOf(o)) for (const [px, py, dir] of [[fx, fy, 1], [bx, by, -1]]) {
-      if (segPtD(px, py, ax, ay, cx, cy) < TRAM_W - 2 && t.v * dir > 0) {
+      if (segPtD(px, py, ax, ay, cx, cy) < (t.w + o.w) / 2 - 2 && t.v * dir > 0) {
         const v = Math.abs(t.v); t.v = -t.v * 0.25; t.s += t.v * dt * 2;
         if (v > 50) { t.hp -= v * 0.8; o.hp -= v * 0.8; sfx.crash(); shake = Math.min(1, v / 250); hardKnock(); }
       }
@@ -5099,11 +5290,11 @@ function damageTram(t, amt, src) {
 // a bullet at (x, y): did it hit a tram's side? (it stops there)
 function tramHitAt(x, y) {
   for (const t of trams) {
-    if (Math.abs(t.x - x) > 230 || Math.abs(t.y - y) > 230) continue;
+    if (Math.abs(t.x - x) > 230 + t.len || Math.abs(t.y - y) > 230 + t.len) continue;
     for (const S of t.sec) {
       if (S.lv < 0) continue;
       const dx = x - S.x, dy = y - S.y, lx = dx * Math.cos(S.a) + dy * Math.sin(S.a), ly = -dx * Math.sin(S.a) + dy * Math.cos(S.a);
-      if (Math.abs(lx) < S.l / 2 && Math.abs(ly) < TRAM_W / 2) return t;
+      if (Math.abs(lx) < S.l / 2 && Math.abs(ly) < t.w / 2) return t;
     }
   }
   return null;
@@ -5123,54 +5314,75 @@ function tramCabNear(x, y) {
 function boardTram(t) {
   const S = t.sec[0], ca = Math.cos(S.a), sa = Math.sin(S.a), R = t.R;
   if (!t.left) { // the driver gets out at the front door, and runs
-    const p = makePed(S.x + ca * (S.l / 2 - 14) - sa * (TRAM_W / 2 + 8), S.y + sa * (S.l / 2 - 14) + ca * (TRAM_W / 2 + 8), {});
+    const p = makePed(S.x + ca * (S.l / 2 - 14) - sa * (t.w / 2 + 8), S.y + sa * (S.l / 2 - 14) + ca * (t.w / 2 + 8), {});
     p.shirt = '#34495e'; p.pants = '#2c3e50'; p.flee = 6; p.fx = player.x; p.fy = player.y;
     if (copNear(t.x, t.y, 380)) addHeat(0.6);
-    msg(`You hijacked a tram: line ${R.ref} to ${R.dest}!`, 3);
+    msg(t.train ? `You hijacked a train: ${R.ref} to ${R.dest}!` : `You hijacked a tram: line ${R.ref} to ${R.dest}!`, 3);
   }
   t.left = false; t.dwell = 0; t.wait = 0; t.endT = 0; t.doors = 0;
-  t.cab = { type: 'tram', tram: t, x: t.x, y: t.y, angle: t.angle, vx: 0, vy: 0, speed: 0, hp: t.hp, driver: 'player', lay: 0, ai: {}, color: t.m.body, fire: 0 };
+  t.cab = { type: t.train ? 'train' : 'tram', tram: t, x: t.x, y: t.y, angle: t.angle, vx: 0, vy: 0, speed: 0, hp: t.hp, driver: 'player', lay: 0, ai: {}, color: t.m.body, fire: 0 };
   player.car = t.cab; player.x = t.x; player.y = t.y;
-  msg(`${touchOn() ? '▲' : '↑'} go, ${touchOn() ? '▼' : '↓'} brake (and back up), Space rings the bell. ${touchOn() ? '⇄' : 'Enter'}: get off.`, 5);
+  msg(`${touchOn() ? '▲' : '↑'} go, ${touchOn() ? '▼' : '↓'} brake (and back up), Space ${t.train ? 'sounds the horn' : 'rings the bell'}. ${touchOn() ? '⇄' : 'Enter'}: get off.${t.train ? ' A train is heavy: brake early.' : ''}`, 5);
   tramStopSay(t);
-  sfx.tram();
+  if (t.train) sfx.train(); else sfx.tram();
 }
 // ---- drawing: each section's roof seen from above, its sides' windows, the joints' bellows, a pantograph on the
 // middle section, the line's number up front; the doors on the right open at the stops
 // the doors on a stopped tram's right-hand side: [x, y, outward x, outward y] (as drawn: two on a long section, one on a short)
+const trainDoorX = (t, k, l) => t.m.loco && k === 0 ? [] : t.m.loco ? [-l * 0.42, l * 0.42] : [-l * 0.27, l * 0.27]; // (a coach's at its ends, a unit's two along each car)
 function tramDoors(t) {
-  const D = [];
-  for (const S of t.sec) {
-    if (S.lv) continue;
-    const ca = Math.cos(S.a), sa = Math.sin(S.a), nd = S.l >= 60 ? 2 : 1;
-    for (let i = 0; i < nd; i++) { const dx = nd === 1 ? 0 : (i ? S.l * 0.24 : -S.l * 0.24); D.push([S.x + ca * dx - sa * (TRAM_W / 2 + 3), S.y + sa * dx + ca * (TRAM_W / 2 + 3), -sa, ca]); }
-  }
+  const D = [], sd = t.train ? t.dside : 1;
+  t.sec.forEach((S, k) => {
+    if (S.lv) return;
+    const ca = Math.cos(S.a), sa = Math.sin(S.a), nd = S.l >= 60 ? 2 : 1, o = (t.w / 2 + 3) * sd;
+    const xs = t.train ? trainDoorX(t, k, S.l) : nd === 1 ? [0] : [-S.l * 0.24, S.l * 0.24];
+    for (const dx of xs) D.push([S.x + ca * dx - sa * o, S.y + sa * dx + ca * o, -sa * sd, ca * sd]);
+  });
   return D;
 }
 function tramPax(t, st, dt) {
   const pl = st.pl; if (!pl || t.cab) return;
-  if (!t.pax || t.pax.st !== st) t.pax = { st, off: Math.random() < 0.3 ? 0 : randi(1, Math.min(6, pl.cap)), offT: 0.3, on: false };
+  if (!t.pax || t.pax.st !== st) { t.pax = { st, off: Math.random() < 0.3 ? 0 : randi(1, Math.min(t.train ? 14 : 6, pl.cap)), offT: 0.3, on: false }; if (t.train) { if (!pl.spots) platSpots(pl); t.dside = pl.side; } }
   const X = t.pax; if (t.doors < 0.9) return; // (the doors open first)
   const D = tramDoors(t); if (!D.length) return;
   X.offT -= dt;
   if (X.off > 0 && X.offT <= 0) { // someone steps off and onto the platform
     X.off--; X.offT = rand(0.25, 0.7);
     const [x, y, ox, oy] = pick(D);
-    if (peds.length < 140 && !circleSolid(x + ox * 6, y + oy * 6, 3)) { const p = makePed(x, y); p.angle = Math.atan2(oy, ox); p.tp = { k: 'off', pl, x: x + ox * rand(16, 26) + oy * rand(-8, 8), y: y + oy * rand(16, 26) - ox * rand(-8, 8), T: 0 }; }
+    if (peds.length < 240 && !circleSolid(x + ox * 6, y + oy * 6, 3)) { const p = makePed(x, y); p.angle = Math.atan2(oy, ox); p.tp = { k: 'off', pl, x: x + ox * rand(16, 26) + oy * rand(-8, 8), y: y + oy * rand(16, 26) - ox * rand(-8, 8), T: 0 }; }
   }
   if (!X.on && (X.off <= 0 || t.dT > 3)) { // and those waiting get on, each at the door nearest them
     X.on = true;
     for (const p of peds) if (p.tp && p.tp.pl === pl && (p.tp.k === 'wait' || p.tp.k === 'walk') && !p.dead && !p.gone) {
-      let bi = -1, bd = 220 * 220; D.forEach((q, i) => { const dd = d2(q[0], q[1], p.x, p.y); if (dd < bd) { bd = dd; bi = i; } });
+      let bi = -1, bd = (t.train ? 420 : 220) ** 2; D.forEach((q, i) => { const dd = d2(q[0], q[1], p.x, p.y); if (dd < bd) { bd = dd; bi = i; } });
       if (bi >= 0) Object.assign(p.tp, { k: 'board', t, door: bi, T: 0 });
     }
   }
   const busy = X.off > 0 || peds.some(p => p.tp && p.tp.k === 'board' && p.tp.t === t && !p.gone && !p.dead);
-  if (busy && t.dT < 25) t.dwell = Math.max(t.dwell, 1.2);
+  if (busy && t.dT < (t.train ? 40 : 25)) t.dwell = Math.max(t.dwell, 1.2);
 }
 // the people on a platform: where they stand (along where the tram will stop, on the pavement beside the track)
 function platSpots(pl) {
   pl.spots = [];
+  if (pl.train) { // (on the platform as mapped, either side of the track, along where the train stands; else the paving beside it)
+    const n = [0, 0];
+    for (const pass of [0, 1]) {
+      for (let s = pl.s - 240; s <= pl.s + 240; s += 12) {
+        if (s < 0 || s > pl.R.len) continue;
+        const [x, y, h] = tramPt(pl.R, s), nx = -Math.sin(h), ny = Math.cos(h);
+        for (const sd of [1, -1]) for (let o = 18; o <= (pass ? 34 : 70); o += 4) {
+          const px = x + nx * o * sd, py = y + ny * o * sd, tt = tileAtP(px, py);
+          if ((pass ? (tt === WALK || tt === PLAZA) : onPlat(px, py)) && !circleSolid(px, py, 4)) {
+            pl.spots.push({ x: px, y: py, a: Math.atan2(-ny * sd, -nx * sd), sd }); n[sd > 0 ? 0 : 1]++; break;
+          }
+        }
+      }
+      if (pl.spots.length) break;
+    }
+    pl.side = n[0] >= n[1] ? 1 : -1; pl.spots = pl.spots.filter(q => q.sd === pl.side);
+    if (pl.spots.length) { const q = pl.spots[pl.spots.length >> 1]; pl.x = q.x; pl.y = q.y; }
+    return;
+  }
   for (let s = pl.s - 130; s <= pl.s - 4; s += 9) {
     const [x, y, h] = tramPt(pl.R, s), nx = -Math.sin(h), ny = Math.cos(h);
     for (let o = 22; o <= 50; o += 3) { // (clear of the tram's side, by a step)
@@ -5194,7 +5406,7 @@ function updatePlatforms(dt) {
     if (!pl.spots) platSpots(pl);
     if (!pl.spots.length) continue;
     let w = 0; for (const p of peds) if (p.tp && p.tp.pl === pl && !p.dead && !p.gone && p.tp.k !== 'off') w++;
-    if (w >= Math.min(pl.cap, 1 + Math.floor((time - pl.last) / 12)) || n > 130) continue;
+    if (w >= Math.min(pl.cap, 1 + Math.floor((time - pl.last) / (pl.train ? 20 : 12))) || n > 230) continue;
     const s = platSpot(null, pl);
     if (!inRects(vis, s.x, s.y)) { const p = makePed(s.x, s.y); p.angle = s.a; p.tp = { k: 'wait', pl, x: s.x, y: s.y, a: s.a }; n++; continue; }
     if (Math.random() > 0.35) continue;
@@ -5246,7 +5458,7 @@ function platPed(p, dt) {
   return true;
 }
 function drawTramSec(t, S, k) {
-  const m = t.m, l = S.l, w = TRAM_W, n = t.sec.length, end = k === 0 || k === n - 1;
+  const m = t.m, l = S.l, w = t.w, n = t.sec.length, end = k === 0 || k === n - 1;
   // where it runs into a tunnel, only the part still outside shows
   let x0 = -l / 2, x1 = l / 2;
   if (!S.on && S.lv < 0) return;
@@ -5259,6 +5471,7 @@ function drawTramSec(t, S, k) {
   if (x1 - x0 < 2) return;
   ctx.save(); ctx.translate(S.x, S.y); ctx.rotate(S.a);
   if (x0 > -l / 2 || x1 < l / 2) { ctx.beginPath(); ctx.rect(x0, -w, x1 - x0, w * 2); ctx.clip(); }
+  if (t.train) { drawTrainCar(t, S, k, l, w, n); ctx.restore(); return; }
   ctx.fillStyle = 'rgba(0,0,0,.35)'; rrect(-l / 2 + 2, -w / 2 + 3, l, w, 3);
   ctx.fillStyle = t.dead ? '#262626' : m.body; rrect(-l / 2, -w / 2, l, w, end ? 5 : 2);
   if (!t.dead) {
@@ -5295,17 +5508,61 @@ function drawTramSec(t, S, k) {
   if (k === n - 1) { ctx.fillStyle = t.v < 3 || (t.cab && keys.down) ? '#ff4040' : '#a31515'; ctx.fillRect(-l / 2, -w / 2 + 1.5, 1.5, 2.5); ctx.fillRect(-l / 2, w / 2 - 4, 1.5, 2.5); }
   ctx.restore();
 }
+// a train's car from above: the roof (its equipment, a pantograph or two), the side windows, the doors (open on the
+// platform's side at a station), the cab's windscreen at either end, the line on the front of a unit
+function drawTrainCar(t, S, k, l, w, n) {
+  const m = t.m, loco = m.loco && k === 0, front = k === 0, back = k === n - 1, cab = loco || (!m.loco && (front || back)), r = cab ? 6 : 2.5;
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; rrect(-l / 2 + 2, -w / 2 + 3, l, w, r);
+  const body = t.dead ? '#262626' : loco ? m.loco : m.body;
+  ctx.fillStyle = body; rrect(-l / 2, -w / 2, l, w, r);
+  if (!t.dead) {
+    ctx.fillStyle = m.roof; ctx.fillRect(-l / 2 + (cab ? 8 : 3), -w / 2 + 3, l - (cab ? 16 : 6), w - 6);
+    if (m.band) { ctx.fillStyle = m.band; ctx.fillRect(-l / 2 + 2, -w / 2, l - 4, 1.5); ctx.fillRect(-l / 2 + 2, w / 2 - 1.5, l - 4, 1.5); }
+    ctx.fillStyle = 'rgba(0,0,0,.18)'; for (let x = -l / 2 + 12; x < l / 2 - 10; x += 14) ctx.fillRect(x, -w / 2 + 3.5, 1, w - 7); // (the roof's ribs)
+    if (!loco) { // the side windows (two rows on a double-decker's flank)
+      ctx.fillStyle = '#1b2631'; const step = m.loco ? 12 : 10;
+      for (let x = -l / 2 + (cab ? 14 : 8); x < l / 2 - (cab ? 18 : 12); x += step) { ctx.fillRect(x, -w / 2 + 1.2, step - 3, 1.9); ctx.fillRect(x, w / 2 - 3.1, step - 3, 1.9); }
+      if (m.dd) { ctx.fillStyle = 'rgba(27,38,49,.55)'; ctx.fillRect(-l / 2 + 16, -w / 2 + 3.4, l - 32, 1); ctx.fillRect(-l / 2 + 16, w / 2 - 4.4, l - 32, 1); }
+    }
+    ctx.fillStyle = 'rgba(70,74,80,.6)'; // (the roof's equipment)
+    if (loco) { ctx.fillRect(-l * 0.12, -4, l * 0.24, 8); ctx.fillRect(-l * 0.4, -3, l * 0.12, 6); ctx.fillRect(l * 0.28, -3, l * 0.12, 6); }
+    else if (!m.loco) { ctx.fillRect(-l * 0.3, -3.5, l * 0.14, 7); ctx.fillRect(l * 0.16, -3.5, l * 0.14, 7); }
+    if (loco || (!m.loco && k === (n >> 1))) for (const px of loco ? [-l * 0.28, l * 0.28] : [0]) { // the pantographs
+      ctx.strokeStyle = '#2f3237'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(px - 11, 0); ctx.lineTo(px, -6); ctx.lineTo(px + 11, 0); ctx.lineTo(px, 6); ctx.closePath(); ctx.stroke();
+      ctx.fillStyle = '#2b2e33'; ctx.fillRect(px - 1, -w / 2 + 2.5, 2, w - 5);
+    }
+    ctx.fillStyle = '#1b2631'; // the windscreens
+    if (loco) { ctx.fillRect(l / 2 - 6, -w / 2 + 2.5, 3.5, w - 5); ctx.fillRect(-l / 2 + 2.5, -w / 2 + 2.5, 3.5, w - 5); }
+    else if (cab) { if (front) ctx.fillRect(l / 2 - 7, -w / 2 + 2.5, 4.5, w - 5); if (back) ctx.fillRect(-l / 2 + 2.5, -w / 2 + 2.5, 4.5, w - 5); }
+    for (const dx of trainDoorX(t, k, l)) { // the doors: shut, a darker panel each side; open, lit, on the platform's
+      ctx.fillStyle = shade(body, 0.75); ctx.fillRect(dx - 4.5, -w / 2, 9, 1.4); ctx.fillRect(dx - 4.5, w / 2 - 1.4, 9, 1.4);
+      if (t.doors > 0.05) { const y = t.dside > 0 ? w / 2 - 3 : -w / 2 - 0.5; ctx.fillStyle = `rgba(255,232,160,${0.95 * t.doors})`; ctx.fillRect(dx - 4.5, y, 9, 3.5); }
+    }
+    if (front && !m.loco && !t.ns) { // the line on the front (none when out of service)
+      const tw = Math.max(9, t.R.ref.length * 4.6 + 3);
+      ctx.fillStyle = t.R.col; ctx.fillRect(l / 2 - 9 - tw, -4.5, tw, 9);
+      ctx.save(); ctx.translate(l / 2 - 9 - tw / 2, 0); ctx.rotate(-S.a);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 7px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t.R.ref, 0, 0.5); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+      ctx.restore();
+    }
+    ctx.fillStyle = carGloss(l, w); rrect(-l / 2, -w / 2, l, w, r);
+  }
+  if (front) { ctx.fillStyle = '#fff6c8'; ctx.fillRect(l / 2 - 1.5, -w / 2 + 2, 1.5, 3); ctx.fillRect(l / 2 - 1.5, w / 2 - 5, 1.5, 3); ctx.fillRect(l / 2 - 1.5, -1.2, 1.5, 2.4); }
+  if (back) { ctx.fillStyle = t.v < 3 ? '#ff4040' : '#a31515'; ctx.fillRect(-l / 2, -w / 2 + 2, 1.5, 3); ctx.fillRect(-l / 2, w / 2 - 5, 1.5, 3); }
+}
 function drawTrams(v, up) {
   for (const t of trams) {
-    if (t.x < v.x0 - 240 || t.x > v.x1 + 240 || t.y < v.y0 - 240 || t.y > v.y1 + 240) continue;
+    const mg = 240 + (t.train ? t.len : 0);
+    if (t.x < v.x0 - mg || t.x > v.x1 + mg || t.y < v.y0 - mg || t.y > v.y1 + mg) continue;
     const S = t.sec;
     for (let k = 0; k < S.length - 1; k++) { // the bellows at the joints
       const A = S[k], B = S[k + 1];
       if ((A.lv > 0) !== !!up || A.lv < 0 || B.lv < 0) continue;
       const ax = A.x - Math.cos(A.a) * A.l / 2, ay = A.y - Math.sin(A.a) * A.l / 2, bx = B.x + Math.cos(B.a) * B.l / 2, by = B.y + Math.sin(B.a) * B.l / 2;
       ctx.save(); ctx.translate((ax + bx) / 2, (ay + by) / 2); ctx.rotate(Math.atan2(ay - by, ax - bx) || A.a);
-      ctx.fillStyle = '#3b3f45'; ctx.fillRect(-t.m.gap / 2 - 3, -TRAM_W / 2 + 2, t.m.gap + 6, TRAM_W - 4);
-      ctx.fillStyle = 'rgba(0,0,0,.35)'; for (let i = -1; i <= 1; i++) ctx.fillRect(i * 2 - 0.5, -TRAM_W / 2 + 2, 1, TRAM_W - 4);
+      ctx.fillStyle = '#3b3f45'; ctx.fillRect(-t.m.gap / 2 - 3, -t.w / 2 + 2, t.m.gap + 6, t.w - 4);
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; for (let i = -1; i <= 1; i++) ctx.fillRect(i * 2 - 0.5, -t.w / 2 + 2, 1, t.w - 4);
       ctx.restore();
     }
     for (let k = S.length - 1; k >= 0; k--) if ((S[k].lv > 0) === !!up) drawTramSec(t, S[k], k); // (in a tunnel: only what is still outside)
@@ -5313,10 +5570,10 @@ function drawTrams(v, up) {
   if (!up) for (const p of TRAM_PORTALS) { // the tunnels' mouths
     if (p.x < v.x0 - 60 || p.x > v.x1 + 60 || p.y < v.y0 - 60 || p.y > v.y1 + 60) continue;
     ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a);
-    const g = ctx.createLinearGradient(0, 0, 34, 0); g.addColorStop(0, 'rgba(14,14,16,.92)'); g.addColorStop(1, 'rgba(14,14,16,.55)');
-    ctx.fillStyle = g; ctx.fillRect(0, -13, 34, 26);
-    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(-1, -15, 6, 31);
-    ctx.fillStyle = tint('#b5b1a7', 1); ctx.fillRect(-3, -15, 5, 30);
+    const h = (p.w || 26) / 2, g = ctx.createLinearGradient(0, 0, 34, 0); g.addColorStop(0, 'rgba(14,14,16,.92)'); g.addColorStop(1, 'rgba(14,14,16,.55)');
+    ctx.fillStyle = g; ctx.fillRect(0, -h, 34, h * 2);
+    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(-1, -h - 2, 6, h * 2 + 5);
+    ctx.fillStyle = tint('#b5b1a7', 1); ctx.fillRect(-3, -h - 2, 5, h * 2 + 4);
     ctx.restore();
   }
 }
@@ -5360,6 +5617,44 @@ function boatHits(c, x, y, a) { for (const [px, py] of carCorners(c, x, y, a)) i
 // where the boats are: the ones that were drawn out on the water, and more moored along the banks (thicker by the
 // harbours and the fishing jetties); each is put there when you come near, like the cars in the parking bays
 const BOAT_SPOTS = [];
+// ---- the University of Defence (Kounicova; on the coarser map, where it stands): the army's vehicles parked in its yards,
+// a T-72, a Pandur, Tatra trucks and Land Rovers, there for the taking. Drive one out and the army wants it back: four
+// stars for the armour, three for the rest. Taken, they're back in their places by the time you return
+const MIL_SPOTS = [];
+if (BRNO) {
+  const polys = B5 ? (BRNO_DATA.unis || []).filter(([n]) => n === 'Univerzita obrany').map(([, f]) => f.map(v => v * T)) : [];
+  const [gx, gy] = geo(49.2075, 16.5948).map(v => v * T);
+  let x0 = gx - 7 * T, y0 = gy - 7 * T, x1 = gx + 7 * T, y1 = gy + 7 * T;
+  if (polys.length) { x0 = y0 = 1e9; x1 = y1 = -1e9; for (const f of polys) for (let k = 0; k < f.length; k += 2) { x0 = Math.min(x0, f[k]); x1 = Math.max(x1, f[k]); y0 = Math.min(y0, f[k + 1]); y1 = Math.max(y1, f[k + 1]); } }
+  const inG = (x, y) => polys.length ? polys.some(r => inRings([r], x, y)) : Math.hypot(x - gx, y - gy) < 7 * T;
+  let a0 = 0, big = 0; // (lined up along the biggest building in the grounds)
+  for (const b of buildings) if (b.fr && b.w * b.h > big && inG(b.x + b.w / 2, b.y + b.h / 2)) { big = b.w * b.h; a0 = Math.atan2(b.fr.s, b.fr.c); }
+  // (each one clear of the others and of their ways out, facing open ground: the longest clear run ahead wins)
+  const inSpot = (px, py) => MIL_SPOTS.some(o => { const t = CT[o.type], dx = px - o.x, dy = py - o.y, u = dx * Math.cos(o.a) + dy * Math.sin(o.a), v = -dx * Math.sin(o.a) + dy * Math.cos(o.a); return u > -t.l / 2 - 9 && u < t.l / 2 + 70 && Math.abs(v) < t.w / 2 + 9; });
+  const ok = (px, py) => { const tt = tileAtP(px, py); return !solidAt(px, py) && tt !== WATER && !inSpot(px, py); };
+  const free = (x, y, a, t) => {
+    const ca = Math.cos(a), sa = Math.sin(a);
+    for (let u = -t.l / 2 - 6; u <= t.l / 2 + 6; u += 5) for (let v = -t.w / 2 - 6; v <= t.w / 2 + 6; v += 5) {
+      const px = x + ca * u - sa * v, py = y + sa * u + ca * v;
+      if (!ok(px, py) || tileAtP(px, py) === ROAD || !inG(px, py)) return false;
+    }
+    return true;
+  };
+  const run = (x, y, a, t) => { // (how far it could drive straight on)
+    const ca = Math.cos(a), sa = Math.sin(a); let d = 0;
+    for (; d < 200; d += 6) for (const v of [-t.w / 2, 0, t.w / 2]) { const px = x + ca * (t.l / 2 + 4 + d) - sa * v, py = y + sa * (t.l / 2 + 4 + d) + ca * v; if (!ok(px, py)) return d; }
+    return d;
+  };
+  for (const type of ['tank', 'apc', 'armytruck', 'armytruck', 'jeep', 'jeep', 'jeep']) {
+    let at = null, best = 50;
+    for (let y = y0 + 12; y < y1; y += 8) for (let x = x0 + 12; x < x1; x += 8) for (let q = 0; q < 4; q++) {
+      const a = a0 + q * Math.PI / 2;
+      if (!free(x, y, a, CT[type])) continue;
+      const r = run(x, y, a, CT[type]); if (r > best) { best = r; at = { x, y, a }; }
+    }
+    if (at) MIL_SPOTS.push({ x: at.x, y: at.y, a: at.a, type, color: CT[type].colors[0], mil: true, c: null, tried: false });
+  }
+}
 {
   const fits = (type, x, y, a) => boatHits({ type }, x, y, a) ? null : { x, y, a, type, boat: true };
   for (let i = props.length - 1; i >= 0; i--) {
@@ -8330,7 +8625,13 @@ function drawCar(c) {
     ctx.fillStyle = '#c0392b'; rrect(0, -w / 2 + 1, 16, w - 2, 3); ctx.fillStyle = '#1b2631'; ctx.fillRect(10, -w / 2 + 3, 3, w - 6);
     ctx.restore(); return;
   }
-  if (c.type === 'truck') {
+  if (c.type === 'armytruck') { // a Tatra: the cab up front, the canvas over the back on its hoops, the spare wheel behind the cab
+    ctx.fillStyle = shade(c.color, 0.85); ctx.fillRect(l * 0.18, -w / 2 + 1, l * 0.3, w - 2);
+    ctx.fillStyle = '#1b2631'; ctx.fillRect(l * 0.38, -w / 2 + 2.5, l * 0.07, w - 5);
+    ctx.fillStyle = shade(c.color, 1.2); ctx.fillRect(-l / 2 + 1, -w / 2 + 0.5, l * 0.64, w - 1);
+    ctx.fillStyle = 'rgba(0,0,0,.22)'; for (let i = 1; i < 6; i++) ctx.fillRect(-l / 2 + 1 + i * l * 0.107, -w / 2 + 0.5, 1.2, w - 1);
+    ctx.fillStyle = '#1e1e1e'; ctx.beginPath(); ctx.arc(l * 0.11, 0, 4, 0, TAU); ctx.fill();
+  } else if (c.type === 'truck') {
     ctx.fillStyle = shade(c.color, 1.15); ctx.fillRect(-l / 2 + 1, -w / 2 + 1, l * 0.66, w - 2);
     ctx.fillStyle = 'rgba(0,0,0,.25)'; for (let i = 1; i < 5; i++) ctx.fillRect(-l / 2 + i * l * 0.13, -w / 2 + 1, 1, w - 2);
     ctx.fillStyle = '#1b2631'; ctx.fillRect(l * 0.3, -w / 2 + 2, l * 0.1, w - 4);
@@ -8346,6 +8647,10 @@ function drawCar(c) {
     ctx.fillStyle = '#1b2631'; ctx.fillRect(-l * 0.3, -w / 2 + 2, l * 0.09, w - 4);
     if (c.type === 'sports') { ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(-l / 2 + 1, -1.5, l - 2, 3); }
     if (c.type === 'taxi') { ctx.fillStyle = '#111'; ctx.fillRect(-l * 0.1, -3, 5, 6); ctx.fillStyle = '#fff'; ctx.fillRect(-l * 0.1 + 1, -2, 3, 4); }
+    if (c.type === 'jeep') { // (the roof rack, and the spare wheel on the back door)
+      ctx.strokeStyle = 'rgba(30,30,24,.7)'; ctx.lineWidth = 1; ctx.strokeRect(-l * 0.28, -w / 2 + 2.5, l * 0.32, w - 5);
+      ctx.fillStyle = '#1e1e1e'; ctx.beginPath(); ctx.arc(-l / 2 - 1, 0, 3.6, 0, TAU); ctx.fill();
+    }
     if (c.type === 'ambulance') {
       ctx.fillStyle = '#fafafa'; ctx.fillRect(-l / 2 + 1, -w / 2 + 2, l * 0.62, w - 4);
       ctx.fillStyle = '#d62828'; ctx.fillRect(-l * 0.2 - 5, -1.5, 10, 3); ctx.fillRect(-l * 0.2 - 1.5, -5, 3, 10);
@@ -8471,8 +8776,8 @@ function drawLighting(v) {
     if (c.fire > 0) l.drawImage(glowSpr, c.x - 70, c.y - 70, 140, 140);
   }
   for (const t of trams) { // a tram's lit saloon, and its headlights
-    if (!vis(t.x, t.y, 260)) continue;
-    for (const S of t.sec) { if (S.lv < 0) continue; l.save(); l.translate(S.x, S.y); l.rotate(S.a); l.globalAlpha = t.dead ? 0.3 : 0.6; l.drawImage(glowSpr, -S.l * 0.62, -TRAM_W, S.l * 1.24, TRAM_W * 2); l.globalAlpha = 1; l.restore(); }
+    if (!(t.train ? t.sec.some(S => vis(S.x, S.y, 200)) : vis(t.x, t.y, 260))) continue;
+    for (const S of t.sec) { if (S.lv < 0) continue; l.save(); l.translate(S.x, S.y); l.rotate(S.a); l.globalAlpha = t.dead ? 0.3 : 0.6; l.drawImage(glowSpr, -S.l * 0.62, -t.w, S.l * 1.24, t.w * 2); l.globalAlpha = 1; l.restore(); }
     const S = t.sec[0]; if (!t.dead && !S.lv) { l.save(); l.translate(S.x, S.y); l.rotate(S.a); l.drawImage(coneSpr, S.l / 2 - 2, -40, 150, 80); l.restore(); }
     if (t.fire > 0) l.drawImage(glowSpr, t.x - 90, t.y - 90, 180, 180);
   }
@@ -8498,7 +8803,7 @@ function drawLighting(v) {
       for (const s of [-1, 1]) { const x = c.x - ca * (t.l / 2 - 1) - sa * s * t.w * 0.32, y = c.y - sa * (t.l / 2 - 1) + ca * s * t.w * 0.32; ctx.beginPath(); ctx.arc(x, y, t.bike ? 2 : 2.6, 0, TAU); ctx.fill(); if (t.bike) break; }
     }
     for (const t of trams) if (!t.dead && vis(t.x, t.y, 220)) for (const S of t.sec) if (S.lv >= 0) { // (the saloon's windows glow warm)
-      ctx.save(); ctx.translate(S.x, S.y); ctx.rotate(S.a); ctx.fillStyle = 'rgba(255,210,130,.28)'; ctx.fillRect(-S.l / 2 + 3, -TRAM_W / 2 + 1, S.l - 6, TRAM_W - 2); ctx.restore();
+      ctx.save(); ctx.translate(S.x, S.y); ctx.rotate(S.a); ctx.fillStyle = 'rgba(255,210,130,.28)'; ctx.fillRect(-S.l / 2 + 3, -t.w / 2 + 1, S.l - 6, t.w - 2); ctx.restore();
     }
     for (const c of cars) if ((c.chase || c.job) && c.lay !== 1 && vis(c.x, c.y, 40)) { ctx.fillStyle = on ? 'rgba(255,40,40,.4)' : 'rgba(40,90,255,.4)'; ctx.beginPath(); ctx.arc(c.x, c.y, 34, 0, TAU); ctx.fill(); }
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
@@ -9547,6 +9852,7 @@ function dbgPlaces() {
   for (let k = 0; k < MW * MH; k += 3) { const r = REG[k]; if (r === undefined || r >= DISTRICTS.length || solidT(map[k])) continue; sx[r] += k % MW; sy[r] += (k / MW) | 0; n[r]++; }
   DISTRICTS.forEach((d, i) => { if (n[i]) add(d.name, (sx[i] / n[i] + 0.5) * T, (sy[i] / n[i] + 0.5) * T); });
   for (const p of TRAM_STOPS) add(p.name, p.x, p.y);
+  if (MIL_SPOTS.length) { const q = MIL_SPOTS[0]; add('Univerzita obrany', q.x, q.y + 40); add('army', q.x, q.y + 40); }
   const seenE = new Set();
   for (const e of EDGES) if (e.name && !seenE.has(e.name)) { seenE.add(e.name); const q = e.pts[e.pts.length >> 1]; add(e.name, q[0], q[1]); }
   if (BRNO) { for (const f of FACULTIES) { const [x, y] = geo(f[3], f[4]); add(f[0], x * T, y * T); } add('harbour', HARBOUR[0] * T, HARBOUR[1] * T); add('reservoir', HARBOUR[0] * T, HARBOUR[1] * T); }
@@ -9603,7 +9909,7 @@ function dbgRun(line) {
     case 'wanted': case 'heat': { const v = clamp(num[0] || 0, 0, 10); heat = v ? Math.min(10.99, v + 0.01) : 0; if (!v) { HQ = hqNew(); belief.sig = 1e4; } lastCrime = time; return `wanted level ${Math.floor(heat)}`; }
     case 'car': case 'spawn': {
       const t = (a[0] || '').toLowerCase();
-      if (!CT[t] || t === 'tram') return 'types: ' + Object.keys(CT).filter(k => k !== 'tram').join(' ');
+      if (!CT[t] || t === 'tram' || t === 'train') return 'types: ' + Object.keys(CT).filter(k => k !== 'tram' && k !== 'train').join(' ');
       const P0 = pp();
       let at;
       if (CT[t].boat) { at = nearOf(P0.x, P0.y, true, 40); if (!at) return 'no water near here'; at.a = rand(TAU); for (let i = 0; i < 12 && boatHits({ type: t }, at.x, at.y, at.a); i++) at.a += 0.5; }
@@ -9627,7 +9933,7 @@ function dbgTick() {
   if (!DBG.god) return;
   player.hp = 100; player.bust = 0;
   const c = player.car, t = c && c.tram;
-  if (t) { if (!t.dead) t.hp = CT.tram.hp; } else if (c) { c.hp = CT[c.type].hp; c.fire = 0; }
+  if (t) { if (!t.dead) t.hp = t.hp0; } else if (c) { c.hp = CT[c.type].hp; c.fire = 0; }
 }
 function dbgDraw() {
   if (!DBG.stats) return;

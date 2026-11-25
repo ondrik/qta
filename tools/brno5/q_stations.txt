@@ -1,0 +1,9 @@
+[out:json][timeout:90];
+(
+  node["railway"~"^(station|halt|stop)$"](49.160,16.490,49.248,16.664);
+  node["public_transport"~"^(station|stop_position)$"]["train"="yes"](49.160,16.490,49.248,16.664);
+  way["railway"~"^(station|halt|platform)$"](49.160,16.490,49.248,16.664);
+  way["public_transport"="platform"]["train"="yes"](49.160,16.490,49.248,16.664);
+  relation["railway"="platform"](49.160,16.490,49.248,16.664);
+);
+out geom;

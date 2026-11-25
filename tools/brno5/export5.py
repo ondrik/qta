@@ -131,6 +131,9 @@ if __name__ == '__main__':
     data = {'bbox': [LON0, LON1, LAT0, LAT1], 'mw': MW, 'mh': MH, 'lc': runs(land), 'roads': R, 'rails': rails, 'trams': trams,
             'rivers': [[n, [c for x, y in pts for c in (round(x, 1), round(y, 1))]] for n, pts in rivers], 'places': places, 'pois': pois,
             'bld': bld, 'bnames': names, 'bcols': cols, 'trees': ''.join(ts), 'land': lands, 'unis': unis, 'sig': sig, 'tl': tl, 'tsn': tsn}
+    if os.path.exists('train5.json'):
+        from train5 import pack
+        data.update(pack())
     js = '// Inner Brno at about 5 m a tile, from OpenStreetMap (© OpenStreetMap contributors, ODbL). Built by tools/brno5.\nwindow.BRNO5_DATA = ' + json.dumps(data, ensure_ascii=False, separators=(',', ':')) + ';\n'
     out = sys.argv[1] if len(sys.argv) > 1 else 'brno5_data.js'
     open(out, 'w').write(js)
