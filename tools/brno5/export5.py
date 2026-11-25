@@ -30,7 +30,16 @@ def clip(pts, m=1.0, eps=0.1):
         elif cur: out.append(cur); cur = []
     if cur: out.append(cur)
     return [dp(c, eps) for c in out if seglen(c) >= 1]
+def rail_pieces(lay):
+    """the railway's tracks as drawn (not in the tunnels), each piece with its OpenStreetMap way"""
+    rails, rway = [], []
+    for e in lay:
+        t = e.get('tags', {})
+        if e['type'] != 'way' or t.get('railway') not in ('rail', 'light_rail') or t.get('tunnel') == 'yes': continue
+        for c in clip([P(g['lat'], g['lon']) for g in e['geometry']], 0.5): rails.append(fl(dp(c, 0.15))); rway.append(e)
+    return rails, rway
 if __name__ == '__main__':
+    from rails5 import rail_levels
     land = np.load('land5.npy')
     net = json.load(open('net5.json'))
     R = []
@@ -41,13 +50,13 @@ if __name__ == '__main__':
         for c in ([w['pts']] if (w.get('tunnel') or w.get('over')) else clip(w['pts'])):
             R.append([nm, w['r'], w['rural'], fl(c), flag, w.get('lf', 1), w.get('lb', 1), w.get('wd', 64)])  # (lanes forward and back, carriageway px)
     lay = json.load(open('land3.json'))['elements']
-    rails, trams = [], []
+    rails, rway = rail_pieces(lay)
+    trams = []
     for e in lay:
         t = e.get('tags', {})
-        if e['type'] != 'way' or t.get('railway') not in ('rail', 'tram', 'light_rail') or t.get('tunnel') == 'yes': continue
-        pts = [P(g['lat'], g['lon']) for g in e['geometry']]
-        if t['railway'] == 'tram': trams += [fl(c, 2) for c in clip(pts, 0.5, 0.05)]  # (closely: the trams run on these, see tram5.py)
-        else: rails += [fl(dp(c, 0.15)) for c in clip(pts, 0.5)]
+        if e['type'] != 'way' or t.get('railway') != 'tram' or t.get('tunnel') == 'yes': continue
+        trams += [fl(c, 2) for c in clip([P(g['lat'], g['lon']) for g in e['geometry']], 0.5, 0.05)]  # (closely: the trams run on these, see tram5.py)
+    rlv, rx = rail_levels(rway, rails, R, json.load(open('roads.json'))['elements'])  # (which tracks are up on bridges, and how they meet the streets)
     places = [(e['tags']['name'], *P(e['lat'], e['lon'])) for e in lay if e['type'] == 'node' and 'place' in e.get('tags', {})]
     places = [[n, round(x, 1), round(y, 1)] for n, x, y in places if -150 < x < MW + 150 and -150 < y < MH + 150 and n not in ('Brno-město',)]
     places.append(['Staré Město', *[round(v, 1) for v in P(49.1951, 16.6080)]])
@@ -130,7 +139,8 @@ if __name__ == '__main__':
         tl.append([r['ref'], r['col'], r['dest'], fl(r['pts'], 2), st, [v for q in r['lv'] for v in q], r['next'], r['edge0'] | r['edge1'] << 1 | r['fed'] << 2])
     data = {'bbox': [LON0, LON1, LAT0, LAT1], 'mw': MW, 'mh': MH, 'lc': runs(land), 'roads': R, 'rails': rails, 'trams': trams,
             'rivers': [[n, [c for x, y in pts for c in (round(x, 1), round(y, 1))]] for n, pts in rivers], 'places': places, 'pois': pois,
-            'bld': bld, 'bnames': names, 'bcols': cols, 'trees': ''.join(ts), 'land': lands, 'unis': unis, 'sig': sig, 'tl': tl, 'tsn': tsn}
+            'bld': bld, 'bnames': names, 'bcols': cols, 'trees': ''.join(ts), 'land': lands, 'unis': unis, 'sig': sig, 'tl': tl, 'tsn': tsn,
+            'rlv': rlv, 'rx': rx}
     if os.path.exists('train5.json'):
         from train5 import pack
         data.update(pack())

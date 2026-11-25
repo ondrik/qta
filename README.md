@@ -45,7 +45,7 @@ To release, tag the commit (`git tag -a v7 -m "what changed"`) and push the tag 
 | V | slow motion + amplitude arrows (phasors) while superposed |
 | Space in a tank / fire truck | fire the cannon / spray water |
 | R · M | radio station · minimap (M again shows the whole map, then hides it) |
-| P / Esc · H | pause (Q on the pause screen quits to the title screen) · help (press H again for the quantum notes) · N dismisses a note |
+| P / Esc · H | pause (Q on the pause screen quits to the title screen) · help (press H again for the quantum notes, and again for your achievements) · N dismisses a note |
 | ← → · ↑ ↓ (title screen) | choose where to start · switch between the island, Brno and inner Brno in detail |
 | L (title screen) | **Physics Lab**: 10 guided lessons (L again from the pause screen to leave) |
 | O (title screen) | **online co-op** with a friend |
@@ -92,7 +92,7 @@ wanted level drops below theirs.
 
 Past five stars the state itself comes after you. You get there by staying in their sight: every 40 s they see
 you, the next level comes, and so does taking out what they send (the tank, a carrier, a bulldozer, the drone, the
-army's helicopter, the airship). Anything else you do counts for a tenth. A second row of stars, the level's name
+army's helicopter, the Helicarrier). Anything else you do counts for a tenth. A second row of stars, the level's name
 and its way out show under the first. From seven stars up a level doesn't fade by itself: only its way out ends it.
 
 | Stars | Who comes, and the way out |
@@ -101,7 +101,19 @@ and its way out show under the first. From seven stars up a level doesn't fade b
 | 7 · State of emergency | The army: checkpoints of armoured carriers and soldiers on the bridges and at the tunnel mouths ahead, carriers with mounted guns, and an attack helicopter whose rockets land where a red ring marks the street. Way out: lie low for 60 s unseen, or on foot face a wall and press T to spend an ε charge tunnelling through the building, out of their sight, or take a boat across the water and get out on a bank unseen, far from where you put out (about 75 tiles; lose the Bureau's drone first). Either takes you back to five stars. |
 | 8 · The Observer | A measurement sweep every 20 s: wherever you are, they know. No superposition or entanglement at all, no ε pickups. Jets strafe your street (a red strip marks their run). Way out: one of the entangled payphones, cyan on the map (at the Atom Array Lab and, in Brno, at FIT BUT). A Bell measurement there (press Space as the arrow crosses the window, two out of three) teleports you to the other one, and you are down to three stars. |
 | 9 · Demolition | Armoured bulldozers come straight through the buildings. Hide behind one and a wrecking crew brings it down on you, leaving rubble across the street. Fuel tankers lie jack-knifed and burning in the junctions ahead, and a crane swings a wrecking ball over a main junction. Way out: 45 s unseen in a pedestrian zone or square, back to five stars. |
-| 10 · Air assault | Swarms of kamikaze drones (a red ring marks where each dives; shoot them down), paratroopers, squads roped down from helicopters onto the street ahead, and an airship whose searchlight finds you. Way out: go to ground, through two different tunnels from end to end, unseen going in and coming out, back to five stars. On the island, with no tunnels, lie low 75 s unseen. |
+| 10 · Air assault | Swarms of kamikaze drones (a red ring marks where each dives; shoot them down), paratroopers, squads roped down from helicopters onto the street ahead, and a S.H.I.E.L.D. Helicarrier that comes in over the city and circles beside you while its searchlight hunts for you (twelve rockets bring it down; bullets pass under it). Way out: go to ground, through two different tunnels from end to end, unseen going in and coming out, back to five stars. On the island, with no tunnels, lie low 75 s unseen. |
+
+### Achievements
+
+Doing something worth remembering earns an achievement, but which things count is hidden: nothing tells you what one
+is until you have it. A card under the minimap tells you when you do. The help's last page (press H three times) has
+a tile for each, from the easiest to the hardest: gold for those you have (what they are is listed below, newest
+first), blank for the rest, but for the next one to find (the easiest you haven't that this map has), whose name
+shows as a hint. Pick a tile (arrow keys, or tap it) to read it; for one you haven't found, Enter (or a tap on its
+line) buys what to do for it, in detail, with the game's cash: the harder it is, the dearer ($500 for the easiest,
+$10,500 for the hardest). What you have bought is kept like the achievements. The title screen counts them. They are
+kept in your browser alone (local storage), and none come in a game where the debug console changed something (a new
+game clears that, unless god mode is still on). In online co-op your friend's go to their own browser.
 
 ## Fishing
 
@@ -251,7 +263,9 @@ scale a car, a street and a building are their real size.
 - **The ground as it is mapped**: squares and pedestrian streets, car parks, parks and cemeteries, railway land,
   sports grounds, woods, water and farmland (each field with its own crop), each drawn to its real outline rather
   than in 5 m tiles; the mapped street trees, and parks and woods planted at a believable density; tram tracks in the
-  streets and every track of the railway.
+  streets and every track of the railway, at its own level: the viaducts over the streets (drawn over the traffic
+  under them, see-through while you are under one), the road bridges over the tracks with their parapets, and the
+  level crossings on the sidings and industrial spurs (no passenger line in the map has one).
 - **The reservoir's south end**: the dam, the harbour at Bystrc and the lake up to Kozí horka, with boats out on
   it and two places to fish from its banks.
 - **Landmarks**, the real buildings made to look like themselves: FIT BUT (the Carthusian monastery's wings round

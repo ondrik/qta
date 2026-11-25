@@ -13,4 +13,5 @@ python3 land.py      # land use and water -> landgrid.npy, rivers.json
 python3 net.py       # the connected road network (dead ends joined up via residential streets) -> net.json
 python3 gradecheck.py net.json  # (no junction where OpenStreetMap has roads cross at different levels)
 python3 export.py    # everything, compactly -> brno_data.json
+python3 railsplit.py # the railway cut where it goes into a tunnel or up over a street, and how it meets the streets
 python3 embed.py ../../game.js
