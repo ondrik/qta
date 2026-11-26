@@ -59,7 +59,7 @@ To release, tag the commit (`git tag -a v7 -m "what changed"`) and push the tag 
 | P / Esc · H | pause (Q on the pause screen quits to the title screen) · help (press H again for the quantum notes, and again for your achievements) · N dismisses a note |
 | ← → · ↑ ↓ (title screen) | choose where to start · switch between the island and inner Brno |
 | L (title screen) | **Physics Lab**: 10 guided lessons (L again from the pause screen to leave) |
-| O (title screen) | **online co-op** with a friend |
+| O (title screen) | **online co-op** with a friend: host, then send them the link it gives you (or the room code) |
 | H (title screen) | your achievements |
 
 On phones and tablets, touch buttons appear automatically. On the title screen, tap the left half to play
@@ -69,7 +69,7 @@ For testing there is a hidden **debug console**: type `debug` while playing (bes
 act in play). `tp <place>` teleports you to a start, site, district, street, tram stop, faculty and so on (`tp <x> <y>`
 to a tile, and in Brno `tp <lat> <lon>`), `find <text>` lists the places, `where` tells you where you are,
 `wanted <n>` sets the wanted level, `car <type>` puts you in any vehicle (boats on the nearest water), `god` stops
-damage and arrests, `powerups` puts a ψ, an ε and a ♥ beside you, `squad` sends P.L.A.N.C.K.'s heroes at you, `stats` shows the frame time, the detail level
+damage and arrests, `powerups` puts one of each power-up and gun beside you, `squad` sends P.L.A.N.C.K.'s heroes at you, `stats` shows the frame time, the detail level
 and how much is being simulated, and `quality <0-5>` fixes the detail level (`quality auto` lets the game choose
 again). `help` lists the rest, Esc closes it.
 
@@ -93,9 +93,9 @@ way it blows) glide and drift, and only water carries them. Press Enter at a ban
 by another empty boat to climb across. Police boats come after you on the water, and police on the banks shoot
 across it. No superposition or tweezer on the water, and T entangles a boat only with another boat.
 
-**Power-ups** turn up at random around you every few seconds, up to eight at a time: **ψ** (a superposition
-charge), **ε** (two entanglement charges) and, once you have lost a life, a **♥** that gives it back. Walk or drive
-into one to take it. They show on the minimap in their colours, blink when they are about to go, and are gone after
+**Power-ups** turn up at random around you every few seconds, up to ten at a time: **ψ** (a superposition
+charge), **ε** (two entanglement charges), once you have lost a life a **♥** that gives it back, and the **guns** (a
+pistol, a machine gun, now and then a rocket launcher). Walk or drive into one to take it. They show on the minimap in their colours, blink when they are about to go, and are gone after
 a minute or once you leave them behind.
 
 **Quantum tunnelling**: hit a wall, in a car or on foot, and now and then you come out on its far side, at the speed

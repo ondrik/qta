@@ -2379,6 +2379,8 @@ const sfx = {
   crash: () => noise(0.25, 650, 'lowpass', 0.55),
   splat: () => noise(0.16, 380, 'lowpass', 0.6),
   punch: () => noise(0.06, 900, 'lowpass', 0.5),
+  swish: () => noise(0.09, 2600, 'bandpass', 0.2, 0.8),
+  thud: () => { noise(0.07, 700, 'lowpass', 0.6); tone(120, 0.09, 'sine', 0.22, 55); },
   pickup: () => { tone(660, 0.08, 'square', 0.07); tone(990, 0.12, 'square', 0.07, 0, now() + 0.08); },
   sealion: () => { tone(470, 0.13, 'sawtooth', 0.08, 300); tone(450, 0.13, 'sawtooth', 0.08, 290, now() + 0.22); }, // (ar! ar!)
   panda: () => { noise(0.07, 1300, 'bandpass', 0.25, 3); noise(0.07, 1100, 'bandpass', 0.25, 3, now() + 0.16); }, // (munching bamboo)
@@ -3714,13 +3716,15 @@ function cycleWeapon() {
 function fire() {
   const w = player.weapon;
   if (!w || !(player.weapons[w] > 0)) {
-    player.shootCd = 0.4; sfx.punch();
+    player.shootCd = 0.4;
     const fx = player.x + Math.cos(player.angle) * 10, fy = player.y + Math.sin(player.angle) * 10;
-    for (const p of peds) if (!p.dead && d2(p.x, p.y, fx, fy) < 12 * 12) {
-      p.hp -= 12; p.x += Math.cos(player.angle) * 6; p.y += Math.sin(player.angle) * 6;
-      if (p.hp <= 0) killPed(p, 'player'); else { p.flee = 5; p.fx = player.x; p.fy = player.y; if (p.cop) addHeat(0.5); }
-      break;
-    }
+    const side = (player.punchSide || 1) > 0 ? -1 : 1, p = peds.find(p => !p.dead && d2(p.x, p.y, fx, fy) < 12 * 12); // (left, right, left...)
+    player.punchAt = time; player.punchSide = p ? side * 2 : side; // (2: it landed)
+    if (!p) { sfx.swish(); return; }
+    sfx.thud();
+    for (let j = 0; j < 6; j++) addPart(fx + Math.cos(player.angle) * 3, fy + Math.sin(player.angle) * 3, rand(-70, 70), rand(-70, 70), 0.25, 1.8, '#fff3b0');
+    p.hp -= 12; p.x += Math.cos(player.angle) * 6; p.y += Math.sin(player.angle) * 6;
+    if (p.hp <= 0) killPed(p, 'player'); else { p.flee = 5; p.fx = player.x; p.fy = player.y; if (p.cop) addHeat(0.5); }
     return;
   }
   const wd = WEAPONS[w];
@@ -4364,7 +4368,7 @@ const PK = {
 function give(w, n) { player.weapons[w] = (player.weapons[w] || 0) + n; if (!player.weapon) player.weapon = w; }
 function placePickups() {
   pickups = [];
-  const kinds = ['pistol', 'pistol', 'pistol', 'pistol', 'smg', 'smg', 'smg', 'rocket', 'rocket', 'health', 'health', 'health', 'health',
+  const kinds = ['health', 'health', 'health', 'health', // (the guns turn up like the power-ups: see DROP)
     'bribe', 'bribe', 'bribe', 'cash', 'cash', 'cash', 'cash', 'cash', 'psi', 'psi', 'psi', 'psi', 'psi', 'ent', 'ent', 'ent', 'ent', 'ent'];
   for (const k of kinds) {
     const t = randomTile([WALK, PLAZA, GRASS], p => inCity(p.tx, p.ty) || (BRNO && DISTRICTS[REG[p.ty * MW + p.tx]].kind === 'city'));
@@ -4388,12 +4392,13 @@ function updatePickups(dt) {
   }
 }
 // ---- power-ups that turn up at random around each player, often and several at a time, and go again after a
-// minute if nobody takes them: ψ, ε, and a heart (an extra life, only while you have lost one)
+// minute if nobody takes them: ψ, ε, a heart (an extra life, only while you have lost one), and the guns
 const DROP = {
   psi: PK.psi, ent: PK.ent,
   heart: { c: '#ff4d6d', label: 'Extra life ♥', give: () => { player.lives++; }, can: () => player.lives < 5 },
+  pistol: PK.pistol, smg: PK.smg, rocket: PK.rocket,
 };
-const DROP_K = Object.keys(DROP), DROP_LIFE = 60, DROP_NEAR = 8; // (how long one waits; how many at most around a player)
+const DROP_K = Object.keys(DROP), DROP_LIFE = 60, DROP_NEAR = 10; // (how long one waits; how many at most around a player)
 let drops = [], dropId = 0;
 const dropShown = u => !(u.k === 'ent' && heat >= 8); // (from eight stars the Observer takes the ε, as with the other pickups)
 function dropNear(P0, k, min = 220, max = 850, gap = 130) {
@@ -4404,10 +4409,10 @@ function updateDrops(dt) { // (for each player: the host runs it again as the gu
   const P0 = pp();
   player.dropT = (player.dropT ?? rand(1, 3)) - dt;
   if (player.dropT <= 0 && !lab) { // (not in the lessons)
-    player.dropT = rand(3, 6);
+    player.dropT = rand(2.5, 5);
     if (drops.filter(u => d2(u.x, u.y, P0.x, P0.y) < 1200 * 1200).length < DROP_NEAR) {
-      const w = { psi: 1, ent: heat >= 8 ? 0 : 1, heart: player.lives < 5 ? 0.4 : 0 };
-      let r = Math.random() * (w.psi + w.ent + w.heart), k = 'psi';
+      const w = { psi: 1, ent: heat >= 8 ? 0 : 1, heart: player.lives < 5 ? 0.4 : 0, pistol: 0.7, smg: 0.45, rocket: 0.18 };
+      let r = Math.random() * DROP_K.reduce((a, q) => a + w[q], 0), k = 'psi';
       for (const q of DROP_K) { r -= w[q]; if (r < 0) { k = q; break; } }
       dropNear(P0, k);
     }
@@ -9039,6 +9044,19 @@ function drawMarkers() {
   if (mission && mission.type === 'barrier' && !mission.stage && onScreen(mission.x, mission.y)) { const m = mission; ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(m.x - 6, m.y - 4, 15, 13); ctx.fillStyle = '#9b6b36'; ctx.fillRect(m.x - 8, m.y - 8, 16, 16); ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 1.4; ctx.strokeRect(m.x - 7.3, m.y - 7.3, 14.6, 14.6); ctx.beginPath(); ctx.moveTo(m.x - 8, m.y - 8); ctx.lineTo(m.x + 8, m.y + 8); ctx.stroke(); ctx.fillStyle = '#3cf0ff'; ctx.fillRect(m.x - 2, m.y - 2, 4, 4); } // (the job's crate of chips)
   for (const u of drops) if (dropShown(u) && onScreen(u.x, u.y) && !(u.age > DROP_LIFE - 8 && Math.sin(time * 14) < -0.3)) drawDrop(u); // (blinking before it goes)
 }
+// a gun's silhouette (x along the barrel), tilted a little, as it lies on the ground waiting to be picked up
+function drawGun(k, x, y, s) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.rotate(-0.35);
+  const R = (a, b, w, h) => ctx.fillRect(a, b, w, h);
+  ctx.fillStyle = '#1c1f22';
+  if (k === 'pistol') { R(-5, -2.6, 11, 3.6); R(-5, 0.6, 3.6, 5.4); R(-1.6, 0.8, 2.4, 1.8); }
+  else if (k === 'smg') { R(-6.5, -2.5, 13, 3.8); R(6.5, -1.7, 3.5, 1.7); R(-0.6, 1, 2.8, 6.4); R(-5.2, 1, 3, 4.2); R(-11, -1.7, 4.8, 2.3); }
+  else {
+    ctx.fillStyle = '#556b2f'; R(-10.5, -2.5, 19.5, 5); ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.moveTo(9, -2.5); ctx.lineTo(13.5, 0); ctx.lineTo(9, 2.5); ctx.fill();
+    ctx.fillStyle = '#1c1f22'; R(-2.5, 2.3, 2.8, 4.2); R(-11.5, -3, 1.6, 6);
+  }
+  ctx.restore();
+}
 // a power-up that turned up: it pops in, then bobs like the others; ψ and ε look like theirs, the heart is a heart
 function drawDrop(u) {
   const bob = Math.sin(time * 4 + u.x) * 2, s = u.age < 0.25 ? u.age / 0.25 * 1.2 : Math.max(1, 1.2 - (u.age - 0.25) / 0.15 * 0.2); // (a little overshoot)
@@ -9050,9 +9068,30 @@ function drawDrop(u) {
     return;
   }
   const pk = DROP[u.k], h = 8 * s;
+  if (WEAPONS[u.k]) {
+    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(u.x + 1.5, u.y + 4, 9 * s, 6 * s, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(246,241,222,.95)'; ctx.beginPath(); ctx.arc(u.x, u.y - 1 + bob, 9.5 * s, 0, TAU); ctx.fill();
+    ctx.strokeStyle = u.k === 'rocket' ? '#e74c3c' : u.k === 'smg' ? '#34495e' : '#7f8c8d'; ctx.lineWidth = 1.6; ctx.stroke();
+    drawGun(u.k, u.x, u.y - 1 + bob, s * 0.78);
+    return;
+  }
   ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(u.x - 7 * s, u.y - 4 * s, 14 * s, 12 * s);
   ctx.fillStyle = pk.c; ctx.fillRect(u.x - h, u.y - 1 - h + bob, 2 * h, 2 * h);
   ctx.fillStyle = '#111'; ctx.font = `bold ${Math.max(1, 11 * s).toFixed(1)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pk.l, u.x, u.y + 3 * s + bob);
+}
+// a punch, in the puncher's own frame (x ahead): the arm out fast and back slower, speed lines, a burst if it landed
+function drawPunch(p, t) {
+  const sd = Math.sign(p.punchSide || 1), e = t < 0.07 ? t / 0.07 : Math.max(0, 1 - (t - 0.07) / 0.19);
+  const fx = 1.5 + e * 9.5, fy = sd * (4.2 - e * 3);
+  ctx.strokeStyle = p.shirt; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(0, sd * 4); ctx.lineTo(fx, fy); ctx.stroke(); ctx.lineCap = 'butt';
+  if (e > 0.5) { ctx.strokeStyle = `rgba(255,255,255,${((e - 0.5) * 1.1).toFixed(2)})`; ctx.lineWidth = 0.8; ctx.beginPath(); for (const o of [-1.7, 1.7]) { ctx.moveTo(fx - 8, fy + o); ctx.lineTo(fx - 3.5, fy + o * 0.6); } ctx.stroke(); }
+  ctx.fillStyle = p.skin; ctx.beginPath(); ctx.arc(fx, fy, 2.2, 0, TAU); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 0.6; ctx.stroke();
+  if (Math.abs(p.punchSide) > 1 && t > 0.05 && t < 0.24) {
+    const k = (t - 0.05) / 0.19, r0 = 2 + k * 3, r1 = 4.5 + k * 6;
+    ctx.strokeStyle = `rgba(255,236,140,${(1 - k).toFixed(2)})`; ctx.lineWidth = 1.3; ctx.beginPath();
+    for (let i = 0; i < 7; i++) { const a = i / 7 * TAU + 0.3; ctx.moveTo(fx + 3 + Math.cos(a) * r0, fy + Math.sin(a) * r0); ctx.lineTo(fx + 3 + Math.cos(a) * r1, fy + Math.sin(a) * r1); }
+    ctx.stroke();
+  }
 }
 function drawPed(p, isPlayer) {
   ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.angle);
@@ -9071,6 +9110,8 @@ function drawPed(p, isPlayer) {
   if (p.fan) { ctx.fillStyle = p.shirt === '#f4f4f4' ? '#1d4fa0' : '#f4f4f4'; ctx.fillRect(-0.9, -5.4, 1.8, 10.8); } // (and a scarf in the other colour)
   if (isPlayer && player.weapon) { ctx.fillStyle = '#111'; ctx.fillRect(3, 1.5, player.weapon === 'rocket' ? 11 : 7, player.weapon === 'rocket' ? 3 : 2); }
   else if (p.cop) { ctx.fillStyle = '#111'; ctx.fillRect(3, 1.5, p.swat ? 9 : 6, p.swat ? 2.6 : 2); }
+  const pt = time - (p.punchAt ?? -9);
+  if (pt >= 0 && pt < 0.26) drawPunch(p, pt);
   ctx.fillStyle = p.skin; ctx.beginPath(); ctx.arc(0.5, 0, 3, 0, TAU); ctx.fill();
   ctx.fillStyle = p.hair; ctx.beginPath(); ctx.arc(-0.5, 0, 3, Math.PI * 0.5, Math.PI * 1.5); ctx.fill();
   if (p.cop) { ctx.fillStyle = p.army ? '#3b4a1f' : p.swat ? '#121418' : '#0d1b4a'; ctx.beginPath(); ctx.arc(0, 0, p.swat ? 3.6 : 3.2, 0, TAU); ctx.fill(); }
@@ -11520,8 +11561,8 @@ function hostSnap() {
   const pk = pickups.map(u => u.cd > 0 ? 0 : 1).join('');
   const snap = { t: 's', time: +time.toFixed(2), dayT: +dayT.toFixed(5), dn: dayN, heat: +heat.toFixed(2), bel: [belief.x | 0, belief.y | 0, belief.sig | 0, belief.seen ? 1 : 0],
     fl: flight.on ? [flight.x | 0, +flight.alt.toFixed(2)] : 0, TR, he: heli ? [heli.x | 0, heli.y | 0, +heli.angle.toFixed(2), +heli.rot.toFixed(2), heli.dead ? 1 : 0, +(heli.fall || 0).toFixed(2), heli.army ? 1 : 0] : 0, C, P, B, hq: HQ,
-    me: [gp.x | 0, gp.y | 0, +gp.angle.toFixed(2), gp.hp | 0, gp.car ? nid(gp.car) : 0, gp.weapons, gp.weapon, gp.cash | 0, gp.lives, gp.mult, +gp.down.toFixed(2), gp.downKind, gp.moving ? 1 : 0, +gp.anim.toFixed(1), gq.psi, gq.ent, gq.link ? nid(gq.link) : 0, gq.branches ? gq.branches.map(b => [b.x | 0, b.y | 0, +b.angle.toFixed(2), b.tint, +(b.amp || 0).toFixed(2)]) : 0, +(gp.tunT ?? time).toFixed(1)],
-    ho: [player.x | 0, player.y | 0, +player.angle.toFixed(2), player.car ? nid(player.car) : 0, player.hidden || (player.down && player.downKind === 'busted') ? 1 : 0, player.moving ? 1 : 0, +player.anim.toFixed(1), player.down && player.downKind === 'wasted' ? 1 : 0],
+    me: [gp.x | 0, gp.y | 0, +gp.angle.toFixed(2), gp.hp | 0, gp.car ? nid(gp.car) : 0, gp.weapons, gp.weapon, gp.cash | 0, gp.lives, gp.mult, +gp.down.toFixed(2), gp.downKind, gp.moving ? 1 : 0, +gp.anim.toFixed(1), gq.psi, gq.ent, gq.link ? nid(gq.link) : 0, gq.branches ? gq.branches.map(b => [b.x | 0, b.y | 0, +b.angle.toFixed(2), b.tint, +(b.amp || 0).toFixed(2)]) : 0, +(gp.tunT ?? time).toFixed(1), +(gp.punchAt ?? -9).toFixed(2), gp.punchSide || 1],
+    ho: [player.x | 0, player.y | 0, +player.angle.toFixed(2), player.car ? nid(player.car) : 0, player.hidden || (player.down && player.downKind === 'busted') ? 1 : 0, player.moving ? 1 : 0, +player.anim.toFixed(1), player.down && player.downKind === 'wasted' ? 1 : 0, +(player.punchAt ?? -9).toFixed(2), player.punchSide || 1],
     mt: tg ? [tg.x | 0, tg.y | 0, mission ? 1 : 0] : 0, ml, dr: drops.map(u => [u.id, u.x | 0, u.y | 0, DROP_K.indexOf(u.k), +u.age.toFixed(1)]), rg: ringing ? BOOTHS.indexOf(ringing) : -1, ev: NET.ev };
   if (pk !== NET.pkSent) { snap.pk = pk; NET.pkSent = pk; }
   NET.ev = [];
@@ -11585,15 +11626,15 @@ function guestApply(d) {
   cars = cars.filter(c => c.type); // (never draw something whose looks haven't arrived)
   bullets = d.B.map(([x, y, r]) => ({ x, y, rocket: !!r }));
   if (d.TR) { const old = new Map(trams.map(t => [t.id, t])); trams = d.TR.map(([id, ri, s, pi, mi, f, v]) => { const R = TL[ri]; let t = old.get(id); if (!t) { t = newTram(R, s, null, TRAM_MODELS[mi]); t.id = id; } if (t.R !== R) { t.R = R; t.s = s; } t.ts = s; t.prev = pi >= 0 ? TL[pi] : null; t.v = v; t.doors = f & 1; t.dead = !!(f & 2); return t; }); }
-  const [x, y, a, hp, car, w, wp, cash, lives, mult, down, dk, mv, an, psi, ent2, link, br, tunT] = d.me;
+  const [x, y, a, hp, car, w, wp, cash, lives, mult, down, dk, mv, an, psi, ent2, link, br, tunT, pAt, pSide] = d.me;
   if (tunT !== undefined) player.tunT = tunT;
-  Object.assign(player, { tx: x, ty: y, ta: a, hp, weapons: w, weapon: wp, cash, lives, mult, down, downKind: dk, moving: !!mv, anim: an });
+  Object.assign(player, { tx: x, ty: y, ta: a, hp, weapons: w, weapon: wp, cash, lives, mult, down, downKind: dk, moving: !!mv, anim: an, punchAt: pAt ?? -9, punchSide: pSide || 1 });
   if (Math.hypot(player.x - x, player.y - y) > 300) { player.x = x; player.y = y; }
   player.car = car ? E.get(car) || null : null;
   Q.psi = psi; Q.ent = ent2; Q.link = link ? E.get(link) || null : null;
   Q.branches = br ? br.map(([bx, by, ba, tint, amp]) => ({ x: bx, y: by, angle: ba, tint, amp })) : null;
-  const [hx, hy, ha, hcar, hid, hmv, han, hdead] = d.ho;
-  NET.other = { x: hx, y: hy, angle: ha, car: hcar, hidden: !!hid, moving: !!hmv, anim: han, dead: !!hdead, shirt: '#ff7a1a', skin: '#e0ac69', hair: '#1a1a1a', pants: '#1e2a3a' };
+  const [hx, hy, ha, hcar, hid, hmv, han, hdead, hpAt, hpSide] = d.ho;
+  NET.other = { x: hx, y: hy, angle: ha, car: hcar, hidden: !!hid, moving: !!hmv, anim: han, dead: !!hdead, punchAt: hpAt ?? -9, punchSide: hpSide || 1, shirt: '#ff7a1a', skin: '#e0ac69', hair: '#1a1a1a', pants: '#1e2a3a' };
   NET.mt = d.mt; NET.mx = d.ml; ringing = d.rg >= 0 ? BOOTHS[d.rg] : null;
   if (d.pk) pickups.forEach((u, i) => { u.cd = d.pk[i] === '1' ? 0 : 1; });
   if (d.dr) drops = d.dr.map(([id, x, y, k, age]) => ({ id, x, y, k: DROP_K[k], age }));
@@ -11661,6 +11702,10 @@ function netPanel(show) {
       '<div style="display:flex;gap:8px"><input data-a="code" maxlength="5" placeholder="ROOM CODE" style="flex:1;min-width:0;padding:8px;font:bold 16px ui-monospace,monospace;text-transform:uppercase;text-align:center;border-radius:8px;border:1px solid #556;background:#1b2030;color:#fff">' +
       '<button data-a="join" style="padding:8px 14px;font:bold 15px system-ui;border-radius:8px;border:0;background:#7dffd8;color:#123;cursor:pointer">Join</button></div>' +
       '<div data-a="status" style="min-height:22px;margin-top:12px;color:#9fd0ff"></div>' +
+      '<div data-a="invite" style="display:none;margin-top:6px"><div style="color:#aab;font-size:13px;margin-bottom:4px">Send your friend this link: it opens the game and joins your room.</div>' +
+      '<div style="display:flex;gap:6px"><input data-a="url" readonly style="flex:1;min-width:0;padding:6px 8px;font:12px ui-monospace,monospace;border-radius:8px;border:1px solid #556;background:#1b2030;color:#cfe">' +
+      '<button data-a="copy" style="padding:6px 12px;font:bold 13px system-ui;border-radius:8px;border:0;background:#ffd54a;color:#222;cursor:pointer">Copy</button>' +
+      '<button data-a="share" style="display:none;padding:6px 12px;font:bold 13px system-ui;border-radius:8px;border:0;background:#7dffd8;color:#123;cursor:pointer">Share</button></div></div>' +
       '<div style="margin-top:8px;font-size:12px;color:#778">Rooms are matched through the free PeerJS service; the game itself runs directly between your browsers.</div>' +
       '<button data-a="close" style="margin-top:10px;padding:5px 14px;border-radius:8px;border:1px solid #556;background:none;color:#ccd;cursor:pointer">Close</button>';
     document.body.appendChild(netEl);
@@ -11669,17 +11714,25 @@ function netPanel(show) {
     q('join').onclick = () => joinNet(q('code').value);
     q('code').onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') joinNet(q('code').value); };
     q('close').onclick = () => netPanel(false);
+    q('url').onfocus = () => q('url').select();
+    q('copy').onclick = () => { const u = q('url').value, ok = () => netStatus(`Link copied (room ${NET.code}): send it to your friend.`);
+      const old = () => { q('url').select(); try { if (document.execCommand('copy')) ok(); } catch (e) { /* select it by hand */ } };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(u).then(ok, old); else old(); };
+    if (navigator.share) { q('share').style.display = ''; q('share').onclick = () => navigator.share({ title: 'Quant Theft Auto', text: `Join my game of Quant Theft Auto (room ${NET.code})`, url: q('url').value }).catch(() => {}); }
     netEl.addEventListener('keydown', e => e.stopPropagation());
   }
   netEl.style.display = show ? 'block' : 'none';
 }
 const netStatus = t => { if (netEl) netEl.querySelector('[data-a="status"]').textContent = t; };
+// the link that joins a room: this very page (so this version of the game), on this map, with the room's code
+function inviteUrl(code) { const u = new URL(location.href); u.search = ''; u.hash = ''; u.searchParams.set('map', MAP_ID); u.searchParams.set('join', code); return u.toString(); }
+function netInvite(code) { if (!netEl) return; const q = a => netEl.querySelector(`[data-a="${a}"]`); q('url').value = code ? inviteUrl(code) : ''; q('invite').style.display = code ? 'block' : 'none'; }
 async function hostNet() {
   if (NET.peer) return;
   try { netStatus('Opening a room…'); await loadPeer(); } catch (e) { netStatus('Could not reach the PeerJS service.'); return; }
   const code = Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
   NET.peer = new window.Peer('qta-room-' + code.toLowerCase()); NET.code = code;
-  NET.peer.on('open', () => netStatus(`Room code: ${code} · waiting for your friend…`));
+  NET.peer.on('open', () => { netStatus(`Room code: ${code} · waiting for your friend…`); netInvite(code); });
   NET.peer.on('error', e => { netStatus('Network trouble: ' + (e.type || e.message)); });
   NET.peer.on('connection', c => {
     if (NET.conn) { c.on('open', () => c.close()); return; }
@@ -11692,7 +11745,7 @@ async function hostNet() {
 function netHostOpen(c) {
   if (state !== 'play') newGame();
   c.send({ t: 'hello', map: MAP_ID, pk: pickups.map(u => [u.x, u.y, u.k]) });
-  addGuest(); netPanel(false);
+  addGuest(); netPanel(false); netInvite(null);
 }
 async function joinNet(code) {
   code = (code || '').trim().toUpperCase(); if (code.length !== 5) { netStatus('Type the five-letter room code.'); return; }
@@ -11709,8 +11762,14 @@ async function joinNet(code) {
 }
 // tests and the map switch use the same entry points without a network: attach any {send, on} pair
 function netAttach(role, c) { NET.conn = c; NET.role = role; if (role === 'host') { c.on('data', onHostData); netHostOpen(c); } else { c.on('data', onGuestData); NET.last = performance.now() + 10000; } }
-// after a map switch the guest rejoins on its own
-try { const pj = sessionStorage.getItem('qta.join'); if (pj) { sessionStorage.removeItem('qta.join'); setTimeout(() => { netPanel(true); joinNet(pj); }, 300); } } catch (e) { /* ignore */ }
+// after a map switch the guest rejoins on its own; an invitation link (?join=CODE) joins its room straight away (the
+// code then leaves the address, so that a reload later doesn't knock on a room long closed)
+try {
+  let pj = sessionStorage.getItem('qta.join'); if (pj) sessionStorage.removeItem('qta.join');
+  const u = new URL(location.href), lj = u.searchParams.get('join');
+  if (lj) { pj = pj || lj; u.searchParams.delete('join'); history.replaceState(null, '', u.toString()); }
+  if (pj) setTimeout(() => { netPanel(true); joinNet(pj); }, 300);
+} catch (e) { /* ignore */ }
 
 // ============================================================ game flow
 function resetWorld() {
@@ -11899,7 +11958,7 @@ function dbgRun(line) {
       'god               toggle: no damage, no arrest',
       'stats             toggle: frame time and what is simulated',
       'quality [auto|0-5] the detail level: 0 the sharpest, 3 plain walls and roofs, 5 the fewest pixels',
-      'cash <n> · time <hour> · day <mon..sun> · charges (refill ψ and ε) · powerups (ψ, ε and ♥ beside you) · squad (send the heroes) · wind <deg> · hantec · close'].join('\n');
+      'cash <n> · time <hour> · day <mon..sun> · charges (refill ψ and ε) · powerups (ψ, ε, ♥ and the guns beside you) · squad (send the heroes) · wind <deg> · hantec · close'].join('\n');
     case 'close': case 'exit': dbgShow(false); return '';
     case 'tp': case 'teleport': case 'goto': {
       if (!a.length) return 'tp <place> or tp <x> <y>';
