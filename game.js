@@ -5,9 +5,9 @@
 // ============================================================ canvas
 const cv = document.getElementById('c');
 let ctx = cv.getContext('2d'); // reassigned briefly while ground chunks are rendered
-let W = 0, H = 0, DPR = 1;
+let W = 0, H = 0, DPR = 1, QCAP = 2; // (QCAP: at most this many pixels to a CSS pixel; lowered on a slow machine, see qualTick)
 function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  DPR = Math.min(window.devicePixelRatio || 1, 2, QCAP);
   W = innerWidth; H = innerHeight;
   cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
 }
@@ -6995,7 +6995,8 @@ function drawStreetNames(v) {
   const z = cam.zoom; if (z < 0.4) return;
   const fs = Math.min(17, 11.5 / z), gap = 1000 / Math.min(1.3, z);
   ctx.font = `bold ${fs.toFixed(1)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-  for (const e of EDGES) {
+  if (!NGRID) NGRID = cellIndex(EDGES, e => e.pts.reduce((b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)], [1e9, 1e9, -1e9, -1e9]));
+  for (const e of cellQuery(NGRID, v.x0, v.y0, v.x1, v.y1)) {
     if (!e.name || e.tunnel || e.over) continue;
     const bb = e.nbb || (e.nbb = e.pts.reduce((b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)], [1e9, 1e9, -1e9, -1e9]));
     if (bb[2] < v.x0 || bb[0] > v.x1 || bb[3] < v.y0 || bb[1] > v.y1) continue;
@@ -7182,7 +7183,7 @@ function drawGroundStatic(v) {
     ctx.fillStyle = '#d4b23a'; ctx.fillRect(A.rx0, A.ry1 + 40, A.rx1 - A.rx0, 3); ctx.fillRect(A.rx0 + 300, A.ry1, 3, 40);
   }
   ctx.fillStyle = '#2b2b2b';
-  for (const l of lamps) if (!l.c && l.x > v.x0 - 4 && l.x < v.x1 + 4 && l.y > v.y0 - 4 && l.y < v.y1 + 4) { ctx.beginPath(); ctx.arc(l.x, l.y, 2.5, 0, TAU); ctx.fill(); }
+  for (const l of lampsNear(v, 4)) if (!l.c && l.x > v.x0 - 4 && l.x < v.x1 + 4 && l.y > v.y0 - 4 && l.y < v.y1 + 4) { ctx.beginPath(); ctx.arc(l.x, l.y, 2.5, 0, TAU); ctx.fill(); }
 }
 
 // ---- props on the ground: graves, benches, fountains, flags...
@@ -7194,6 +7195,28 @@ function inView(g, v, m, fn) {
     for (const o of a) if (o.x > v.x0 - m && o.x < v.x1 + m && o.y > v.y0 - m && o.y < v.y1 + m) fn(o);
   }
 }
+// the same for long lists of things with an extent (inner Brno's 52,000 buildings, 37,000 street lamps, its streets):
+// each item is filed under every cell its box touches, and what may be in a rectangle comes back in the list's own
+// order, so whatever is then picked out of it is drawn just as from the whole list
+function cellIndex(list, box) {
+  const C = 256, nx = Math.ceil(MW * T / C) + 1, ny = Math.ceil(MH * T / C) + 1, cells = new Array(nx * ny);
+  list.forEach((o, i) => {
+    const [x0, y0, x1, y1] = box(o), a = clamp(Math.floor(x0 / C), 0, nx - 1), b = clamp(Math.floor(x1 / C), 0, nx - 1), c = clamp(Math.floor(y0 / C), 0, ny - 1), d = clamp(Math.floor(y1 / C), 0, ny - 1);
+    for (let cy = c; cy <= d; cy++) for (let cx = a; cx <= b; cx++) (cells[cy * nx + cx] || (cells[cy * nx + cx] = [])).push(i);
+  });
+  return { list, C, nx, ny, cells, seen: new Uint32Array(list.length), stamp: 0 };
+}
+function cellQuery(G, x0, y0, x1, y1) { // (every item whose box overlaps the rectangle, and some near it)
+  const { C, nx, ny, cells, seen } = G, st = ++G.stamp, ids = [];
+  const a = clamp(Math.floor(x0 / C), 0, nx - 1), b = clamp(Math.floor(x1 / C), 0, nx - 1), c = clamp(Math.floor(y0 / C), 0, ny - 1), d = clamp(Math.floor(y1 / C), 0, ny - 1);
+  for (let cy = c; cy <= d; cy++) for (let cx = a; cx <= b; cx++) { const L = cells[cy * nx + cx]; if (L) for (const i of L) if (seen[i] !== st) { seen[i] = st; ids.push(i); } }
+  ids.sort((p, q) => p - q);
+  return ids.map(i => G.list[i]);
+}
+let BGRID = null, LAMPG = null, NGRID = null, B_TOP = 0;
+const bGrid = () => BGRID || (B_TOP = buildings.reduce((m, b) => Math.max(m, b.top), 0), BGRID = cellIndex(buildings, b => [b.x, b.y, b.x + b.w, b.y + b.h]));
+const lGrid = () => LAMPG || (LAMPG = cellIndex(lamps, p => [p.x, p.y, p.x, p.y]));
+const lampsNear = (v, m) => cellQuery(lGrid(), v.x0 - m, v.y0 - m, v.x1 + m, v.y1 + m); // (m: at least the margin tested)
 let TGRID = null, PGRID = null;
 function drawProps(v) {
   if (!PGRID) PGRID = gridOf(props);
@@ -7483,8 +7506,8 @@ function drawShadows(v) {
   if (!SUN.on) return;
   const h = dayT * 24, a = 0.32 * (1 - NIGHT) * clamp(Math.min(h - 5.5, 18.5 - h), 0, 1);
   if (a < 0.02) return;
-  const L = SUN.len * HC, p = new Path2D();
-  for (const b of buildings) {
+  const G = bGrid(), L = SUN.len * HC, p = new Path2D(), R = B_TOP * L * Math.max(Math.abs(SUN.sx), Math.abs(SUN.sy)) + 1; // (B_TOP: set as the index is made)
+  for (const b of cellQuery(G, v.x0 - R, v.y0 - R, v.x1 + R, v.y1 + R)) { // (as far round the view as the tallest one's shadow reaches)
     const ox = SUN.sx * L * b.top, oy = SUN.sy * L * b.top;
     if (b.x + Math.min(0, ox) > v.x1 || b.x + b.w + Math.max(0, ox) < v.x0 || b.y + Math.min(0, oy) > v.y1 || b.y + b.h + Math.max(0, oy) < v.y0) continue;
     if (b.wr) { // a real outline: each wall facing away from the sun swept along the shadow (the rest falls under the building)
@@ -7555,7 +7578,7 @@ function drawWall(b, ax, ay, bx, by, nx, ny, i, z0, z1, win, top) {
   const depth = Math.hypot(A1x - A0x, A1y - A0y), len = Math.hypot(bx - ax, by - ay);
   // the wall's material, mapped with u along the wall and v up it (the chimney is the only box drawn without a top flag)
   const mat = top === undefined ? 'brick' : wallMat(b), wt = WTEX[mat];
-  if (wt && depth > 2.5) {
+  if (TEX && wt && depth > 2.5) {
     const hz = (z1 - z0) * HC, ux = (B0x - A0x) / len, uy = (B0y - A0y) / len;
     const vx = (A1x + B1x - A0x - B0x) / (2 * hz), vy = (A1y + B1y - A0y - B0y) / (2 * hz);
     wt.setTransform(setPM(ux / 2, uy / 2, -vx / 2, -vy / 2, A0x, A0y));
@@ -7632,7 +7655,7 @@ function drawWall(b, ax, ay, bx, by, nx, ny, i, z0, z1, win, top) {
     }
   }
 }
-let TEXA = 1; // how strongly wall and roof textures show (they fade into the dark at night)
+let TEXA = 1, TEX = true; // how strongly wall and roof textures show (they fade into the dark at night); TEX: whether they are drawn at all
 const proj = (x, y, z) => { const k = 1 + z; return [cam.x + (x - cam.x) * k, cam.y + (y - cam.y) * k]; };
 function polyFill(pts) { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); ctx.fill(); }
 // sloped roofs: gable (ridge plus two triangular end walls) or hip (four slopes; a square hip is a spire)
@@ -7681,7 +7704,7 @@ function drawFaces(b, faces) {
     ctx.fillStyle = tint(f.c, f.L); polyFill(f.q);
     // tiles or slates on the slopes, the wall's material on gable ends: x along the eave, y down the slope
     const tx = f.wall ? WTEX[wallMat(b)] : roofMat(b);
-    if (tx) {
+    if (TEX && tx) {
       const p = f.p, q = f.q, n = p.length, top = f.top || (n === 4 ? [(p[2][0] + p[3][0]) / 2, (p[2][1] + p[3][1]) / 2, p[2][2]] : p[2]);
       const qt = f.top ? proj(top[0], top[1], top[2]) : n === 4 ? [(q[2][0] + q[3][0]) / 2, (q[2][1] + q[3][1]) / 2] : q[2];
       const eLen = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]), sLen = Math.hypot(top[0] - (p[0][0] + p[1][0]) / 2, top[1] - (p[0][1] + p[1][1]) / 2, (top[2] - p[0][2]) * HC);
@@ -7792,7 +7815,7 @@ function flatRoof(b, x0, y0, x1, y1, z, top, deco) { // (deco: only what stands 
     ctx.fillStyle = tint(b.roof, L * 1.15); ctx.fillRect(rx, ry, rw, rh);
     ctx.fillStyle = tint(b.roof, L); ctx.fillRect(rx + 3 * k, ry + 3 * k, rw - 6 * k, rh - 6 * k);
   }
-  if (b.kind !== 'stadium' && !deco) { // roofing: corrugated sheet, gravel or bitumen membrane, fixed to the building as it sways with parallax
+  if (b.kind !== 'stadium' && !deco && TEX) { // roofing: corrugated sheet, gravel or bitumen membrane, fixed to the building as it sways with parallax
     const ware = b.style === 'ware', rt = ware ? RTEX.corr : !b.kind && b.style === 'flat' && (b.sd & 3) === 0 ? RTEX.gravel : RTEX.membrane;
     const ox = cam.x * (1 - k) + (b.sd % 61) * k, oy = cam.y * (1 - k) + (b.sd % 37) * k, i = b.style === 'glass' ? 2 * k : 3 * k;
     rt.setTransform(ware && rw <= rh ? setPM(0, k / 2, k / 2, 0, ox, oy) : setPM(k / 2, 0, 0, k / 2, ox, oy));
@@ -7947,7 +7970,7 @@ function drawCanopy(b) {
 function drawBuildings(v) {
   const cx = cam.x, cy = cam.y, list = [];
   TEXA = 1 - 0.55 * NIGHT;
-  for (const b of buildings) if (b.x < v.x1 + 260 && b.x + b.w > v.x0 - 260 && b.y < v.y1 + 260 && b.y + b.h > v.y0 - 260) list.push(b);
+  for (const b of cellQuery(bGrid(), v.x0 - 260, v.y0 - 260, v.x1 + 260, v.y1 + 260)) if (b.x < v.x1 + 260 && b.x + b.w > v.x0 - 260 && b.y < v.y1 + 260 && b.y + b.h > v.y0 - 260) list.push(b);
   list.sort((a, b) => d2(b.x + b.w / 2, b.y + b.h / 2, cx, cy) - d2(a.x + a.w / 2, a.y + a.h / 2, cx, cy));
   const glow = [];
   for (const b of list) {
@@ -8097,7 +8120,7 @@ function polyFlat(b) {
   ringPath(inner, z); ctx.fillStyle = tint(b.roof, L); ctx.fill('evenodd');
   const ware = b.style === 'ware', rt = ware ? RTEX.corr : !b.kind && b.style === 'flat' && (b.sd & 3) === 0 ? RTEX.gravel : RTEX.membrane;
   const ox = cam.x * (1 - k) + (b.sd % 61) * k, oy = cam.y * (1 - k) + (b.sd % 37) * k;
-  rt.setTransform(setPM(k / 2, 0, 0, k / 2, ox, oy)); ctx.fillStyle = rt; ctx.globalAlpha = TEXA * 0.9; ctx.fill('evenodd'); ctx.globalAlpha = 1;
+  if (TEX) { rt.setTransform(setPM(k / 2, 0, 0, k / 2, ox, oy)); ctx.fillStyle = rt; ctx.globalAlpha = TEXA * 0.9; ctx.fill('evenodd'); ctx.globalAlpha = 1; }
   if (SUN.on && !glass) { // the parapet's shadow along the inside of the edges the sun comes over
     const a = 0.16 * (1 - NIGHT), dx = SUN.sx * Math.min(SUN.len, 2) * 3, dy = SUN.sy * Math.min(SUN.len, 2) * 3;
     ctx.save(); ringPath(inner, z); ctx.clip('evenodd'); ctx.fillStyle = `rgba(0,0,0,${a})`;
@@ -8774,7 +8797,7 @@ function drawLighting(v) {
   l.globalCompositeOperation = 'destination-out';
   l.setTransform(z, 0, 0, z, lw / 2 - cam.x * z, lh / 2 - cam.y * z);
   const vis = (x, y, m) => x > v.x0 - m && x < v.x1 + m && y > v.y0 - m && y < v.y1 + m;
-  for (const p of lamps) if (vis(p.x, p.y, p.r)) l.drawImage(glowSpr, p.x - p.r, p.y - p.r, p.r * 2, p.r * 2);
+  for (const p of lampsNear(v, 85)) if (vis(p.x, p.y, p.r)) l.drawImage(glowSpr, p.x - p.r, p.y - p.r, p.r * 2, p.r * 2); // (no lamp's light reaches further than 85)
   for (const c of cars) {
     if (c.dead || c.lay === 1 || !vis(c.x, c.y, 160)) continue;
     if (c.driver) { // headlights, and a faint light that keeps the car's own shape (no halo on the road round it)
@@ -8801,7 +8824,7 @@ function drawLighting(v) {
   ctx.save(); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.drawImage(lightCv, 0, 0, W, H); ctx.restore();
   if (dk > 0.15) { // coloured light sources on top
     ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = dk;
-    for (const p of lamps) if (vis(p.x, p.y, 10)) { ctx.fillStyle = p.c || 'rgba(255,220,140,.9)'; ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, TAU); ctx.fill(); }
+    for (const p of lampsNear(v, 10)) if (vis(p.x, p.y, 10)) { ctx.fillStyle = p.c || 'rgba(255,220,140,.9)'; ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, TAU); ctx.fill(); }
     if (fp && player.fish.ph !== 'bite') { ctx.fillStyle = 'rgba(120,255,140,.9)'; ctx.beginPath(); ctx.arc(fp[0], fp[1], 1.8, 0, TAU); ctx.fill(); } // (the float's glow stick)
     forLights(v, (n, poles) => { for (const p of poles) { ctx.fillStyle = SIG[sigCol(n, p.g)]; ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, TAU); ctx.fill(); } });
     const on = Math.sin(time * 18) > 0;
@@ -10881,7 +10904,7 @@ function dbgTeleport(x, y) {
 }
 function dbgRun(line) {
   const [cmd, ...a] = line.split(/\s+/), rest = a.join(' '), num = a.map(Number);
-  if (!['help', '?', 'where', 'find', 'stats', 'close', 'hantec', ''].includes(cmd.toLowerCase())) DBG.used = true; // (no achievements in this game)
+  if (!['help', '?', 'where', 'find', 'stats', 'quality', 'detail', 'close', 'hantec', ''].includes(cmd.toLowerCase())) DBG.used = true; // (no achievements in this game)
   switch (cmd.toLowerCase()) {
     case 'help': case '?': return [
       'tp <place>        teleport (a start, site, district, street, tram stop, faculty, hospital, police, jetty 1, payphone 1, harbour...)',
@@ -10892,6 +10915,7 @@ function dbgRun(line) {
       'car <type>        a vehicle by you, and you in it (car list: the types)',
       'god               toggle: no damage, no arrest',
       'stats             toggle: frame time and what is simulated',
+      'quality [auto|0-5] the detail level: 0 the sharpest, 3 plain walls and roofs, 5 the fewest pixels',
       'cash <n> · time <hour> · day <mon..sun> · charges (refill ψ and ε) · wind <deg> · hantec · close'].join('\n');
     case 'close': case 'exit': dbgShow(false); return '';
     case 'tp': case 'teleport': case 'goto': {
@@ -10924,6 +10948,10 @@ function dbgRun(line) {
     }
     case 'god': DBG.god = !DBG.god; return 'god mode ' + (DBG.god ? 'on' : 'off');
     case 'stats': DBG.stats = !DBG.stats; return 'stats ' + (DBG.stats ? 'on' : 'off');
+    case 'quality': case 'detail':
+      if ((a[0] || '').toLowerCase() === 'auto') { QA.fix = -1; QA.lock = false; QA.down = null; QA.up = -1; QA.tries.fill(0); qualSet(0); return qualSay(); }
+      if (a.length && isFinite(num[0])) { QA.fix = clamp(Math.round(num[0]), 0, QUAL.length - 1); QA.down = null; QA.up = -1; qualSet(QA.fix); }
+      return qualSay();
     case 'cash': player.cash = num[0] || 0; return `cash $${player.cash}`;
     case 'day': { const i = WDAYS.findIndex(d => d.toLowerCase() === (a[0] || '').slice(0, 3).toLowerCase()); if (i < 0) return 'day <mon|tue|wed|thu|fri|sat|sun>'; dayN += ((i - weekday()) % 7 + 7) % 7; EGG.h = null; return `it is ${WDAYS[i]}`; }
     case 'hantec': hantecToggle(); return 'Hantec ' + (HANTEC_ON ? 'on' : 'off');
@@ -10940,14 +10968,59 @@ function dbgTick() {
   const c = player.car, t = c && c.tram;
   if (t) { if (!t.dead) t.hp = t.hp0; } else if (c) { c.hp = CT[c.type].hp; c.fire = 0; }
 }
+// ---- detail: on a machine that cannot keep up (under 30 frames a second), the frame gets fewer pixels, and then plain
+// walls and roofs, until it can. It steps down one level at a time while the frames are slow; if none of the steps
+// makes them faster (two steps that bring nothing tell), it goes back up to where it began and stays there. After a good
+// while at full speed the level above is tried again, and kept if the frames stay as fast (twice at most). The debug
+// console's "quality" fixes a level.
+const QUAL = [[2, 1], [1.5, 1], [1, 1], [1, 0], [0.8, 0], [0.67, 0]]; // (at most this many pixels to a CSS pixel; textures)
+const QA = { lv: 0, fix: -1, iv: [], ivT: 0, skip: 2000, down: null, up: -1, fast: 0, lock: false, tries: QUAL.map(() => 0) };
+const qualOf = i => [Math.min(window.devicePixelRatio || 1, 2, QUAL[i][0]), QUAL[i][1]]; // (what a level means on this screen)
+function qualStep(i, d) { // the next level down (d 1) or up (d -1) that changes anything on this screen
+  const [a, b] = qualOf(i);
+  for (let j = i + d; j >= 0 && j < QUAL.length; j += d) { const [c, e] = qualOf(j); if (c !== a || e !== b) return j; }
+  return i;
+}
+function qualSet(i) {
+  QA.lv = i; QCAP = QUAL[i][0]; TEX = !!QUAL[i][1];
+  if (qualOf(i)[0] !== DPR) resize();
+  QA.iv = []; QA.ivT = 0; QA.skip = 1000; // (ms: meanwhile the ground is drawn again at the new size)
+}
+function qualTick(ms) { // ms: the time since the frame before
+  if (QA.fix >= 0) return;
+  if (document.hidden || (state !== 'play' && state !== 'title' && state !== 'guest')) { QA.iv = []; QA.ivT = 0; return; }
+  if (!(ms > 0 && ms < 250)) return; // (a pause, or one long frame, left out; the first frame's stamp can even come before the clock read as the game was set up)
+  if (QA.skip > 0) { QA.skip -= ms; return; }
+  QA.iv.push(ms); QA.ivT += ms; if (QA.iv.length < 90 && !(QA.ivT > 1500 && QA.iv.length >= 12)) return; // (90 frames, or 1.5 s of slow ones)
+  const med = QA.iv.sort((a, b) => a - b)[QA.iv.length >> 1], slow = med > 34; QA.iv = []; QA.ivT = 0; // (the median: a burst of slow frames while a new part of the city is drawn does not count)
+  const D = QA.down;
+  if (D) { // (on the way down)
+    D.miss = med > D.best * 0.95 ? D.miss + 1 : 0; // (no faster than the best level yet)
+    if (med < D.best) { D.best = med; D.at = QA.lv; }
+    const j = qualStep(QA.lv, 1);
+    if (!slow) QA.down = null;
+    else if (D.miss >= 2 || j === QA.lv) { QA.down = null; QA.lock = true; qualSet(D.best < D.base * 0.85 ? D.at : D.top); } // (the fastest, if anything helped; and no more tries)
+    else qualSet(j);
+    return;
+  }
+  if (QA.up >= 0) { const from = QA.up; QA.up = -1; if (med >= 18) qualSet(from); return; } // (not as fast up there)
+  if (slow) {
+    QA.fast = 0; const j = qualStep(QA.lv, 1);
+    if (!QA.lock && j !== QA.lv) { QA.down = { top: QA.lv, base: med, best: med, at: QA.lv, miss: 0 }; qualSet(j); }
+  } else if (med < 18 && QA.lv > 0) {
+    if (++QA.fast >= 8) { QA.fast = 0; const j = qualStep(QA.lv, -1); if (j !== QA.lv && QA.tries[j] < 2) { QA.tries[j]++; QA.up = QA.lv; qualSet(j); } }
+  } else QA.fast = 0;
+}
+const qualSay = () => `detail ${QA.lv}${QA.fix >= 0 ? ' (fixed)' : ' (automatic)'}: ${+DPR.toFixed(2)} pixels to a CSS pixel (${cv.width} x ${cv.height}), textures ${TEX ? 'on' : 'off'}`;
 function dbgDraw() {
   if (!DBG.stats) return;
-  const s = `${DBG.ft.toFixed(1)} ms · cars ${cars.length} (boats ${cars.filter(boatOf).length}) · people ${peds.length} (on platforms ${peds.filter(p => p.tp).length}) · trams ${trams.length} in full, ${tramsFar.length} further off`;
+  const s = `${DBG.ft.toFixed(1)} ms · detail ${QA.lv}${QA.fix >= 0 ? '*' : ''} (${+DPR.toFixed(2)}x${TEX ? '' : ', plain'}) · cars ${cars.length} (boats ${cars.filter(boatOf).length}) · people ${peds.length} (on platforms ${peds.filter(p => p.tp).length}) · trams ${trams.length} in full, ${tramsFar.length} further off`;
   ctx.font = '12px ui-monospace,Menlo,monospace'; const w = ctx.measureText(s).width;
   ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.fillRect(W / 2 - w / 2 - 6, H - 52, w + 12, 18); ctx.fillStyle = '#7dffd8'; ctx.textAlign = 'center'; ctx.fillText(s, W / 2, H - 39); ctx.textAlign = 'left';
 }
 function frame(nowT) {
   showVersionPicker();
+  qualTick(nowT - last);
   const dt = Math.min(0.05, Math.max(0.001, (nowT - last) / 1000)); last = nowT; const ft0 = performance.now();
   if (state === 'title' && helpPage === 3) { // the achievements page, over the title screen
     if (hit('KeyH', 'Escape', 'Enter', 'NumpadEnter', 'Space')) helpPage = 0; else if (!achPageInput() && hit('Tap')) helpPage = 0;

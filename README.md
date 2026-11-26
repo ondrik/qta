@@ -11,6 +11,11 @@ No build step and no dependencies: just `index.html` and `game.js` (plain canvas
 `brno5_data.js` (3.4 MB) for Brno, loaded only when you pick it. Online co-op loads one small library,
 and only when you open the co-op menu.
 
+On a slower computer the game keeps itself playable. When it falls under 30 frames a second it draws fewer pixels
+(a sharp screen gets up to two to each of its own), then plain walls and roofs without their textures, until it keeps
+up; once there is room again it goes back up. A browser that holds every page at 30 frames a second, as on battery,
+is left alone.
+
 Play it at **https://ondrik.github.io/qta/**.
 
 Every released version stays playable: pick one from the version menu on the title screen, or browse
@@ -58,7 +63,8 @@ For testing there is a hidden **debug console**: type `debug` while playing (bes
 act in play). `tp <place>` teleports you to a start, site, district, street, tram stop, faculty and so on (`tp <x> <y>`
 to a tile, and in Brno `tp <lat> <lon>`), `find <text>` lists the places, `where` tells you where you are,
 `wanted <n>` sets the wanted level, `car <type>` puts you in any vehicle (boats on the nearest water), `god` stops
-damage and arrests, and `stats` shows the frame time and how much is being simulated. `help` lists the rest, Esc
+damage and arrests, `stats` shows the frame time, the detail level and how much is being simulated, and
+`quality <0-5>` fixes the detail level (`quality auto` lets the game choose again). `help` lists the rest, Esc
 closes it.
 
 Goal: reach **$100,000**. Ringing payphones give jobs, and each finished job raises your cash multiplier.

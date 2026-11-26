@@ -38,7 +38,22 @@
   <div class="tb" data-p="KeyR"  style="right:20px;top:150px;width:44px;height:44px;font-size:14px">♪</div>
   <div class="tb" data-p="KeyP"  style="right:72px;top:150px;width:44px;height:44px;font-size:14px">II</div>
 </div>
-<script>try { var m = new URLSearchParams(location.search).get('map') || localStorage.getItem('qta.map'); if (m === 'brno5' || m === 'brno') document.write('<script src="brno5_data.js"><\/script>'); } catch (e) {}</script>
-<script src="game.js"></script>
+<div id="boot" style="position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;color:#8a949e;font:15px system-ui,sans-serif;pointer-events:none"></div>
+<script>
+// inner Brno's data and the game start only once the page has been painted, so that while they are set up (a few
+// seconds, longer on a slow machine) the line above shows instead of a blank page; both download at once and run in order
+(() => {
+  let m = null; try { m = new URLSearchParams(location.search).get('map') || localStorage.getItem('qta.map'); } catch (e) {}
+  const brno = m === 'brno5' || m === 'brno', boot = document.getElementById('boot');
+  if (brno) boot.textContent = 'Building inner Brno…';
+  requestAnimationFrame(() => setTimeout(() => {
+    for (const src of brno ? ['brno5_data.js', 'game.js'] : ['game.js']) {
+      const s = document.createElement('script'); s.src = src; s.async = false;
+      if (src === 'game.js') s.onload = s.onerror = () => boot.remove();
+      document.body.appendChild(s);
+    }
+  }));
+})();
+</script>
 </body>
 </html>
