@@ -63,9 +63,9 @@ For testing there is a hidden **debug console**: type `debug` while playing (bes
 act in play). `tp <place>` teleports you to a start, site, district, street, tram stop, faculty and so on (`tp <x> <y>`
 to a tile, and in Brno `tp <lat> <lon>`), `find <text>` lists the places, `where` tells you where you are,
 `wanted <n>` sets the wanted level, `car <type>` puts you in any vehicle (boats on the nearest water), `god` stops
-damage and arrests, `stats` shows the frame time, the detail level and how much is being simulated, and
-`quality <0-5>` fixes the detail level (`quality auto` lets the game choose again). `help` lists the rest, Esc
-closes it.
+damage and arrests, `powerups` puts a ψ, an ε and a ♥ beside you, `squad` sends P.L.A.N.C.K.'s heroes at you, `stats` shows the frame time, the detail level
+and how much is being simulated, and `quality <0-5>` fixes the detail level (`quality auto` lets the game choose
+again). `help` lists the rest, Esc closes it.
 
 Goal: reach **$100,000**. Ringing payphones give jobs, and each finished job raises your cash multiplier.
 **Boats** lie moored along the banks of the reservoir (in Brno) and of the island's sea, lakes and river, and more
@@ -74,6 +74,11 @@ dinghies (the wind drives a dinghy, and it can't sail straight into it: the red 
 way it blows) glide and drift, and only water carries them. Press Enter at a bank to get out, or, out on the water,
 by another empty boat to climb across. Police boats come after you on the water, and police on the banks shoot
 across it. No superposition or tweezer on the water, and T entangles a boat only with another boat.
+
+**Power-ups** turn up at random around you every few seconds, up to eight at a time: **ψ** (a superposition
+charge), **ε** (two entanglement charges) and, once you have lost a life, a **♥** that gives it back. Walk or drive
+into one to take it. They show on the minimap in their colours, blink when they are about to go, and are gone after
+a minute or once you leave them behind.
 
 Spray shops ($500) clear your wanted level (up to five stars). If you are wasted or busted you come back at the nearest hospital or
 police station, facing the street. Ramming a police car gets you at least one star, and that cruiser gives chase.
@@ -108,7 +113,7 @@ and its way out show under the first. From seven stars up a level doesn't fade b
 | 7 · State of emergency | The army: checkpoints of armoured carriers and soldiers on the bridges and at the tunnel mouths ahead, carriers with mounted guns, and an attack helicopter whose rockets land where a red ring marks the street. Way out: lie low for 60 s unseen, or on foot face a wall and press T to spend an ε charge tunnelling through the building, out of their sight, or take a boat across the water and get out on a bank unseen, far from where you put out (about 75 tiles; lose the Bureau's drone first). Either takes you back to five stars. |
 | 8 · The Observer | A measurement sweep every 20 s: wherever you are, they know. No superposition or entanglement at all, no ε pickups. Jets strafe your street (a red strip marks their run). Way out: one of the entangled payphones, cyan on the map (at the Atom Array Lab and, in Brno, at FIT BUT). A Bell measurement there (press Space as the arrow crosses the window, two out of three) teleports you to the other one, and you are down to three stars. |
 | 9 · Demolition | Armoured bulldozers come straight through the buildings. Hide behind one and a wrecking crew brings it down on you, leaving rubble across the street. Fuel tankers lie jack-knifed and burning in the junctions ahead, and a crane swings a wrecking ball over a main junction. Way out: 45 s unseen in a pedestrian zone or square, back to five stars. |
-| 10 · Air assault | Swarms of kamikaze drones (a red ring marks where each dives; shoot them down), paratroopers, squads roped down from helicopters onto the street ahead, and a S.H.I.E.L.D. Helicarrier that comes in over the city and circles beside you while its searchlight hunts for you (twelve rockets bring it down; bullets pass under it). Way out: go to ground, through two different tunnels from end to end, unseen going in and coming out, back to five stars. On the island, with no tunnels, lie low 75 s unseen. |
+| 10 · Air assault | Swarms of kamikaze drones (a red ring marks where each dives; shoot them down), paratroopers, squads roped down from helicopters onto the street ahead, and a P.L.A.N.C.K. Helicarrier that comes in over the city and circles beside you while its searchlight hunts for you (twelve rockets bring it down; bullets pass under it). It sends down its heroes one after another: the **Collapser**, an armoured flyer whose visor beam burns and keeps you seen; **Agent Spooky**, a spy entangled with you, who appears beside you, shoots, and stuns you (or stalls your car) with a wrist shock; **Big Bang**, a giant who leaps after you, lands with a shockwave and throws cars at you; and the **Tunneler**, who walks straight through buildings, digs ahead of you and grabs your car. Shoot them, rocket them or run them over (Big Bang stops a car dead); beaten, each is beamed back up. Way out: go to ground, through two different tunnels from end to end, unseen going in and coming out, back to five stars. On the island, with no tunnels, lie low 75 s unseen. |
 
 ### Achievements
 
@@ -118,7 +123,7 @@ a tile for each, from the easiest to the hardest: gold for those you have (what 
 first), blank for the rest, but for the next one to find (the easiest you haven't that this map has), whose name
 shows as a hint. Pick a tile (arrow keys, or tap it) to read it; for one you haven't found, Enter (or a tap on its
 line) buys what to do for it, in detail, with the game's cash: the harder it is, the dearer ($500 for the easiest,
-$10,500 for the hardest). What you have bought is kept like the achievements. The title screen shows them too, in its
+$10,700 for the hardest). What you have bought is kept like the achievements. The title screen shows them too, in its
 top right corner (H, or a tap on them, opens the page there). They are kept in your browser alone (local storage),
 and none come in a game where the debug console changed something (a new game clears that, unless god mode is still
 on). In online co-op your friend's go to their own browser.

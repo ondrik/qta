@@ -3428,7 +3428,7 @@ function copNear(x, y, r) {
 function copSees(x, y) {
   if (player.car && player.car.lay === 1 && d2(player.car.x, player.car.y, x, y) < 40 * 40) return false; // (nobody sees you in a tunnel)
   for (const p of peds) if (p.cop && !p.dead) { const dd = d2(p.x, p.y, x, y); if (dd < 70 * 70 || (dd < 260 * 260 && los(p.x, p.y, x, y))) return true; }
-  if (HQ.sweep > 0 || (HQ.drone && HQ.drone.lock && !HQ.drone.fall) || (HQ.carrier && HQ.carrier.see)) return true; // (the sweep, the Bureau's drone, the Helicarrier's light)
+  if (HQ.sweep > 0 || (HQ.drone && HQ.drone.lock && !HQ.drone.fall) || (HQ.carrier && HQ.carrier.see) || HQ.heroes.some(h => h.see)) return true; // (the sweep, the Bureau's drone, the Helicarrier's light, the Collapser)
   for (const c of cars) if ((c.type === 'police' || c.type === 'policeboat' || c.type === 'tank' || c.type === 'swat' || c.type === 'bureau' || c.type === 'apc' || c.type === 'dozer') && c.driver === 'police') { const dd = d2(c.x, c.y, x, y); if (dd < 70 * 70 || (dd < 300 * 300 && los(c.x, c.y, x, y))) return true; }
   if (heli && !heli.dead && d2(heli.lx, heli.ly, x, y) < 120 * 120) return true; // the helicopter sees everything under its searchlight
   return false;
@@ -3460,6 +3460,7 @@ function explode(x, y, r, src) {
   }
   for (const t of trams) for (const S of t.sec) { const d = Math.hypot(S.x - x, S.y - y); if (!S.lv && d < r + S.l / 2) { damageTram(t, (1 - d / (r + S.l / 2)) * 420, src); break; } }
   for (const p of peds) if (!p.dead && Math.hypot(p.x - x, p.y - y) < r) killPed(p, src, true);
+  if (src === 'player') heroBlast(x, y, r);
   scare(x, y, r * 4);
   if (!player.car && !player.hidden) {
     const d = Math.hypot(player.x - x, player.y - y);
@@ -4064,6 +4065,7 @@ function updatePlayer(dt) {
   if (player.fish) { updateFishing(dt); return; }
   if (player.jack) { updateJack(dt); return; }
   if (HQ.bell && !player.isGuest) { updateBell(dt); return; }
+  if (player.stun > 0) { player.stun -= dt; player.moving = false; const c = player.car; if (c && !c.tram) applyControls(c, 0, 0, false, dt); return; } // (Agent Spooky's wrist shock: nothing answers for a moment)
   const con = !player.car && CONSOLES.find(c => d2(c.x, c.y, player.x, player.y) < 28 * 28);
   const epr = !player.car && heat >= 8 ? eprPhones().findIndex(e => d2(e.x, e.y, player.x, player.y) < 30 * 30) : -1;
   if (epr !== player.eprHint) { if (epr >= 0) msg(`An entangled payphone. ${touchOn() ? '⇄' : 'Enter'}: a Bell measurement, and you teleport to its twin.`, 3); player.eprHint = epr; }
@@ -4298,6 +4300,44 @@ function updatePickups(dt) {
     if (u.k === 'ent' && heat >= 8) continue; // (the Observer took them)
     if (!player.down && d2(u.x, u.y, P0.x, P0.y) < 20 * 20 && (!PK[u.k].can || PK[u.k].can())) { PK[u.k].give(); msg(PK[u.k].label, PK[u.k].draw ? 5 : 2); sfx.pickup(); u.cd = PK[u.k].cd ?? 45; }
   }
+}
+// ---- power-ups that turn up at random around each player, often and several at a time, and go again after a
+// minute if nobody takes them: ψ, ε, and a heart (an extra life, only while you have lost one)
+const DROP = {
+  psi: PK.psi, ent: PK.ent,
+  heart: { c: '#ff4d6d', label: 'Extra life ♥', give: () => { player.lives++; }, can: () => player.lives < 5 },
+};
+const DROP_K = Object.keys(DROP), DROP_LIFE = 60, DROP_NEAR = 8; // (how long one waits; how many at most around a player)
+let drops = [], dropId = 0;
+const dropShown = u => !(u.k === 'ent' && heat >= 8); // (from eight stars the Observer takes the ε, as with the other pickups)
+function dropNear(P0, k, min = 220, max = 850, gap = 130) {
+  const t = randomTile([WALK, PLAZA, GRASS, SAND], p => { p.x += rand(-8, 8); p.y += rand(-8, 8); return !circleSolid(p.x, p.y, 10) && !drops.some(u => d2(u.x, u.y, p.x, p.y) < gap * gap); }, { x: P0.x, y: P0.y, min, max });
+  if (t) drops.push({ id: ++dropId, x: t.x, y: t.y, k, age: 0 });
+}
+function updateDrops(dt) { // (for each player: the host runs it again as the guest)
+  const P0 = pp();
+  player.dropT = (player.dropT ?? rand(1, 3)) - dt;
+  if (player.dropT <= 0 && !lab) { // (not in the lessons)
+    player.dropT = rand(3, 6);
+    if (drops.filter(u => d2(u.x, u.y, P0.x, P0.y) < 1200 * 1200).length < DROP_NEAR) {
+      const w = { psi: 1, ent: heat >= 8 ? 0 : 1, heart: player.lives < 5 ? 0.4 : 0 };
+      let r = Math.random() * (w.psi + w.ent + w.heart), k = 'psi';
+      for (const q of DROP_K) { r -= w[q]; if (r < 0) { k = q; break; } }
+      dropNear(P0, k);
+    }
+  }
+  if (player.down) return;
+  for (let i = drops.length - 1; i >= 0; i--) {
+    const u = drops[i], D = DROP[u.k];
+    if (!dropShown(u) || d2(u.x, u.y, P0.x, P0.y) > 20 * 20 || (D.can && !D.can())) continue;
+    D.give(); msg(D.label, 2); sfx.pickup(); drops.splice(i, 1);
+    for (let j = 0; j < 8; j++) addPart(u.x, u.y, rand(-60, 60), rand(-60, 60), 0.4, 2.5, D.c);
+  }
+}
+function ageDrops(dt) { // (once a frame, for everyone: gone after a minute, or when nobody is near)
+  const at = allCams();
+  for (const u of drops) u.age += dt;
+  drops = drops.filter(u => u.age < DROP_LIFE && at.some(m => d2(u.x, u.y, m.x, m.y) < 2000 * 2000));
 }
 
 // ============================================================ missions
@@ -5824,7 +5864,7 @@ function drawBoat(c) {
 // strafing; the way out is quantum teleportation between the entangled payphones. ★9 demolition: bulldozers through
 // the buildings, wrecking crews that bring down the one you hide behind, burning tankers across the junctions ahead, a
 // wrecking ball; hide in a pedestrian zone. ★10 air assault: kamikaze drone swarms, paratroopers, squads roped down from
-// helicopters, a S.H.I.E.L.D. Helicarrier's searchlight; go to ground through two tunnels, unseen at their portals.
+// helicopters, a P.L.A.N.C.K. Helicarrier's searchlight and the heroes it sends down; go to ground through two tunnels, unseen at their portals.
 // Each comes when you outlast the one below in plain sight (40 s seen) or raise the stakes; from 7 up a level doesn't
 // fade by itself: only its way out ends it.
 const WL = [null, null, null, null, null, null,
@@ -5832,12 +5872,12 @@ const WL = [null, null, null, null, null, null,
   { name: 'STATE OF EMERGENCY', col: '#9ccc65', sub: 'Army checkpoints, armoured carriers, rockets · lie low 60 s unseen, or land unseen across the water' },
   { name: 'THE OBSERVER', col: '#4dd0e1', sub: 'Sweeps every 20 s, jets, no X or T · the entangled payphones (cyan) teleport you out' },
   { name: 'DEMOLITION', col: '#ffb74d', sub: 'Bulldozers, falling buildings, burning tankers · hide 45 s in a pedestrian zone' },
-  { name: 'AIR ASSAULT', col: '#ef5350', sub: 'Drone swarms, paratroopers, a S.H.I.E.L.D. Helicarrier · go to ground: two tunnels, unseen at the portals' }];
+  { name: 'AIR ASSAULT', col: '#ef5350', sub: 'Drones, paratroopers, a P.L.A.N.C.K. Helicarrier and its heroes · go to ground: two tunnels, unseen at the portals' }];
 const DRONE_Z = 0.25, KAMI_Z = 0.12, CARRIER_Z = 0.9, JET_Z = 0.55, ROPE_Z = 0.4;
 // (plain data only: the host sends it to a co-op guest as it is)
 function hqNew() { return { lv: 0, det: false, drone: null, droneCd: 0, spikes: [], spikeCd: 6, strikes: [], rocketCd: 4, jet: null, jetCd: 8,
   sweepT: 12, sweep: 0, low: 0, plaza: 0, hideT: 0, tun: [], tunIn: null, pl: 0, rubble: [], tankerCd: 10, crane: null, craneCd: 14,
-  kami: [], kamiCd: 5, paras: [], paraCd: 8, rope: null, ropeCd: 12, carrier: null, bell: null }; }
+  kami: [], kamiCd: 5, paras: [], paraCd: 8, rope: null, ropeCd: 12, carrier: null, bell: null, heroes: [], beat: [] }; }
 
 // the entangled pair of payphones: at the Atom Array Lab, and at FIT BUT in Brno (or, elsewhere, the booth farthest off)
 function eprPhones() {
@@ -6095,7 +6135,7 @@ function updateWanted(dt) {
       if (p) { const k = kerbToKerb(p), a = rand(TAU); HQ.rope = { x: k.x, y: k.y, nx: k.nx, ny: k.ny, w: k.w, hx: k.x + Math.cos(a) * 1200, hy: k.y + Math.sin(a) * 1200, ph: 0, t: 0, n: 0, a: a + Math.PI }; }
       HQ.ropeCd = p ? 24 : 3;
     }
-    if (!HQ.carrier) { const a = rand(TAU); HQ.carrier = { x: P0.x + Math.cos(a) * 1500, y: P0.y + Math.sin(a) * 1500, lx: P0.x, ly: P0.y, a: a + Math.PI, orb: a, hp: 12, see: false, fall: 0 }; msg('A S.H.I.E.L.D. Helicarrier is coming in over the city, its searchlight sweeping for you.', 4); }
+    if (!HQ.carrier) { const a = rand(TAU); HQ.carrier = { x: P0.x + Math.cos(a) * 1500, y: P0.y + Math.sin(a) * 1500, lx: P0.x, ly: P0.y, a: a + Math.PI, orb: a, hp: 12, see: false, fall: 0, sent: 0, sendT: 7 }; HQ.beat = []; msg('A P.L.A.N.C.K. Helicarrier is coming in over the city, its searchlight sweeping for you.', 4); }
   }
   for (const q of HQ.kami) {
     q.life -= dt;
@@ -6135,8 +6175,10 @@ function updateWanted(dt) {
       const near = d2(bl.x, bl.y, P0.x, P0.y) < 560 * 560, hx = near ? P0.x : belief.x + Math.cos(time * 0.7) * Math.min(belief.sig, 260), hy = near ? P0.y : belief.y + Math.sin(time * 0.9) * Math.min(belief.sig, 260);
       const lx = hx - bl.lx, ly = hy - bl.ly, ld = Math.hypot(lx, ly) || 1, st = Math.min(ld, 190 * dt); bl.lx += lx / ld * st; bl.ly += ly / ld * st;
       bl.see = !hid && d2(bl.lx, bl.ly, P0.x, P0.y) < 140 * 140;
+      if (bl.sent < SQUAD.length && (bl.sendT -= dt) <= 0) bl.sendT = launchHero(SQUAD[bl.sent], bl, P0) ? (bl.sent++, 10) : 2; // (its heroes, one after another)
     }
   }
+  updateHeroes(dt, stars, P0, hid, pc);
   if (stars >= 10 && TUNNELS.length >= 2) { // through a tunnel from end to end, unseen going in and coming out
     const L = pc ? pc.lay : 0;
     if (L === 1 && HQ.pl !== 1) { const id = tE[Math.floor(pc.y / T) * MW + Math.floor(pc.x / T)], e = id >= 0 ? EDGES[id] : null; HQ.tunIn = e ? { name: e.name || 'tunnel ' + id, x: pc.x, y: pc.y, len: e.len || 300, seen: belief.seen } : null; }
@@ -6147,6 +6189,177 @@ function updateWanted(dt) {
     HQ.pl = L;
     if (HQ.tun.length >= 2) { heat = 5.5; bigText('AIR ASSAULT CALLED OFF', '#ef5350', 3, 'They lost you underground: five stars'); sfx.good(); ach('ground'); }
   } else if (stars >= 10 && HQ.low >= 75) { heat = 5.5; bigText('AIR ASSAULT CALLED OFF', '#ef5350', 3, 'They lost you: five stars'); sfx.good(); ach('ground'); }
+}
+// ---- ★10: P.L.A.N.C.K.'s heroes, sent down from the Helicarrier one after another: an armoured flyer whose visor is a
+// measurement, a spy entangled with you, a giant who leaps and throws cars, and a man who walks through walls. Beaten,
+// each is beamed back up. (All plain data in HQ, so a co-op guest sees them too.)
+const HEROES = {
+  collapser: { name: 'The Collapser', hp: 240, c: '#7ff6ff', line: 'P.L.A.N.C.K. sends down the Collapser. While his visor sees you, you are seen: shoot him down, or get under cover.' },
+  spooky: { name: 'Agent Spooky', hp: 170, c: '#e4e8ee', line: 'Agent Spooky drops from the Helicarrier. She is entangled with you: wherever you go, she can appear beside you.' },
+  bigbang: { name: 'Big Bang', hp: 420, c: '#ffcc33', line: 'Big Bang jumps off the Helicarrier. He leaps after you, and he throws cars.' },
+  tunneler: { name: 'The Tunneler', hp: 260, c: '#e0b84a', line: 'The Tunneler is down. Walls don\'t stop him: he tunnels straight through them.' },
+};
+const SQUAD = Object.keys(HEROES), COLL_Z = 0.2;
+const heroSpot = (P, min, max) => randomTile([WALK, PLAZA, GRASS, ROAD, SAND], p => !circleSolid(p.x, p.y, 8), { x: P.x, y: P.y, min, max });
+function launchHero(k, bl, P0) {
+  const q = k === 'collapser' ? { x: P0.x + rand(-150, 150), y: P0.y + rand(-150, 150) } : heroSpot(P0, 110, 220);
+  if (!q) return false;
+  HQ.heroes.push({ k, x: bl.x, y: bl.y, z: CARRIER_Z, a: Math.atan2(q.y - bl.y, q.x - bl.x), hp: HEROES[k].hp, ph: 'drop', t: 0, sx: bl.x, sy: bl.y, tx: q.x, ty: q.y,
+    vx: 0, vy: 0, cd: 2, gun: 1.5, blink: 4, leap: 2, dig: 6, ram: 0, hit: 0, lift: 0, anim: 0, stuck: 0, orb: rand(TAU), see: false, wall: false, beam: null, wave: null, jump: null });
+  msg(HEROES[k].line, 4.5); sfx.bad();
+  return true;
+}
+function heroHurt(h, n) {
+  if ((h.ph !== 'go' && h.ph !== 'drop') || n <= 0) return;
+  h.hp -= n; h.hit = 0.15;
+  if (h.hp <= 0) {
+    h.ph = 'down'; h.t = 0; h.beam = null; h.jump = null; h.see = false; earn(1500);
+    msg(`${HEROES[h.k].name} is down!`, 3); sfx.good();
+    if (!HQ.beat.includes(h.k)) HQ.beat.push(h.k);
+    if (HQ.beat.length === SQUAD.length) { earn(5000); ach('squad'); bigText('P.L.A.N.C.K.\'S HEROES BEATEN', '#ef5350', 3.5, 'All four, beamed back up to the Helicarrier'); }
+  } else if (h.k === 'spooky' && Math.random() < 0.3) heroBlink(h, pp(), 80, 140); // (she doesn't stay where she was hit)
+}
+function heroBlink(h, P, min, max) { // (spooky action at a distance)
+  const q = heroSpot(P, min, max); if (!q) return;
+  qburst(h.x, h.y, '#3cf0ff', 14); h.x = q.x; h.y = q.y; qburst(h.x, h.y, '#3cf0ff', 14); if (onScreen(h.x, h.y)) sfx.quantum();
+}
+function heroBlast(x, y, r) { // (a rocket, or what it set off)
+  for (const h of HQ.heroes) if (h.z < 0.05 && !h.wall) { const d = Math.hypot(h.x - x, h.y - y); if (d < r + 12) heroHurt(h, (1 - d / (r + 12)) * 170 + 20); }
+}
+function heroKnock(h, by) { // (a blow that throws you back)
+  const P = player, dx = P.x - h.x, dy = P.y - h.y, d = Math.hypot(dx, dy) || 1, nx = P.x + dx / d * by, ny = P.y + dy / d * by;
+  if (!circleSolid(nx, ny, 4)) { P.x = nx; P.y = ny; }
+}
+// Big Bang lands: a shockwave that flings the cars about and knocks you down
+function heroShock(h) {
+  const x = h.x, y = h.y; h.wave = { x, y, t: 0 };
+  if (onScreen(x, y, 200)) { sfx.boom(); shake = Math.max(shake, 0.9); }
+  for (const c of cars) {
+    if (c.dead || c.tram || c.lay === 1 || c.lay === 3) continue;
+    const dx = c.x - x, dy = c.y - y, d = Math.hypot(dx, dy) || 1;
+    if (d < 150) { const f = 1 - d / 150; c.vx += dx / d * 340 * f; c.vy += dy / d * 340 * f; damageCar(c, 50 * f); if (c === player.car) hardKnock(); }
+  }
+  if (!player.car && !player.down && !player.hidden) { const d = Math.hypot(player.x - x, player.y - y); if (d < 110) { hurtPlayer(6 + 22 * (1 - d / 110)); heroKnock(h, 26); } }
+  for (const p of peds) if (!p.dead && d2(p.x, p.y, x, y) < 90 * 90) { p.flee = 4; p.fx = x; p.fy = y; }
+  if (!seeThrough(x, y)) addDecal({ k: 'scorch', x, y, r: 16 });
+}
+// and picks up the nearest car and hurls it at you
+function heroThrow(h, P0) {
+  let best = null, bd = 75 * 75;
+  for (const c of cars) {
+    if (c === player.car || c.dead || c.tram || CT[c.type].boat || c.type === 'tank' || (c.driver && c.driver !== 'ai') || c.mission || c.egg || c.heldBy || c.jackHold || c.twin || c.linked || c.decoy || c.thrown > 0 || c.lay === 1 || c.lay === 3) continue;
+    const dd = d2(c.x, c.y, h.x, h.y); if (dd < bd) { bd = dd; best = c; }
+  }
+  if (!best) return false;
+  const a = Math.atan2(P0.y + (P0.vy || 0) * 0.4 - best.y, P0.x + (P0.vx || 0) * 0.4 - best.x);
+  if (best.driver === 'ai') ejectDriver(best, true);
+  best.driver = null; best.thrown = 1.1; best.tvx = Math.cos(a) * 540; best.tvy = Math.sin(a) * 540; best.parked = false; best.moved = true;
+  h.a = a; h.lift = 0.35; msg('Big Bang hurls a car at you!', 1.5);
+  return true;
+}
+function heroRammed(h, pc) { // (driving into them)
+  const sp = Math.hypot(pc.vx, pc.vy), t = CT[pc.type];
+  if (h.ram > 0 || sp < 110 || h.z > 0.02 || h.wall || d2(h.x, h.y, pc.x, pc.y) > (t.l / 2 + 8) ** 2) return;
+  h.ram = 0.8;
+  if (h.k === 'spooky' && Math.random() < 0.7) { heroBlink(h, pc, 70, 120); return; } // (she isn't there when you arrive)
+  if (onScreen(h.x, h.y)) sfx.crash();
+  if (h.k === 'bigbang') { damageCar(pc, 40); pc.vx *= -0.35; pc.vy *= -0.35; pc.speed *= -0.35; hardKnock(); shake = 1; heroHurt(h, sp * 0.12); return; } // (like hitting a wall)
+  heroHurt(h, sp * 0.3);
+  const d = Math.hypot(h.x - pc.x, h.y - pc.y) || 1, nx = h.x + (h.x - pc.x) / d * 30, ny = h.y + (h.y - pc.y) / d * 30;
+  if (!circleSolid(nx, ny, 6)) { h.x = nx; h.y = ny; }
+}
+function updateHeroes(dt, stars, P0, hid, pc) {
+  const leave = stars < 10 || player.down, under = pc && pc.lay === 1; // (in a tunnel only the Tunneler gets at you)
+  for (const h of HQ.heroes) {
+    h.hit = Math.max(0, h.hit - dt); h.ram -= dt; h.cd -= dt;
+    if (h.beam && (h.beam.t -= dt) <= 0) h.beam = null;
+    if (h.wave && (h.wave.t += dt) > 0.55) h.wave = null;
+    if (h.ph === 'up') { h.t += dt; h.z = h.z0 + h.t * 0.6; if (h.t > 1.4) h.gone = 1; continue; }
+    if (h.ph === 'down') { h.t += dt; if (h.k === 'collapser') h.z = Math.max(0, COLL_Z * (1 - h.t / 0.8)); if (h.t > 2.5) { h.ph = 'up'; h.t = 0; h.z0 = h.z; qburst(h.x, h.y, '#9fe8ff', 12); } continue; }
+    if (leave) { h.ph = 'up'; h.t = 0; h.z0 = h.z; h.see = false; h.beam = null; h.jump = null; continue; }
+    if (h.ph === 'drop') { // down from the Helicarrier's deck
+      h.t += dt; const f = Math.min(1, h.t / 1.6), e = f * (2 - f);
+      h.x = lerp(h.sx, h.tx, e); h.y = lerp(h.sy, h.ty, e); h.z = h.k === 'collapser' ? lerp(CARRIER_Z, COLL_Z, f) : CARRIER_Z * (1 - f);
+      if (f >= 1) {
+        h.ph = 'go'; h.z = h.k === 'collapser' ? COLL_Z : 0;
+        if (h.k === 'bigbang') heroShock(h); else if (h.k === 'spooky') qburst(h.x, h.y, '#3cf0ff', 16);
+      }
+      continue;
+    }
+    const dx = P0.x - h.x, dy = P0.y - h.y, d = Math.hypot(dx, dy) || 1;
+    if (d > 3200) { h.ph = 'up'; h.t = 0; h.z0 = h.z; continue; } // (they lost you)
+    if (h.k === 'collapser') { // circles you, and his visor's beam measures and burns
+      h.orb += dt * 0.7;
+      const gx = P0.x + Math.cos(h.orb) * 150, gy = P0.y + Math.sin(h.orb) * 150, ex = gx - h.x, ey = gy - h.y, ed = Math.hypot(ex, ey) || 1, sp = Math.min(ed * 2, ed > 600 ? 520 : 300);
+      h.vx += (ex / ed * sp - h.vx) * Math.min(1, dt * 2.2); h.vy += (ey / ed * sp - h.vy) * Math.min(1, dt * 2.2);
+      h.x += h.vx * dt; h.y += h.vy * dt; if (Math.hypot(h.vx, h.vy) > 40) h.a = Math.atan2(h.vy, h.vx);
+      h.see = !hid && d < 380;
+      if (h.see && d < 340 && h.cd <= 0) {
+        h.cd = 1.6;
+        const v = Math.hypot(P0.vx || 0, P0.vy || 0), miss = Math.random() < (pc ? clamp(v / 450, 0.15, 0.7) : 0.25);
+        const bx = P0.x + (miss ? rand(-45, 45) : rand(-3, 3)), by = P0.y + (miss ? rand(-45, 45) : rand(-3, 3));
+        h.beam = { x: bx, y: by, t: 0.2 }; h.a = Math.atan2(by - h.y, bx - h.x);
+        if (!miss) { if (pc) damageCar(pc, 16); else hurtPlayer(9); }
+        for (let k = 0; k < 6; k++) addPart(bx, by, rand(-70, 70), rand(-70, 70), 0.3, 2, '#bff8ff', 0, true);
+        if (onScreen(h.x, h.y)) sfx.shot();
+      }
+      continue;
+    }
+    if (h.k === 'spooky') { // quick on her feet; too far, or stuck, and she is beside you; a wrist shock up close
+      h.blink -= dt; h.gun -= dt;
+      if ((d > 280 || h.stuck > 1.2) && h.blink <= 0) { heroBlink(h, P0, 60, 110); h.blink = 6; h.stuck = 0; }
+      else if (d > 24) { const ox = h.x, oy = h.y; moveFree(h, dx / d * 150, dy / d * 150, dt, 4); h.a = Math.atan2(dy, dx); h.anim += dt * 18; h.stuck = Math.hypot(h.x - ox, h.y - oy) < 150 * dt * 0.3 ? h.stuck + dt : 0; }
+      if (!under && d < 30 && h.cd <= 0) {
+        h.cd = 4; player.stun = pc ? 1.3 : 1.0; if (pc) damageCar(pc, 10); else hurtPlayer(8);
+        for (let k = 0; k < 10; k++) addPart(P0.x, P0.y, rand(-80, 80), rand(-80, 80), 0.3, 2, '#7ff6ff', 0, true);
+        msg(pc ? 'Agent Spooky\'s wrist shock stalls your car!' : 'Agent Spooky\'s wrist shock: you can\'t move!', 1.5); sfx.quantum();
+      } else if (!under && !hid && d > 70 && d < 260 && h.gun <= 0) {
+        h.gun = 1.4; const a = Math.atan2(dy, dx) + rand(-0.06, 0.06); h.a = a;
+        bullets.push({ x: h.x + Math.cos(a) * 10, y: h.y + Math.sin(a) * 10, vx: Math.cos(a) * 650, vy: Math.sin(a) * 650, life: 0.6, dmg: 7, owner: 'cop' });
+        if (onScreen(h.x, h.y)) sfx.shot();
+      }
+    } else if (h.k === 'bigbang') { // walks, leaps after you (and lands with a shockwave), throws cars, punches
+      h.leap -= dt; h.lift = Math.max(0, h.lift - dt);
+      if (h.jump) {
+        const j = h.jump; j.t += dt; const f = Math.min(1, j.t / j.dur);
+        h.x = lerp(j.sx, j.tx, f); h.y = lerp(j.sy, j.ty, f); h.z = 0.32 * 4 * f * (1 - f);
+        if (f >= 1) { h.jump = null; h.z = 0; heroShock(h); }
+        continue;
+      }
+      if (h.leap <= 0 && (d > 150 || Math.random() < 0.35)) {
+        let tx = P0.x + (P0.vx || 0) * 1.1 + rand(-40, 40), ty = P0.y + (P0.vy || 0) * 1.1 + rand(-40, 40);
+        const jd = Math.hypot(tx - h.x, ty - h.y); if (jd > 560) { tx = h.x + (tx - h.x) / jd * 560; ty = h.y + (ty - h.y) / jd * 560; }
+        if (circleSolid(tx, ty, 10)) { const q = heroSpot({ x: tx, y: ty }, 0, 120); tx = q ? q.x : h.x; ty = q ? q.y : h.y; }
+        h.jump = { sx: h.x, sy: h.y, tx, ty, t: 0, dur: 1.1 }; h.a = Math.atan2(ty - h.y, tx - h.x); h.leap = rand(4, 6);
+      } else if (h.cd <= 0 && d > 60 && d < 320 && !hid && !under && heroThrow(h, P0)) h.cd = 4.5;
+      else if (d > 26) { moveFree(h, dx / d * 70, dy / d * 70, dt, 7); h.a = Math.atan2(dy, dx); h.anim += dt * 10; }
+      else if (h.cd <= 0 && !under) { h.cd = 2.2; if (pc) { damageCar(pc, 30); hardKnock(); } else { hurtPlayer(18); heroKnock(h, 30); } if (onScreen(h.x, h.y)) sfx.crash(); }
+    } else { // the Tunneler: straight at you, through whatever is in the way; far behind, he digs and comes up ahead of you
+      h.dig -= dt;
+      if (d > 650 && h.dig <= 0) {
+        const v = Math.hypot(P0.vx || 0, P0.vy || 0), a = v > 40 ? Math.atan2(P0.vy, P0.vx) : rand(TAU);
+        h.x = P0.x + Math.cos(a) * 240 + rand(-40, 40); h.y = P0.y + Math.sin(a) * 240 + rand(-40, 40); h.dig = 8;
+        for (let k = 0; k < 14; k++) addPart(h.x + rand(-8, 8), h.y + rand(-8, 8), rand(-50, 50), rand(-50, 50), 0.7, 3.5, '#8d7b63', 6, true);
+      } else if (d > 20) { h.x += dx / d * 118 * dt; h.y += dy / d * 118 * dt; h.a = Math.atan2(dy, dx); h.anim += dt * 12; }
+      h.wall = solidAt(h.x, h.y);
+      if (h.wall && Math.random() < dt * 12) addPart(h.x + rand(-6, 6), h.y + rand(-6, 6), rand(-20, 20), rand(-20, 20), 0.6, 3, '#8d7b63', 4, true); // (the dust of the wall he is in)
+      if (d < 24 && h.cd <= 0) {
+        h.cd = 2;
+        if (pc) { damageCar(pc, 30); pc.vx *= 0.25; pc.vy *= 0.25; pc.speed *= 0.25; hardKnock(); msg('The Tunneler grabs your car!', 1.5); } else { hurtPlayer(14); heroKnock(h, 24); }
+        if (onScreen(h.x, h.y)) sfx.crash();
+      }
+    }
+    if (pc) heroRammed(h, pc);
+  }
+  HQ.heroes = HQ.heroes.filter(h => !h.gone);
+  for (const c of cars) if (c.thrown > 0) { // a car in the air, thrown by Big Bang
+    c.thrown -= dt; c.x += c.tvx * dt; c.y += c.tvy * dt; c.angle += dt * 9; c.vx = c.tvx; c.vy = c.tvy; c.speed = 0;
+    let end = c.thrown <= 0;
+    if (!end && solidAt(c.x, c.y)) { end = true; c.x -= c.tvx * dt; c.y -= c.tvy * dt; damageCar(c, 90); }
+    else if (!end && !player.car && !player.down && d2(c.x, c.y, player.x, player.y) < 20 * 20) { end = true; hurtPlayer(40); }
+    else if (!end && player.car && player.car !== c && d2(c.x, c.y, player.car.x, player.car.y) < 30 * 30) { end = true; damageCar(player.car, 55); player.car.vx += c.tvx * 0.4; player.car.vy += c.tvy * 0.4; hardKnock(); damageCar(c, 60); }
+    if (end) { c.thrown = 0; c.vx *= 0.25; c.vy *= 0.25; if (onScreen(c.x, c.y)) sfx.crash(); shake = Math.max(shake, 0.5); }
+  }
 }
 // what the HUD says about the level's way out
 function wantedHint() {
@@ -6184,6 +6397,11 @@ function airHit(b) {
   const d = HQ.drone;
   if (d && !d.fall) { const [x, y] = at(d, DRONE_Z); if (d2(b.x, b.y, x, y) < 13 * 13) { d.hp -= b.rocket ? 99 : b.dmg; if (d.hp <= 0) { d.fall = 0.01; earn(200); addHeat(0.25, true); msg('You shot down the Bureau\'s drone!', 2.5); ach('drone'); } return true; } }
   for (const q of HQ.kami) { const [x, y] = at(q, KAMI_Z); if (d2(b.x, b.y, x, y) < 10 * 10) { q.gone = 1; if (q.st) q.st.cancel = true; for (let k = 0; k < 8; k++) addPart(x, y, rand(-60, 60), rand(-60, 60), 0.4, 3, pick(['#ff9c2a', '#555']), 4, true); earn(40); return true; } }
+  for (const h of HQ.heroes) { // (a rocket's blast does the rest, on the ground)
+    if ((h.ph !== 'go' && h.ph !== 'drop') || h.wall) continue;
+    const [x, y] = at(h, h.z), r = h.k === 'bigbang' ? 11 : 8;
+    if (d2(b.x, b.y, x, y) < r * r) { heroHurt(h, b.rocket ? (h.z > 0.05 ? 120 : 0) : b.dmg); for (let k = 0; k < 4; k++) addPart(b.x, b.y, rand(-60, 60), rand(-60, 60), 0.25, 2, '#ffe08a', 0, true); return true; }
+  }
   const bl = HQ.carrier; // (only a rocket reaches it: bullets pass under it, at whatever is on the ground)
   if (bl && !bl.fall && b.rocket) { const [x, y] = at(bl, CARRIER_Z), ca = Math.cos(bl.a), sa = Math.sin(bl.a), lx = (b.x - x) * ca + (b.y - y) * sa, ly = -(b.x - x) * sa + (b.y - y) * ca, f = CARRIER_SC * (1 + CARRIER_Z);
     if ((lx / (160 * f)) ** 2 + (ly / (70 * f)) ** 2 < 1) { bl.hp--; for (let k = 0; k < 10; k++) addPart(b.x, b.y, rand(-90, 90), rand(-90, 90), 0.5, 3, pick(['#ff9c2a', '#ffd34d', '#555']), 4, true); if (bl.hp <= 0) { bl.fall = 0.01; earn(10000); addHeat(0.5, true); msg('The Helicarrier is going down!', 3); ach('carrier'); } else if (bl.hp % 4 === 0) msg(`The Helicarrier is hit: ${bl.hp} more rockets.`, 2); return true; } }
@@ -6316,6 +6534,7 @@ function drawWantedAir() {
       ctx.restore();
     }
   }
+  drawHeroes(true);
 }
 // a flying aircraft carrier, seen from above (bow to +x): the hull and its flight deck, the island on the starboard side,
 // jets parked on deck, and four lift rotors on outriggers, two each side
@@ -6349,6 +6568,72 @@ function drawCarrier(nb, on, fall) {
   ctx.fillStyle = fall ? '#ff5a1f' : on ? '#ff3030' : '#661010'; ctx.beginPath(); ctx.arc(-120, -62 - 34, 3, 0, TAU); ctx.arc(-160, 0, 3, 0, TAU); ctx.fill(); // (port and stern lights)
   ctx.fillStyle = fall ? '#ff5a1f' : on ? '#3dff6e' : '#105f22'; ctx.beginPath(); ctx.arc(-120, 62 + 34, 3, 0, TAU); ctx.fill(); // (starboard)
   ctx.fillStyle = on ? '#ffffff' : '#8a8a8a'; ctx.beginPath(); ctx.arc(165, 0, 2.5, 0, TAU); ctx.fill();
+}
+// P.L.A.N.C.K.'s heroes: on the ground among the people (air false), or up in the air, and the Tunneler inside a wall,
+// over the roofs (air true); seen from above, each facing +x
+function drawHeroes(air) {
+  if (!HQ.heroes || !HQ.heroes.length) return;
+  const nb = air ? 1 + NIGHT * 1.6 : 1, c = h => air ? tint(h, nb) : h;
+  for (const h of HQ.heroes) {
+    if (!air && h.wave) { const w = h.wave, f = w.t / 0.55; ctx.strokeStyle = `rgba(255,214,120,${0.9 * (1 - f)})`; ctx.lineWidth = 5 * (1 - f) + 1; ctx.beginPath(); ctx.arc(w.x, w.y, 20 + f * 140, 0, TAU); ctx.stroke(); }
+    const aloft = h.z > 0.02 || h.ph === 'up' || (h.k === 'tunneler' && h.wall);
+    if (aloft !== air) continue;
+    const k = 1 + h.z, x = cam.x + (h.x - cam.x) * k, y = cam.y + (h.y - cam.y) * k;
+    if (air && h.beam) { // the Collapser's visor beam
+      const b = h.beam, f = b.t / 0.2;
+      ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+      ctx.strokeStyle = `rgba(120,235,255,${0.7 * f})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.strokeStyle = `rgba(255,255,255,${f})`; ctx.lineWidth = 1.3; ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over'; ctx.lineCap = 'butt';
+    }
+    if (!onScreen(x, y, 60)) continue;
+    const up = h.ph === 'up' ? clamp(1 - h.t / 1.4, 0, 1) : 1;
+    if (h.ph === 'up') { ctx.fillStyle = `rgba(120,235,255,${0.35 * up})`; ctx.beginPath(); ctx.arc(h.x, h.y, 14, 0, TAU); ctx.fill(); } // (beamed back up)
+    else if (h.z > 0.02) { ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(h.x + 2, h.y + 3, h.k === 'bigbang' ? 9 : 6, h.k === 'bigbang' ? 6 : 4, 0, 0, TAU); ctx.fill(); }
+    const sc = { collapser: 1.45, spooky: 1.45, bigbang: 1.9, tunneler: 1.4 }[h.k];
+    ctx.save(); ctx.translate(x, y); ctx.rotate(h.a + (h.ph === 'down' ? 1.2 : 0)); ctx.scale(k * sc, k * sc);
+    ctx.globalAlpha = up * (h.k === 'tunneler' && h.wall ? 0.5 : h.ph === 'down' ? 0.85 : 1);
+    const sw = (h.ph === 'go' ? Math.sin(h.anim) : 0) * 3;
+    if (h.k === 'collapser') { // grey armour, arms ahead, the lens on his back and the visor glowing cyan; thrusters at his heels
+      if (h.ph !== 'down') { ctx.fillStyle = `rgba(160,240,255,${0.55 + 0.3 * Math.sin(time * 40)})`; ctx.beginPath(); ctx.ellipse(-12, -2, 4, 1.5, 0, 0, TAU); ctx.ellipse(-12, 2, 4, 1.5, 0, 0, TAU); ctx.fill(); }
+      ctx.fillStyle = c('#4a5563'); ctx.fillRect(-9.5, -3.2, 6.5, 2.2); ctx.fillRect(-9.5, 1, 6.5, 2.2); ctx.fillRect(2, -5.4, 7, 1.8); ctx.fillRect(2, 3.6, 7, 1.8);
+      ctx.fillStyle = c('#6f7d8c'); ctx.beginPath(); ctx.ellipse(-1, 0, 5.5, 4.6, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = c('#a9b8c6'); ctx.beginPath(); ctx.ellipse(-1, 0, 3.4, 2.8, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#3cf0ff'; ctx.beginPath(); ctx.arc(-1, 0, 1.4, 0, TAU); ctx.fill();
+      ctx.fillStyle = c('#8d9bab'); ctx.beginPath(); ctx.arc(6, 0, 3, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#7ff6ff'; ctx.fillRect(7.6, -1.7, 1.3, 3.4);
+    } else if (h.k === 'spooky') { // a spy in black, silver hair, a cyan ∞ on her back, the shockers at her wrists
+      ctx.fillStyle = c('#15151b'); ctx.fillRect(sw - 2, -3, 4, 2.2); ctx.fillRect(-sw - 2, 0.8, 4, 2.2);
+      ctx.fillStyle = c('#1d1d26'); ctx.beginPath(); ctx.ellipse(0, 0, 3, 5, 0, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#3cf0ff'; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.arc(-1.8, -1.1, 1, 0, TAU); ctx.moveTo(-0.8, 1.1); ctx.arc(-1.8, 1.1, 1, 0, TAU); ctx.stroke();
+      ctx.fillStyle = '#7ff6ff'; ctx.beginPath(); ctx.arc(2.6, -4.3, 0.9, 0, TAU); ctx.arc(2.6, 4.3, 0.9, 0, TAU); ctx.fill();
+      ctx.fillStyle = c('#e2bfa3'); ctx.beginPath(); ctx.arc(0.6, 0, 2.7, 0, TAU); ctx.fill();
+      ctx.fillStyle = c('#d9dde3'); ctx.beginPath(); ctx.arc(-0.2, 0, 3.1, Math.PI * 0.4, Math.PI * 1.6); ctx.fill();
+    } else if (h.k === 'bigbang') { // a giant in navy, a burst on his back, his fists up when he lifts a car
+      ctx.fillStyle = c('#1e2547'); ctx.fillRect(sw * 0.6 - 2.5, -4, 5, 3); ctx.fillRect(-sw * 0.6 - 2.5, 1, 5, 3);
+      const ax = h.lift > 0 ? 4 : 0;
+      ctx.fillStyle = c('#26305a'); ctx.fillRect(-1.5 + ax, -8.6, 6, 2.6); ctx.fillRect(-1.5 + ax, 6, 6, 2.6);
+      ctx.fillStyle = c('#c68642'); ctx.beginPath(); ctx.arc(5 + ax, -7.3, 1.8, 0, TAU); ctx.arc(5 + ax, 7.3, 1.8, 0, TAU); ctx.fill();
+      ctx.fillStyle = c('#26305a'); ctx.beginPath(); ctx.ellipse(0, 0, 4.6, 6.8, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#ffcc33'; ctx.beginPath(); for (let i = 0; i < 16; i++) { const a = i / 16 * TAU, r = i % 2 ? 1.3 : 3.2; ctx.lineTo(-0.8 + Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill();
+      ctx.fillStyle = c('#c68642'); ctx.beginPath(); ctx.arc(1.6, 0, 2.9, 0, TAU); ctx.fill();
+    } else { // the Tunneler: work clothes, a hard hat with a lamp, a pack on his back; in a wall, ripples round him
+      if (h.wall) { ctx.strokeStyle = 'rgba(60,240,255,.7)'; ctx.lineWidth = 0.8; for (let i = 0; i < 2; i++) { const r = 5 + ((time * 14 + i * 6) % 12); ctx.globalAlpha = up * 0.6 * (1 - (r - 5) / 12); ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke(); } ctx.globalAlpha = up * 0.5; }
+      ctx.fillStyle = c('#4e4032'); ctx.fillRect(sw - 2, -3.4, 4, 2.4); ctx.fillRect(-sw - 2, 1, 4, 2.4);
+      ctx.fillStyle = c('#6d5a45'); ctx.beginPath(); ctx.ellipse(0, 0, 3.6, 5.8, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = c('#3e3328'); ctx.fillRect(-5, -2.8, 3, 5.6); ctx.fillStyle = '#3cf0ff'; ctx.fillRect(-4.2, -0.6, 1.4, 1.2);
+      ctx.fillStyle = c('#c9a227'); ctx.beginPath(); ctx.arc(0.6, 0, 3.2, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#fff5c0'; ctx.beginPath(); ctx.arc(3.2, 0, 0.9, 0, TAU); ctx.fill();
+    }
+    if (h.hit > 0) { ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.arc(0, 0, 7, 0, TAU); ctx.fill(); }
+    ctx.restore(); ctx.globalAlpha = 1;
+    if (h.ph === 'down') { ctx.fillStyle = '#ffe14d'; for (let i = 0; i < 3; i++) { const a = time * 4 + i * TAU / 3; ctx.beginPath(); ctx.arc(x + Math.cos(a) * 9, y - 12 + Math.sin(a) * 3, 1.4, 0, TAU); ctx.fill(); } } // (seeing stars)
+    if (h.ph === 'go' || h.ph === 'drop') { // the name, and the health left once hurt
+      const ty = y - 9 * k * sc - 4, H0 = HEROES[h.k];
+      ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.strokeText(H0.name, x, ty); ctx.fillStyle = H0.c; ctx.fillText(H0.name, x, ty);
+      if (h.hp < H0.hp) { ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x - 13, ty + 2, 26, 3.5); ctx.fillStyle = H0.c; ctx.fillRect(x - 12.5, ty + 2.5, 25 * clamp(h.hp / H0.hp, 0, 1), 2.5); }
+    }
+  }
 }
 // the sweep (a band of measurement crossing the screen) and the Bell measurement's dial
 function drawWantedHUD() {
@@ -6390,7 +6675,7 @@ function updateWorld(dt) {
   const vs = allCams().map(c => viewRect(900, c));
   const active = cars.filter(c => vs.some(v => c.x > v.x0 && c.x < v.x1 && c.y > v.y0 && c.y < v.y1));
   for (const c of active) {
-    if (c.heldBy) continue; // (a car in the tweezer moves with the trap, below)
+    if (c.heldBy || c.thrown > 0) continue; // (a car in the tweezer moves with the trap, below; one Big Bang threw, in updateHeroes)
     const px = c.x, py = c.y;
     if (c.door && !c.doorHold) c.door = Math.max(0, c.door - dt * 3.5); // (a door swings shut behind whoever got in)
     if ((c.labStatic || c.jackHold) && c.driver !== 'player') applyControls(c, 0, 0, true, dt); // (and a car being jacked stops)
@@ -6433,6 +6718,7 @@ function updateWorld(dt) {
   }
   if (!player.hidden) {
     updatePickups(dt);
+    updateDrops(dt);
     updateMissions(dt);
     updateBelief(dt);
     updateWanted(dt);
@@ -6452,12 +6738,13 @@ function updateWorld(dt) {
   }
   if (NET.guest) asGuest(() => {
     if (player.hidden) return;
-    updatePickups(dt); updateLink(dt);
+    updatePickups(dt); updateDrops(dt); updateLink(dt);
     const nm = placeName(player.x, player.y);
     if (nm !== curDistrict) { curDistrict = nm; msg(`— ${nm} —`, 2.5); }
     if (Q.note) { Q.note.t -= dt; if (Q.note.t <= 0 || hit('KeyN')) Q.note = null; }
     updateCamera(dt);
   });
+  ageDrops(dt);
   if (BRNO) updateEggs(dt);
   manageSpawns(dt);
   if (NET.guest) { asGuest(() => manageSpawns(dt)); for (const k in NET.guest.pressed) delete NET.guest.pressed[k]; } // (each press counts once)
@@ -8614,6 +8901,22 @@ function drawMarkers() {
     ctx.fillStyle = pk.c; ctx.fillRect(u.x - 8, u.y - 9 + bob, 16, 16);
     ctx.fillStyle = '#111'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(pk.l, u.x, u.y + 3 + bob);
   }
+  for (const u of drops) if (dropShown(u) && onScreen(u.x, u.y) && !(u.age > DROP_LIFE - 8 && Math.sin(time * 14) < -0.3)) drawDrop(u); // (blinking before it goes)
+}
+// a power-up that turned up: it pops in, then bobs like the others; ψ and ε look like theirs, the heart is a heart
+function drawDrop(u) {
+  const bob = Math.sin(time * 4 + u.x) * 2, s = u.age < 0.25 ? u.age / 0.25 * 1.2 : Math.max(1, 1.2 - (u.age - 0.25) / 0.15 * 0.2); // (a little overshoot)
+  if (u.k === 'heart') {
+    const heart = (x, y, r) => { ctx.beginPath(); ctx.moveTo(x, y + r * 0.9); ctx.bezierCurveTo(x - r * 1.35, y - r * 0.1, x - r * 0.65, y - r * 1.15, x, y - r * 0.35); ctx.bezierCurveTo(x + r * 0.65, y - r * 1.15, x + r * 1.35, y - r * 0.1, x, y + r * 0.9); };
+    ctx.fillStyle = 'rgba(0,0,0,.3)'; heart(u.x + 1.5, u.y + 4, 8 * s); ctx.fill();
+    heart(u.x, u.y - 2 + bob, 8.5 * s); ctx.fillStyle = DROP.heart.c; ctx.fill(); ctx.strokeStyle = '#5a0f1c'; ctx.lineWidth = 1.3; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.arc(u.x - 3.2 * s, u.y - 4.5 * s + bob, 1.8 * s, 0, TAU); ctx.fill();
+    return;
+  }
+  const pk = DROP[u.k], h = 8 * s;
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(u.x - 7 * s, u.y - 4 * s, 14 * s, 12 * s);
+  ctx.fillStyle = pk.c; ctx.fillRect(u.x - h, u.y - 1 - h + bob, 2 * h, 2 * h);
+  ctx.fillStyle = '#111'; ctx.font = `bold ${Math.max(1, 11 * s).toFixed(1)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pk.l, u.x, u.y + 3 * s + bob);
 }
 function drawPed(p, isPlayer) {
   ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.angle);
@@ -8953,6 +9256,7 @@ function drawWorld() {
   drawEggs(v, 0);
   for (const p of peds) if (p.dead && onScreen(p.x, p.y)) drawPed(p);
   for (const p of peds) if (!p.dead && onScreen(p.x, p.y)) drawPed(p);
+  drawHeroes(false);
   drawEggs(v, 1);
   if (!player.car && !player.hidden && !player.cellar && !(player.down && player.downKind === 'busted')) drawPed(player, true);
   drawFishing();
@@ -9240,6 +9544,7 @@ function drawHUD() {
     for (const sp of FISH_SPOTS) dot(sp.x, sp.y, '#4fc3f7', 2);
     for (const L of [trams, tramsFar]) for (const t of L) if (!t.dead) dot(t.x, t.y, t.R.col, full ? 1.6 : 1.8); // (the trams, in their lines' colours)
     if (Q.branches) for (const g of Q.branches) dot(g.x, g.y, g.tint, 2);
+    for (const u of drops) if (dropShown(u)) dot(u.x, u.y, DROP[u.k].c, full ? 2.5 : 2); // (the power-ups that turned up)
     // BUT's other faculties: a small diamond each in the faculty's colour
     for (const f of FACS) {
       const fx = mx + (f.x / T - sx) * ms, fy = my + (f.y / T - sy) * ms, r = full ? 4.5 : 3;
@@ -9263,6 +9568,7 @@ function drawHUD() {
     if (heli) dot(heli.x, heli.y, Math.sin(time * 10) > 0 ? '#cfe3ff' : '#f33', 3);
     if (heat >= 8) for (const e of eprPhones()) dot(e.x, e.y, Math.sin(time * 6) > 0 ? '#3cf0ff' : '#fff', full ? 4.5 : 3.5);
     if (HQ.drone) dot(HQ.drone.x, HQ.drone.y, '#b388ff', 2); if (HQ.carrier) dot(HQ.carrier.x, HQ.carrier.y, '#ef5350', 5);
+    for (const h of HQ.heroes || []) if (h.ph === 'go' || h.ph === 'drop') dot(h.x, h.y, HEROES[h.k].c, full ? 3.5 : 2.5); // (P.L.A.N.C.K.'s heroes)
     if (Q.decoy) dot(Q.decoy.x, Q.decoy.y, '#3cf0ff', 2.5);
     for (const e of eggDots()) dot(e.x, e.y, e.c, full ? 4 : 3);
     const tg = missionTarget(); if (tg) dot(tg.x, tg.y, '#ffe14d', 3.5);
@@ -9590,7 +9896,8 @@ const ACH = {
   ground: ['Gone to Ground', 'Called off an air assault by going underground.'],
   qtunnel: ['Through the Wall', 'Tunnelled through a wall and out of their sight.'],
   drone: ['Drone Down', 'Shot down the Bureau\'s drone.'],
-  carrier: ['Carrier Down', 'Brought down a S.H.I.E.L.D. Helicarrier.'],
+  carrier: ['Carrier Down', 'Brought down a P.L.A.N.C.K. Helicarrier.'],
+  squad: ['The Constants', 'Beat all four of P.L.A.N.C.K.\'s heroes.'],
   // quantum
   superpose: ['Both Ways at Once', 'Put your car into a superposition.'],
   swap: ['Spooky Action', 'Measured an entangled pair and swapped places with your twin.'],
@@ -9636,7 +9943,7 @@ const ACH = {
 };
 // from the easiest to the hardest: the order of the tiles, and the next to find is the first you haven't (that can be had
 // on this map: the third field, b or 5 Brno)
-const ACH_ORDER = ['superpose', 'wasted', 'copcar', 'busted', 'swap', 'job', 'day', 'tourist', 'spilberk', 'station', 'jakub', 'tram', 'army', 'tank', 'sail', 'cellars', 'formula', 'bren', 'lab', 'atoms', 'schrodinger', 'wl6', 'kometa', 'cow', 'marble', 'bells', 'duck', 'hantec', 'coop', 'drone', 'wl7', 'qtunnel', 'train', 'arc', 'lucky', 'deadline', 'lowkey', 'ashore', 'wl8', 'teleport', 'mult9', 'monk', 'wl9', 'crowd', 'dragon', 'birk', 'conquer', 'wl10', 'notes', 'ground', 'carrier'];
+const ACH_ORDER = ['superpose', 'wasted', 'copcar', 'busted', 'swap', 'job', 'day', 'tourist', 'spilberk', 'station', 'jakub', 'tram', 'army', 'tank', 'sail', 'cellars', 'formula', 'bren', 'lab', 'atoms', 'schrodinger', 'wl6', 'kometa', 'cow', 'marble', 'bells', 'duck', 'hantec', 'coop', 'drone', 'wl7', 'qtunnel', 'train', 'arc', 'lucky', 'deadline', 'lowkey', 'ashore', 'wl8', 'teleport', 'mult9', 'monk', 'wl9', 'crowd', 'dragon', 'birk', 'conquer', 'wl10', 'notes', 'ground', 'carrier', 'squad'];
 const achHere = k => { const w = ACH[k][2]; return !w || (w === 'b' && BRNO) || (w === '5' && B5); };
 const ACH_GOT = (() => { try { const o = JSON.parse(localStorage.getItem('qta.ach') || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
 const achToasts = [];
@@ -9723,7 +10030,8 @@ const ACH_HOW = {
   wl10: 'At nine stars, stay in their sight until the tenth comes.',
   notes: 'Meet every quantum note: try every quantum trick, from superposition to teleportation, and go fishing.',
   ground: 'At ten stars, drive through two different tunnels from end to end, unseen going in and coming out (on the island, with no tunnels: stay unseen 75 s).',
-  carrier: 'At ten stars a S.H.I.E.L.D. Helicarrier comes: bring it down with twelve rockets.',
+  carrier: 'At ten stars a P.L.A.N.C.K. Helicarrier comes: bring it down with twelve rockets.',
+  squad: 'At ten stars the Helicarrier sends down four heroes, one after another: the Collapser, Agent Spooky, Big Bang and the Tunneler. Beat all four (rockets help, and so does running them over, except Big Bang).',
 };
 // what to do for one you haven't found yet, bought with the game's cash (dearer the harder it is), kept like them
 const ACH_REV = (() => { try { const o = JSON.parse(localStorage.getItem('qta.achRev') || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
@@ -10556,7 +10864,10 @@ const eggDots = () => { const o = []; if (!EA) return o; if (EGG.dragon) o.push(
 // big words and the commonest messages whole (some put together from the dictionaries' words), elsewhere the words and
 // the places as Brno says them: šalina, švestky, fáro, štatl, Svoboďák, Zelňák, Špilas, Rola, Prýgl, Monte Bú... (from
 // the Czech Wikipedia's Hantec, Wiktionary, hantec.cz and the like)
-var HANTEC_ON = (() => { try { return localStorage.getItem('qta.hantec') === '1'; } catch (e) { return false; } })();
+// (on the Brno map a browser set to Czech starts with it on; whatever you switch it to yourself is kept, on either map)
+const HANTEC_CZ = (() => { try { return BRNO && /^cs\b/i.test((navigator.languages && navigator.languages[0]) || navigator.language || ''); } catch (e) { return false; } })();
+let HANTEC_SET = false; // (switched by hand at some point)
+var HANTEC_ON = (() => { try { const v = localStorage.getItem('qta.hantec'); if (v === '1' || v === '0') { HANTEC_SET = true; return v === '1'; } } catch (e) { /* storage unavailable */ } return HANTEC_CZ; })();
 const hxw = (s, f = 'giu') => new RegExp(`(?<![\\p{L}\\p{N}])(?:${s})(?![\\p{L}\\p{N}])`, f);
 const HX_WHOLE = [
   [/^WASTED$/, 'JE TO V KAKÁČU'], [/^BUSTED$/, 'ŠÓPLI TĚ DO KAMEŇA'], [/^JOB DONE$/, 'HOKNA HOTOVÁ'], [/^JOB FAILED$/, 'JE TO KRÉN'],
@@ -10592,7 +10903,7 @@ function hx(s) {
 }
 const hxs = s => HANTEC_ON && s ? hx(s) : s;
 function hantecToggle() {
-  HANTEC_ON = !HANTEC_ON; try { localStorage.setItem('qta.hantec', HANTEC_ON ? '1' : '0'); } catch (e) { /* storage unavailable */ }
+  HANTEC_ON = !HANTEC_ON; HANTEC_SET = true; try { localStorage.setItem('qta.hantec', HANTEC_ON ? '1' : '0'); } catch (e) { /* storage unavailable */ }
   msg(HANTEC_ON ? 'Hantec: špica! The štatl speaks Brno now (type "hantec" again to stop).' : 'Hantec off.', 5);
   if (HANTEC_ON) ach('hantec');
 }
@@ -10660,7 +10971,7 @@ function hostSnap() {
     fl: flight.on ? [flight.x | 0, +flight.alt.toFixed(2)] : 0, TR, he: heli ? [heli.x | 0, heli.y | 0, +heli.angle.toFixed(2), +heli.rot.toFixed(2), heli.dead ? 1 : 0, +(heli.fall || 0).toFixed(2), heli.army ? 1 : 0] : 0, C, P, B, hq: HQ,
     me: [gp.x | 0, gp.y | 0, +gp.angle.toFixed(2), gp.hp | 0, gp.car ? nid(gp.car) : 0, gp.weapons, gp.weapon, gp.cash | 0, gp.lives, gp.mult, +gp.down.toFixed(2), gp.downKind, gp.moving ? 1 : 0, +gp.anim.toFixed(1), gq.psi, gq.ent, gq.link ? nid(gq.link) : 0, gq.branches ? gq.branches.map(b => [b.x | 0, b.y | 0, +b.angle.toFixed(2), b.tint, +(b.amp || 0).toFixed(2)]) : 0],
     ho: [player.x | 0, player.y | 0, +player.angle.toFixed(2), player.car ? nid(player.car) : 0, player.hidden || (player.down && player.downKind === 'busted') ? 1 : 0, player.moving ? 1 : 0, +player.anim.toFixed(1), player.down && player.downKind === 'wasted' ? 1 : 0],
-    mt: tg ? [tg.x | 0, tg.y | 0, mission ? 1 : 0] : 0, ml, rg: ringing ? BOOTHS.indexOf(ringing) : -1, ev: NET.ev };
+    mt: tg ? [tg.x | 0, tg.y | 0, mission ? 1 : 0] : 0, ml, dr: drops.map(u => [u.id, u.x | 0, u.y | 0, DROP_K.indexOf(u.k), +u.age.toFixed(1)]), rg: ringing ? BOOTHS.indexOf(ringing) : -1, ev: NET.ev };
   if (pk !== NET.pkSent) { snap.pk = pk; NET.pkSent = pk; }
   NET.ev = [];
   const ch = NET.conn.dataChannel; if (ch && ch.bufferedAmount > 200000) { NET.shown = was; NET.ev = snap.ev; return; } // a slow link: skip this one rather than queue up lag
@@ -10733,6 +11044,7 @@ function guestApply(d) {
   NET.other = { x: hx, y: hy, angle: ha, car: hcar, hidden: !!hid, moving: !!hmv, anim: han, dead: !!hdead, shirt: '#ff7a1a', skin: '#e0ac69', hair: '#1a1a1a', pants: '#1e2a3a' };
   NET.mt = d.mt; NET.mx = d.ml; ringing = d.rg >= 0 ? BOOTHS[d.rg] : null;
   if (d.pk) pickups.forEach((u, i) => { u.cd = d.pk[i] === '1' ? 0 : 1; });
+  if (d.dr) drops = d.dr.map(([id, x, y, k, age]) => ({ id, x, y, k: DROP_K[k], age }));
   for (const e of d.ev) {
     if (e[0] === 'boom') boomFx(e[1], e[2], e[3]);
     else if (e[0] === 'dec') { decals.push(e[1]); if (decals.length > 500) decals.shift(); }
@@ -10850,7 +11162,7 @@ try { const pj = sessionStorage.getItem('qta.join'); if (pj) { sessionStorage.re
 
 // ============================================================ game flow
 function resetWorld() {
-  cars = []; peds = []; bullets = []; parts = []; decals = []; heli = null;
+  cars = []; peds = []; bullets = []; parts = []; decals = []; heli = null; drops = [];
   seed = 4242; eggReset(); placeParked(); placePickups(); initTrams(); HQ = hqNew(); tankerCars = []; caller = null;
 }
 let startSel = 0; // which of STARTS a new game begins in (chosen on the title screen)
@@ -10872,6 +11184,7 @@ function newGame() {
   for (let i = 0; i < 30; i++) manageSpawns(1);
   msg(`Welcome to ${at.name}. Find a ride, any ride.`, 5);
   msg('X superposes your car. T entangles you with another car. H for help.', 6);
+  if (HANTEC_ON && !HANTEC_SET && !lab) msg('Your browser speaks Czech, so Brno speaks Hantec: type "hantec" to switch it off.', 7);
   state = 'play'; helpPage = 0; DBG.used = DBG.god; achMap();
 }
 function titleInit() {
@@ -10992,7 +11305,7 @@ function dbgRun(line) {
       'god               toggle: no damage, no arrest',
       'stats             toggle: frame time and what is simulated',
       'quality [auto|0-5] the detail level: 0 the sharpest, 3 plain walls and roofs, 5 the fewest pixels',
-      'cash <n> · time <hour> · day <mon..sun> · charges (refill ψ and ε) · wind <deg> · hantec · close'].join('\n');
+      'cash <n> · time <hour> · day <mon..sun> · charges (refill ψ and ε) · powerups (ψ, ε and ♥ beside you) · squad (send the heroes) · wind <deg> · hantec · close'].join('\n');
     case 'close': case 'exit': dbgShow(false); return '';
     case 'tp': case 'teleport': case 'goto': {
       if (!a.length) return 'tp <place> or tp <x> <y>';
@@ -11033,6 +11346,8 @@ function dbgRun(line) {
     case 'hantec': hantecToggle(); return 'Hantec ' + (HANTEC_ON ? 'on' : 'off');
     case 'time': dayT = ((num[0] || 0) % 24) / 24; EGG.h = null; return `time ${num[0] || 0}:00`;
     case 'charges': Q.psi = 9; Q.ent = 9; return 'ψ 9 · ε 9';
+    case 'squad': { if (heat < 10) heat = 10.3; const P = pp(), bl = HQ.carrier || { x: P.x + 500, y: P.y - 300 }; for (const k of SQUAD) launchHero(k, bl, P); if (HQ.carrier) HQ.carrier.sent = SQUAD.length; return 'P.L.A.N.C.K.\'s heroes are coming'; }
+    case 'powerups': { const n = drops.length; for (const k of DROP_K) dropNear(pp(), k, 50, 140, 40); return `${drops.length - n} power-ups beside you`; }
     case 'wind': WIND = (num[0] || 0) * Math.PI / 180; return `the wind blows to ${num[0] || 0}° (0 east, 90 south)`;
     default: return `unknown: ${cmd} ("help" lists the commands)`;
   }
