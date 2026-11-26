@@ -287,8 +287,11 @@ function chamfer(m) {
 }
 function terrainBrno() {
   const el = new Float32Array(GW * GH), wet = new Uint8Array(GW * GH), dry = new Uint8Array(GW * GH), fw = new Float32Array(GW * GH);
-  const share = (x, y, c) => { let n = 0; for (const [i, j] of [[x - 1, y - 1], [x, y - 1], [x - 1, y], [x, y]]) if (i >= 0 && j >= 0 && i < MW && j < MH && LCG[j * MW + i] === c) n++; return n / 4; };
-  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) { const i = y * GW + x, w = share(x, y, LC_WATER) >= 0.5; wet[i] = w ? 1 : 0; dry[i] = w ? 0 : 1; fw[i] = share(x, y, LC_FOREST); }
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) { // (how much of the four tiles round each grid point is water, and forest)
+    let nw = 0, nf = 0;
+    for (let j = y - 1; j <= y; j++) for (let i = x - 1; i <= x; i++) if (i >= 0 && j >= 0 && i < MW && j < MH) { const c = LCG[j * MW + i]; if (c === LC_WATER) nw++; else if (c === LC_FOREST) nf++; }
+    const i = y * GW + x, w = nw / 4 >= 0.5; wet[i] = w ? 1 : 0; dry[i] = w ? 0 : 1; fw[i] = nf / 4;
+  }
   const dIn = chamfer(wet), dOut = chamfer(dry);
   const HILL = new Float64Array(GW * GH); // (the hills)
   for (const [hx, hy, hr, hh] of B_HILLS) for (let y = Math.max(0, Math.ceil(hy - hr)); y <= Math.min(GH - 1, Math.floor(hy + hr)); y++) for (let x = Math.max(0, Math.ceil(hx - hr)); x <= Math.min(GW - 1, Math.floor(hx + hr)); x++) {
@@ -1432,10 +1435,15 @@ function genMap() {
     if (B5) {
       const near = (tx, ty, ok, R = 24) => { for (let r = 0; r <= R; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; const x = tx + dx, y = ty + dy; if (x > 1 && y > 1 && x < MW - 2 && y < MH - 2 && ok(y * MW + x)) return [x, y]; } return null; };
       const atGeo = (lat, lon, ok, R) => { const [gx, gy] = geo(lat, lon); return near(Math.round(gx), Math.round(gy), ok, R); };
+      // (the buildings by cell, by group and by name, made the first time they are asked for: none come or go in here)
+      let GI = null, GR = null, GN = null;
+      const groupOf = g => { if (!GR) { GR = new Map(); for (const b of buildings) { const L = GR.get(b.grp); if (L) L.push(b); else GR.set(b.grp, [b]); } } return GR.get(g).slice(); };
+      const byName = nm => { if (!GN) { GN = new Map(); for (const b of buildings) if (!GN.has(b.bname)) GN.set(b.bname, b); } return GN.get(nm); };
       const groupNear = (x, y, r) => { // the whole building (all its boxes) nearest a point
+        if (!GI) GI = cellIndex(buildings, b => [b.x, b.y, b.x + b.w, b.y + b.h]);
         let best = null, bd = r * r;
-        for (const b of buildings) { const dx = Math.max(b.x / T - x, 0, x - (b.x + b.w) / T), dy = Math.max(b.y / T - y, 0, y - (b.y + b.h) / T), d = dx * dx + dy * dy; if (d < bd) { bd = d; best = b; } }
-        return best ? buildings.filter(b => b.grp === best.grp) : [];
+        for (const b of cellQuery(GI, (x - r) * T, (y - r) * T, (x + r) * T, (y + r) * T)) { const dx = Math.max(b.x / T - x, 0, x - (b.x + b.w) / T), dy = Math.max(b.y / T - y, 0, y - (b.y + b.h) / T), d = dx * dx + dy * dy; if (d < bd) { bd = d; best = b; } }
+        return best ? groupOf(best.grp) : [];
       };
       const rectOf = bs => ({ x0: Math.min(...bs.map(b => b.x / T)), y0: Math.min(...bs.map(b => b.y / T)), x1: Math.max(...bs.map(b => (b.x + b.w) / T)) - 1, y1: Math.max(...bs.map(b => (b.y + b.h) / T)) - 1 });
       const biggest = bs => bs.reduce((a, b) => b.w * b.h > a.w * a.h ? b : a);
@@ -1507,7 +1515,7 @@ function genMap() {
       }
       // ---- the city's landmarks: the real buildings where they stand, made to look like themselves (towers, spires and
       // domes come from OpenStreetMap where it maps them; the Old Town Hall's tower and the churches' other towers are added)
-      const named = nm => { const b = buildings.find(q => q.bname === nm); return b ? buildings.filter(q => q.grp === b.grp) : []; };
+      const named = nm => { const b = byName(nm); return b ? groupOf(b.grp) : []; };
       const nearG = (lat, lon, r = 3) => { const [x, y] = geo(lat, lon); return groupNear(x, y, r); };
       const pieceAt = (lat, lon, r = 3) => { // (the piece the point is in, else the nearest)
         const [x, y] = geo(lat, lon), px = x * T, py = y * T; let best = null, bd = (r * T) ** 2;
@@ -1787,8 +1795,9 @@ function genMap() {
     if (e.rural || e.hw) continue;
     const town = townAt(Math.floor(e.pts[0][0] / T), Math.floor(e.pts[0][1] / T));
     if (!town || town.reg === R_VILLAGE) continue;
+    const at = edgeWalk(e);
     for (let s0 = 80; s0 < e.len - 80; s0 += 110) {
-      const [x, y, h] = edgePt(e, s0), nx = -Math.sin(h), ny = Math.cos(h);
+      const [x, y, h] = at(s0), nx = -Math.sin(h), ny = Math.cos(h);
       for (const sd of [-1, 1]) { const px = x + nx * 58 * sd, py = y + ny * 58 * sd; if (tileAtP(px, py) === WALK) palm(px / T, py / T); }
     }
   }
@@ -1837,8 +1846,9 @@ function genMap() {
       if (e.rural || e.hw) continue;
       const tw = townAt(Math.floor(e.pts[0][0] / T), Math.floor(e.pts[0][1] / T));
       if (!tw || DISTRICTS[tw.reg].style === 'old' || DISTRICTS[tw.reg].style === 'industrial') continue;
+      const at = edgeWalk(e);
       for (let s0 = 110; s0 < e.len - 110; s0 += B5 ? 170 : 110) {
-        const [x, y, h] = edgePt(e, s0), nx = -Math.sin(h), ny = Math.cos(h);
+        const [x, y, h] = at(s0), nx = -Math.sin(h), ny = Math.cos(h);
         // (on the pavement: not in the median of a dual carriageway, nor in its other half)
         for (const sd of [-1, 1]) { const o = e.wd / 2 + 26, px = x + nx * o * sd, py = y + ny * o * sd, k = Math.floor(py / T) * MW + Math.floor(px / T); if (tileAtP(px, py) === WALK && !taken[k] && offKerb(px, py, eR[k]) > 10) tree(px / T, py / T, (9 + srnd() * 3) * TS); }
       }
@@ -1869,9 +1879,9 @@ function genMap() {
   for (const e of EDGES) {
     e.land = []; e.water = [];
     let cur = null, wet = null;
-    const n = Math.max(2, Math.ceil(e.len / 8));
+    const n = Math.max(2, Math.ceil(e.len / 8)), at = edgeWalk(e);
     for (let k = 0; k <= n; k++) {
-      const s = e.len * k / n, p = edgePt(e, s), wt = bridge[Math.floor(p[1] / T) * MW + Math.floor(p[0] / T)] === 1, w = wt || !!(e.rbr && e.rbr.some(([a, b]) => s >= a && s <= b));
+      const s = e.len * k / n, p = at(s), wt = bridge[Math.floor(p[1] / T) * MW + Math.floor(p[0] / T)] === 1, w = wt || !!(e.rbr && e.rbr.some(([a, b]) => s >= a && s <= b));
       if (wt) e.wet = true; // (over the water itself)
       if (w !== wet || !cur) { if (cur) cur.push(p); cur = [p]; (w ? e.water : e.land).push(cur); wet = w; } else cur.push(p);
     }
@@ -1885,6 +1895,20 @@ function edgePt(e, s) {
     acc += l;
   }
   return [e.pts[0][0], e.pts[0][1], 0];
+}
+// edgePt for points taken in order along an edge (s never going back): it carries on from the segment it stopped at,
+// with the same sums, so each point is just what edgePt gives, without walking the whole way from the start each time
+function edgeWalk(e) {
+  let i = 1, acc = 0;
+  return s => {
+    const P = e.pts;
+    for (; i < P.length; i++) {
+      const a = P[i - 1], b = P[i], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (acc + l >= s || i === P.length - 1) { const t = l ? clamp((s - acc) / l, 0, 1) : 0; return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, Math.atan2(b[1] - a[1], b[0] - a[0])]; }
+      acc += l;
+    }
+    return [P[0][0], P[0][1], 0];
+  };
 }
 genMap();
 
@@ -2013,8 +2037,9 @@ const lightNear = (x, y) => { const ci = Math.floor(x / 90), cj = Math.floor(y /
 for (const e of EDGES) {
   if (e.ring || e.rural || e.over) continue;
   const step = e.hw ? 200 : 150, off = e.wd / 2 + (e.hw ? 12 : 20); // (on the pavement, just beyond the kerb)
+  const at = edgeWalk(e);
   for (let s = 60; s < e.len - 60; s += step) {
-    const [x, y, h] = edgePt(e, s), nx = -Math.sin(h), ny = Math.cos(h);
+    const [x, y, h] = at(s), nx = -Math.sin(h), ny = Math.cos(h);
     for (const sd of [-1, 1]) {
       const onBridge = bridge[Math.floor(y / T) * MW + Math.floor(x / T)];
       const o = onBridge ? 36 : off, lx = x + nx * o * sd, ly = y + ny * o * sd, t = tileAtP(lx, ly);
@@ -5564,7 +5589,7 @@ if (BRNO) {
   };
   for (const type of ['tank', 'apc', 'armytruck', 'armytruck', 'jeep', 'jeep', 'jeep']) {
     let at = null, best = 50;
-    for (let y = y0 + 12; y < y1; y += 8) for (let x = x0 + 12; x < x1; x += 8) for (let q = 0; q < 4; q++) {
+    for (let y = y0 + 12; y < y1 && best < 204; y += 8) for (let x = x0 + 12; x < x1 && best < 204; x += 8) for (let q = 0; q < 4 && best < 204; q++) { // (204: the longest run there is, so nothing after it can win)
       const a = a0 + q * Math.PI / 2;
       if (!free(x, y, a, CT[type])) continue;
       const r = run(x, y, a, CT[type]); if (r > best) { best = r; at = { x, y, a }; }
@@ -6744,7 +6769,7 @@ function wallMat(b) {
 const inRiver = (tx, ty) => tx >= 1 && tx < CW && ty >= 1 && ty < CH && Math.abs(ty + 0.5 - riverY(tx + 0.5)) < RIVER_HW + 0.5;
 const RIVER_PX = RIVER.map(([x, y]) => [x * T, y * T]);
 // the static ground is rendered once into cached chunks; only the water animates per frame
-const CHK = 8 * T, chunkCache = new Map();
+const CHK = 8 * T, chunkCache = new Map(), chunkPool = []; let chunkNew = 0; // (chunks drawn this frame)
 let chunkS = 0;
 // ---- the countryside's ground: the terrain fields are sampled every 4 px and used as soft masks that blend
 // grass, forest floor, dry grass, sand, rock, snow and water into each other, then hill shading on top
@@ -6754,15 +6779,17 @@ const tsG = tsCv.getContext('2d'), tsIm = tsG.createImageData(TSN, TSN);
 const TV = {}; for (const k of ['wa', 'ro', 'sd', 'sb', 'fo', 'dr', 'sn', 'sh', 'tw']) TV[k] = new Float32Array(TSA);
 const TA = new Float32Array(TSA);
 let scrCv = null, scrG = null;
-function sampleTerrain(x0, y0) {
+let TVK = null, TVK5 = null; // (each sampled field: where its samples go, its grid, its fine detail)
+function sampleTerrain(x0, y0, shadeOnly) { // (shadeOnly: just the hill shading, all inner Brno's ground uses)
+  const K = shadeOnly ? TVK5 || (TVK5 = [[TV.sh, F.sh, DETA.sh]]) : TVK || (TVK = Object.keys(TV).map(k => [TV[k], F[k], DETA[k]])), nk = K.length;
   for (let j = 0, q = 0; j < TSN; j++) for (let i = 0; i < TSN; i++, q++) {
     const wx = x0 + (i - 0.5) * TSUB, wy = y0 + (j - 0.5) * TSUB, u = clamp(wx / T, 0, MW - 0.001), v = clamp(wy / T, 0, MH - 0.001);
     const ix = u | 0, iy = v | 0, fx = u - ix, fy = v - iy, g = iy * GW + ix;
     const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy, X = wx | 0, Y = wy | 0;
-    for (const k in TV) {
-      const A = F[k]; let val = A[g] * w00 + A[g + 1] * w10 + A[g + GW] * w01 + A[g + GW + 1] * w11;
-      const d = DETA[k]; if (d) val += d[0] * (detAt(X, Y, d[1]) - 0.5);
-      TV[k][q] = val;
+    for (let t = 0; t < nk; t++) {
+      const e = K[t], A = e[1]; let val = A[g] * w00 + A[g + 1] * w10 + A[g + GW] * w01 + A[g + GW + 1] * w11;
+      const d = e[2]; if (d) val += d[0] * (detAt(X, Y, d[1]) - 0.5);
+      e[0][q] = val;
     }
   }
 }
@@ -6850,31 +6877,52 @@ function groundChunk(cx, cy) {
   const key = cx * 256 + cy;
   let c = chunkCache.get(key);
   if (c) { chunkCache.delete(key); chunkCache.set(key, c); return c; }
-  c = document.createElement('canvas'); c.width = c.height = Math.ceil(CHK * chunkS);
+  chunkNew++;
+  const n = Math.ceil(CHK * chunkS); c = chunkPool.pop(); // (a canvas the cache let go of, cleared, costs less than a new one)
+  if (!c || c.width !== n) { c = document.createElement('canvas'); c.width = c.height = n; }
   const g = c.getContext('2d'), main = ctx;
+  g.save(); g.clearRect(0, 0, n, n); g.beginPath(); // (and its state is put back afterwards: each chunk starts as on a new canvas)
   g.setTransform(chunkS, 0, 0, chunkS, -cx * CHK * chunkS, -cy * CHK * chunkS);
   ctx = g;
   try {
     const country = hasCountry(cx, cy);
-    if (B5) { sampleTerrain(cx * CHK, cy * CHK); drawLand5(cx, cy); } // (inner Brno: its mapped areas; the terrain only shades)
+    if (B5) { sampleTerrain(cx * CHK, cy * CHK, true); drawLand5(cx, cy); } // (inner Brno: its mapped areas; the terrain only shades)
     else if (country) drawTerrain(cx, cy);
     drawGroundStatic({ x0: cx * CHK - T, y0: cy * CHK - T, x1: (cx + 1) * CHK + T - 1, y1: (cy + 1) * CHK + T - 1 }); // 1-tile margin so kerb details cross chunk seams
     ctx.fillStyle = PAT.grime; ctx.fillRect(cx * CHK, cy * CHK, CHK, CHK); // dirt and bleaching, continuous across chunks
     if (country) hillShade(cx, cy);
-  } finally { ctx = main; }
+  } finally { ctx = main; g.restore(); }
   chunkCache.set(key, c);
-  if (chunkCache.size > 80) chunkCache.delete(chunkCache.keys().next().value);
+  if (chunkCache.size > 80) { const k0 = chunkCache.keys().next().value; chunkPool.push(chunkCache.get(k0)); chunkCache.delete(k0); }
   return c;
 }
 function drawGround(v) {
   const S = DPR >= 1.5 ? 2 : 1;
-  if (S !== chunkS) { chunkCache.clear(); chunkS = S; }
-  ctx.imageSmoothingEnabled = false;
+  if (S !== chunkS) { chunkCache.clear(); chunkPool.length = 0; chunkS = S; }
+  ctx.imageSmoothingEnabled = false; chunkNew = 0;
   for (let cy = Math.max(0, Math.floor(v.y0 / CHK)); cy <= Math.min(Math.floor((MH * T - 1) / CHK), Math.floor(v.y1 / CHK)); cy++)
     for (let cx = Math.max(0, Math.floor(v.x0 / CHK)); cx <= Math.min(Math.floor((MW * T - 1) / CHK), Math.floor(v.x1 / CHK)); cx++)
       ctx.drawImage(groundChunk(cx, cy), cx * CHK, cy * CHK, CHK + 0.5, CHK + 0.5);
   ctx.imageSmoothingEnabled = true;
+  if (!chunkNew) chunkAhead(v);
   drawWaterAnim(v);
+}
+// one chunk of the ring just outside the view, the one furthest along the way the camera moves, is drawn in a frame that
+// drew none: driving into a new part of the city then finds its ground ready, instead of drawing a whole row of chunks
+// in one frame (a chunk looks the same whenever it is drawn)
+const CA = { x: 0, y: 0 };
+function chunkAhead(v) {
+  const x0 = Math.floor(v.x0 / CHK) - 1, x1 = Math.floor(v.x1 / CHK) + 1, y0 = Math.floor(v.y0 / CHK) - 1, y1 = Math.floor(v.y1 / CHK) + 1;
+  const mx = Math.floor((MW * T - 1) / CHK), my = Math.floor((MH * T - 1) / CHK), ax = cam.x + (cam.x - CA.x) * 40, ay = cam.y + (cam.y - CA.y) * 40;
+  CA.x = cam.x; CA.y = cam.y;
+  if ((x1 - x0 + 1) * (y1 - y0 + 1) > 76) return; // (the view and its ring would not fit in the cache together)
+  let best = -1, bd = Infinity;
+  for (let cy = Math.max(0, y0); cy <= Math.min(my, y1); cy++) for (let cx = Math.max(0, x0); cx <= Math.min(mx, x1); cx++) {
+    if (cx > x0 && cx < x1 && cy > y0 && cy < y1) continue; // (in view: drawn already)
+    if (chunkCache.has(cx * 256 + cy)) continue;
+    const d = d2((cx + 0.5) * CHK, (cy + 0.5) * CHK, ax, ay); if (d < bd) { bd = d; best = cx * 256 + cy; }
+  }
+  if (best >= 0) groundChunk(best >> 8, best & 255);
 }
 function drawWaterAnim(v) {
   const x0 = Math.max(0, Math.floor(v.x0 / T)), y0 = Math.max(0, Math.floor(v.y0 / T));
@@ -7075,7 +7123,8 @@ function drawGroundStatic(v) {
   }
   // roads are stroked in layers so that junctions merge cleanly: parapets, pavements, kerbs, asphalt, markings
   const inV = e => e.bb[0] < v.x1 && e.bb[2] > v.x0 && e.bb[1] < v.y1 && e.bb[3] > v.y0;
-  const E = EDGES.filter(e => !e.tunnel && !e.over && inV(e)).concat(RAMPS.filter(inV), OVRAMPS.filter(inV)); // (of a tunnel, only its ramps show; a deck is drawn above the street's cars)
+  if (!EGRID) EGRID = cellIndex(EDGES, e => e.bb);
+  const E = cellQuery(EGRID, v.x0, v.y0, v.x1, v.y1).filter(e => !e.tunnel && !e.over && inV(e)).concat(RAMPS.filter(inV), OVRAMPS.filter(inV)); // (of a tunnel, only its ramps show; a deck is drawn above the street's cars)
   const W = o => (o.e ? o.e.wd : o.wd) || 64; // (each street as wide as its carriageway: a ramp as its street)
   ctx.lineCap = 'round';
   for (const e of E) for (const r of e.water) { path(r.map(([x, y]) => [x + 6, y + 9])); ctx.strokeStyle = 'rgba(0,0,0,.28)'; ctx.lineWidth = W(e) + 8; ctx.stroke(); }
@@ -7093,9 +7142,9 @@ function drawGroundStatic(v) {
   // wear: a darker oily stripe down the middle of each lane and rubbed-in wheel tracks, plus drips where cars wait at lights
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const mid = new Path2D(), wheels = new Path2D(), drips = new Path2D();
-  for (const L of LANES) {
+  if (!LNGRID) LNGRID = cellIndex(LANES, L => { let a = 1e9, b = 1e9, c = -1e9, d = -1e9; for (let i = 0; i < L.n; i++) { a = Math.min(a, L.x[i]); b = Math.min(b, L.y[i]); c = Math.max(c, L.x[i]); d = Math.max(d, L.y[i]); } return (L.bb = [a - 20, b - 20, c + 20, d + 20]); });
+  for (const L of cellQuery(LNGRID, v.x0, v.y0, v.x1, v.y1)) {
     if (L.e.tunnel) continue;
-    if (!L.bb) { let a = 1e9, b = 1e9, c = -1e9, d = -1e9; for (let i = 0; i < L.n; i++) { a = Math.min(a, L.x[i]); b = Math.min(b, L.y[i]); c = Math.max(c, L.x[i]); d = Math.max(d, L.y[i]); } L.bb = [a - 20, b - 20, c + 20, d + 20]; }
     if (L.bb[0] > v.x1 || L.bb[2] < v.x0 || L.bb[1] > v.y1 || L.bb[3] < v.y0) continue;
     for (const [P, o] of [[mid, 0], [wheels, -6.5], [wheels, 6.5]])
       for (let i = 0; i < L.n; i++) { const x = L.x[i] - Math.sin(L.h[i]) * o, y = L.y[i] + Math.cos(L.h[i]) * o; i ? P.lineTo(x, y) : P.moveTo(x, y); }
@@ -7213,7 +7262,7 @@ function cellQuery(G, x0, y0, x1, y1) { // (every item whose box overlaps the re
   ids.sort((p, q) => p - q);
   return ids.map(i => G.list[i]);
 }
-let BGRID = null, LAMPG = null, NGRID = null, B_TOP = 0;
+let BGRID = null, LAMPG = null, NGRID = null, EGRID = null, LNGRID = null, B_TOP = 0;
 const bGrid = () => BGRID || (B_TOP = buildings.reduce((m, b) => Math.max(m, b.top), 0), BGRID = cellIndex(buildings, b => [b.x, b.y, b.x + b.w, b.y + b.h]));
 const lGrid = () => LAMPG || (LAMPG = cellIndex(lamps, p => [p.x, p.y, p.x, p.y]));
 const lampsNear = (v, m) => cellQuery(lGrid(), v.x0 - m, v.y0 - m, v.x1 + m, v.y1 + m); // (m: at least the margin tested)
@@ -7567,13 +7616,23 @@ function drawBox(b, x0, y0, x1, y1, z0, z1, win, top) {
 }
 // one wall from (ax, ay) to (bx, by) with its outward normal, from z0 up to z1: its material, windows and the rest
 let FRC = 1, FRS = 0; // (the turn of the frame a building is drawn in: its walls know which way is north)
+// a wall's dark windows, lit windows and the shade along its foot are gathered as numbers (the four corners of each
+// quad) and drawn as one path each: making three Path2D objects for every wall cost more than drawing them
+const WQ = [[], [], []];
+function fillQuads(A) {
+  if (!A.length) return false;
+  ctx.beginPath();
+  for (let i = 0; i < A.length; i += 8) { ctx.moveTo(A[i], A[i + 1]); ctx.lineTo(A[i + 2], A[i + 3]); ctx.lineTo(A[i + 4], A[i + 5]); ctx.lineTo(A[i + 6], A[i + 7]); } // (a fill closes each quad itself)
+  ctx.fill(); return true;
+}
 function drawWall(b, ax, ay, bx, by, nx, ny, i, z0, z1, win, top) {
   const cx = cam.x, cy = cam.y, k0 = 1 + z0, k1 = 1 + z1;
   const A0x = cx + (ax - cx) * k0, A0y = cy + (ay - cy) * k0, B0x = cx + (bx - cx) * k0, B0y = cy + (by - cy) * k0;
   const A1x = cx + (ax - cx) * k1, A1y = cy + (ay - cy) * k1, B1x = cx + (bx - cx) * k1, B1y = cy + (by - cy) * k1;
   const wny = FRS * nx + FRC * ny, L = lum(nx, ny, 0) * (wny < -0.7 ? 0.9 : 1); // (a wall facing north is a shade darker)
   ctx.fillStyle = tint(b.wall, L);
-  ctx.beginPath(); ctx.moveTo(A0x, A0y); ctx.lineTo(B0x, B0y); ctx.lineTo(B1x, B1y); ctx.lineTo(A1x, A1y); ctx.closePath(); ctx.fill();
+  const wallPath = () => { ctx.beginPath(); ctx.moveTo(A0x, A0y); ctx.lineTo(B0x, B0y); ctx.lineTo(B1x, B1y); ctx.lineTo(A1x, A1y); ctx.closePath(); };
+  wallPath(); ctx.fill();
   // windows are quads in the wall's (u along, v up) coordinates
   const depth = Math.hypot(A1x - A0x, A1y - A0y), len = Math.hypot(bx - ax, by - ay);
   // the wall's material, mapped with u along the wall and v up it (the chimney is the only box drawn without a top flag)
@@ -7585,9 +7644,14 @@ function drawWall(b, ax, ay, bx, by, nx, ny, i, z0, z1, win, top) {
     ctx.fillStyle = wt; ctx.globalAlpha = TEXA; ctx.fill(); ctx.globalAlpha = 1;
   }
   const P = (u, v) => { const ux0 = A0x + (B0x - A0x) * u, uy0 = A0y + (B0y - A0y) * u; return [ux0 + (A1x + (B1x - A1x) * u - ux0) * v, uy0 + (A1y + (B1y - A1y) * u - uy0) * v]; };
-  const pd = new Path2D(), pl = new Path2D(), pe = new Path2D();
+  const pd = WQ[0], pl = WQ[1], pe = WQ[2]; pd.length = pl.length = pe.length = 0;
+  const qn = (A, u0, u1, v0, v1) => { // (a quad's corners into A, worked out just as P does)
+    const a0 = A0x + (B0x - A0x) * u0, b0 = A0y + (B0y - A0y) * u0, a1 = A0x + (B0x - A0x) * u1, b1 = A0y + (B0y - A0y) * u1;
+    const c0 = A1x + (B1x - A1x) * u0 - a0, d0 = A1y + (B1y - A1y) * u0 - b0, c1 = A1x + (B1x - A1x) * u1 - a1, d1 = A1y + (B1y - A1y) * u1 - b1;
+    A.push(a0 + c0 * v0, b0 + d0 * v0, a1 + c1 * v0, b1 + d1 * v0, a1 + c1 * v1, b1 + d1 * v1, a0 + c0 * v1, b0 + d0 * v1);
+  };
   const quad = (path, u0, u1, v0, v1) => { const a = P(u0, v0), b2 = P(u1, v0), c = P(u1, v1), d = P(u0, v1); path.moveTo(a[0], a[1]); path.lineTo(b2[0], b2[1]); path.lineTo(c[0], c[1]); path.lineTo(d[0], d[1]); path.closePath(); };
-  if (z0 === 0 && depth > 3) quad(pe, 0, 1, 0, Math.min(0.3, 3 / depth)); // ambient occlusion at the base
+  if (z0 === 0 && depth > 3) qn(pe, 0, 1, 0, Math.min(0.3, 3 / depth)); // ambient occlusion at the base
   let nf = Math.max(1, Math.round((z1 - z0) / 0.042));
   const ws = win === 'bays' && !(wny > 0.7) ? 'grid' : win;
   const litP = NIGHT * (b.kind === 'church' ? 0.6 : 0.45), sd = b.sd + i * 7919;
@@ -7598,7 +7662,7 @@ function drawWall(b, ax, ay, bx, by, nx, ny, i, z0, z1, win, top) {
   const grid = (sp, um, v0, v1, n = nf) => {
     wa = clamp((depth / n - 1.2) / 2.3, 0, 1); if (wa <= 0) return;
     const nc = Math.max(1, Math.min(Math.floor(len / sp), Math.floor(len * k1 / 5)));
-    for (let f = 0; f < n; f++) for (let c = 0; c < nc; c++) quad(lit(f, c) ? pl : pd, (c + um) / nc, (c + 1 - um) / nc, (f + v0) / n, (f + v1) / n);
+    for (let f = 0; f < n; f++) for (let c = 0; c < nc; c++) qn(lit(f, c) ? pl : pd, (c + um) / nc, (c + 1 - um) / nc, (f + v0) / n, (f + v1) / n);
   };
   let extra = null;
   if (ws === 'grid') grid(15, 0.28, 0.3, 0.78);
@@ -7616,21 +7680,22 @@ function drawWall(b, ax, ay, bx, by, nx, ny, i, z0, z1, win, top) {
   } else if (ws === 'columns') {
     if (depth > 4) {
       const nc = Math.max(2, Math.floor(len / 16)), pc = new Path2D();
-      quad(pd, 0.02, 0.98, 0.05, 0.86);
+      qn(pd, 0.02, 0.98, 0.05, 0.86);
       for (let c = 0; c < nc; c++) quad(pc, (c + 0.3) / nc, (c + 0.7) / nc, 0.03, 0.88);
-      ctx.fillStyle = tint('#3a3530', L); ctx.fill(pd);
+      ctx.fillStyle = tint('#3a3530', L); fillQuads(pd);
       ctx.fillStyle = tint('#f3eee3', L); ctx.fill(pc);
-      ctx.fillStyle = tint('#000000', 1); ctx.globalAlpha = 0.2; ctx.fill(pe); ctx.globalAlpha = 1;
-      return;
+      ctx.fillStyle = tint('#000000', 1); ctx.globalAlpha = 0.2; fillQuads(pe); ctx.globalAlpha = 1;
+      wallPath(); return; // (the wall's own outline is left as the path, as it always was)
     }
   }
   ctx.fillStyle = tint(b.style === 'glass' ? '#a8cde2' : b.kind === 'church' ? '#2c3a55' : '#28313d', b.style === 'glass' ? L * 0.95 : 1);
-  ctx.globalAlpha = wa; ctx.fill(pd);
+  ctx.globalAlpha = wa; let drawn = fillQuads(pd);
   if (litP > 0.02) {
-    ctx.fillStyle = b.kind === 'church' ? '#e8a25a' : LIT[b.sd & 3]; ctx.globalAlpha = wa * Math.min(1, NIGHT * (b.kind === 'church' ? 0.8 : 1.4)); ctx.fill(pl);
-  } else { ctx.fill(pl); }
+    ctx.fillStyle = b.kind === 'church' ? '#e8a25a' : LIT[b.sd & 3]; ctx.globalAlpha = wa * Math.min(1, NIGHT * (b.kind === 'church' ? 0.8 : 1.4)); drawn = fillQuads(pl) || drawn;
+  } else drawn = fillQuads(pl) || drawn;
   ctx.globalAlpha = 1;
-  ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fill(pe);
+  ctx.fillStyle = 'rgba(0,0,0,.22)'; drawn = fillQuads(pe) || drawn;
+  if (drawn) wallPath(); // (the wall's own outline is the path again: the glass below, and whoever comes next, expect it)
   if (b.kind === 'club' && z0 === 0 && depth > 3) { // a club: its door on the front, and a neon tube under the eaves
     const pn = new Path2D(); quad(pn, 0.02, 0.98, 0.84, 0.88);
     if (i === (b.lp ? b.frontE : b.front)) {
@@ -8228,10 +8293,11 @@ function polyHip(b) {
   if (!b.hr) return false;
   const e = b.ht, { faces, top, D } = b.hr, ch = Math.min(b.hip, D / T * 0.022 + 0.012), z = d => e + ch * d / D, L0 = lum(0, 0, 1);
   ringPath(b.lp, e); ctx.fillStyle = tint(b.roof, L0 * 0.9); ctx.fill('evenodd'); // (under the slopes, so no seam shows)
-  drawFaces(b, faces.map(({ e: w, p }) => {
+  if (!b.hf) b.hf = faces.map(({ e: w, p }) => { // (the slopes in 3-D: the same every frame)
     const dl = w.d, m = [(w.A[0][0] + w.B[0][0]) / 2 + w.mx * dl, (w.A[0][1] + w.B[0][1]) / 2 + w.my * dl, z(dl)];
     return { p: p.map(q => [q[0], q[1], z(q[2])]), n: [-w.mx * ch, -w.my * ch, D / HC], c: b.roof, top: m };
-  }));
+  });
+  drawFaces(b, b.hf.slice()); // (a fresh list each time: drawFaces sorts it, and ties keep this order)
   if (top) { ringPath(top, z(D)); ctx.fillStyle = tint(b.roof, L0 * 1.04); ctx.fill('evenodd'); }
   if (b.kind || b.sign) { const sv = b.ht; b.ht = z(D); b.det = []; b.kit = 0; flatRoof(b, b.x, b.y, b.x + b.w, b.y + b.h, b.ht, true, true); b.ht = sv; }
   return true;
@@ -9866,9 +9932,19 @@ const EA = BRNO ? (() => {
       for (let u = -t.l / 2 - 5; u <= t.l / 2 + 5; u += 5) for (let v = -t.w / 2 - 5; v <= t.w / 2 + 5; v += 5) { const px = cx + ca * u - sa * v, py = cy + sa * u + ca * v; if (!ok(px, py) || tileAtP(px, py) === ROAD || (inside && !inside(px, py))) return false; }
       return true; };
     const run = (cx, cy, a) => { const ca = Math.cos(a), sa = Math.sin(a); let d = 0; for (; d < 150; d += 6) for (const v of [-t.w / 2, 0, t.w / 2]) { const px = cx + ca * (t.l / 2 + 4 + d) - sa * v, py = cy + sa * (t.l / 2 + 4 + d) + ca * v; if (!ok(px, py)) return d; } return d; };
-    for (let py = y - R; py <= y + R; py += 8) for (let px = x - R; px <= x + R; px += 8) {
-      const dd = Math.hypot(px - x, py - y); if (dd > R || dd - 75 > bs) continue;
-      for (let q = 0; q < 8; q++) { const a = q * Math.PI / 4; if (!free(px, py, a)) continue; const r = run(px, py, a); if (r < 40) continue; const s = dd - Math.min(r, 120) * 0.6; if (s < bs) { bs = s; best = { x: px, y: py, a }; } }
+    // (the points in rings outward from the spot: once a ring is too far out to do better, nor can any after it; of equally
+    // good ones the first in the order of rows wins, as it did when they were searched row by row)
+    const rings = []; let n = 0, bi = Infinity;
+    for (let py = y - R; py <= y + R; py += 8) for (let px = x - R; px <= x + R; px += 8, n++) {
+      const dd = Math.hypot(px - x, py - y); if (dd > R) continue;
+      const k = Math.floor(dd / 8); (rings[k] || (rings[k] = [])).push(px, py, dd, n);
+    }
+    for (let k = 0; k < rings.length && k * 8 - 75 <= bs; k++) {
+      const G = rings[k]; if (!G) continue;
+      for (let m = 0; m < G.length; m += 4) {
+        const px = G[m], py = G[m + 1], dd = G[m + 2], o = G[m + 3] * 8; if (dd - 75 > bs) continue;
+        for (let q = 0; q < 8; q++) { const a = q * Math.PI / 4; if (!free(px, py, a)) continue; const r = run(px, py, a); if (r < 40) continue; const s = dd - Math.min(r, 120) * 0.6; if (s < bs || (s === bs && o + q < bi)) { bs = s; bi = o + q; best = { x: px, y: py, a }; } }
+      }
     }
     return best;
   };
