@@ -257,7 +257,9 @@ menu still has it.)
   mapped gets one over its west front. Where a building stood on a street's carriageway, the street wins.
 - **The ground as it is mapped**: squares and pedestrian streets, car parks, parks and cemeteries, railway land,
   sports grounds, woods, water and farmland (each field with its own crop), each drawn to its real outline rather
-  than in 5 m tiles; the mapped street trees, and parks and woods planted at a believable density; tram tracks in the
+  than in 5 m tiles; parks and woods planted at a believable density, every tree mapped in them, and on the streets
+  and squares a quarter of the mapped trees and a tree-lined street here and there (all of them made a slalom of the
+  pavements); tram tracks in the
   streets and every track of the railway, at its own level: the viaducts over the streets (drawn over the traffic
   under them, see-through while you are under one), the road bridges over the tracks with their parapets, and the
   level crossings on the sidings and industrial spurs (no passenger line in the map has one).

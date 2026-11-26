@@ -1822,9 +1822,11 @@ function genMap() {
     const TS = 1.6; // (trees are bigger next to 5 m tiles)
     // how far (x, y) is outside the kerb of street id: a street tree's trunk stands on the pavement, not in a lane
     const offKerb = (x, y, id) => { if (id < 0) return 1e9; const e = EDGES[id], P = e.pts; let d = 1e9; for (let i = 0; i < P.length - 1; i++) d = Math.min(d, closestOnSeg([x, y], P[i], P[i + 1]).d); return d - e.wd / 2; };
-    if (B5) { // the trees OpenStreetMap knows, on the streets and in the parks
+    if (B5) { // the trees OpenStreetMap knows, on the streets and in the parks (on the streets and squares only one in
+      // four: all of them made the streets a slalom. The random numbers are drawn all the same, so nothing else moves)
       const r = BRNO_DATA.trees; let x = 0, y = 0;
-      for (let i = 0; i < r.length;) { const a = vlq(r, i); i = a[1]; const b = vlq(r, i); i = b[1]; x += a[0]; y += b[0]; const k = (y >> 2) * MW + (x >> 2); if (map[k] !== BUILD && map[k] !== ROAD && map[k] !== WATER && dR[k] > 40 && tunT[k] !== 2 && ovT[k] !== 2 && !solidAt(x / 4 * T, y / 4 * T) && offKerb(x / 4 * T, y / 4 * T, eR[k]) > 10) { tree(x / 4, y / 4, (10 + srnd() * 6) * TS, srnd() * 6 | 0); taken[k] = 1; } }
+      const few = (k, x, y) => map[k] !== GRASS && LCG[k] !== LC_GREEN && LCG[k] !== LC_FOREST && hash3(x, y, 17) >= 0.25;
+      for (let i = 0; i < r.length;) { const a = vlq(r, i); i = a[1]; const b = vlq(r, i); i = b[1]; x += a[0]; y += b[0]; const k = (y >> 2) * MW + (x >> 2); if (map[k] !== BUILD && map[k] !== ROAD && map[k] !== WATER && dR[k] > 40 && tunT[k] !== 2 && ovT[k] !== 2 && !solidAt(x / 4 * T, y / 4 * T) && offKerb(x / 4 * T, y / 4 * T, eR[k]) > 10) { const tr = (10 + srnd() * 6) * TS, sp = srnd() * 6 | 0; if (!few(k, x, y)) tree(x / 4, y / 4, tr, sp); taken[k] = 1; } }
     }
     // crop fields: inner Brno's are its real farmland, drawn as polygons (the tiles only slow you down)
     for (let k = 0; k < MW * MH; k++) if ((LCG[k] === LC_FARM || LCG[k] === LC_VINE) && map[k] === GRASS) map[k] = FIELD;
@@ -1841,15 +1843,20 @@ function genMap() {
       } else if (lc === LC_GREEN) { if (r < 0.2 * dn) tree(jx(), jy(), (10 + srnd() * 6) * TS, srnd() * 6 | 0); }
       else if (r < 0.015 * dn) tree(jx(), jy(), (11 + srnd() * 5) * TS, srnd() * 6 | 0);
     }
+    const lined = e => { // (about one street in four; a street by its name is lined all along or not at all)
+      if (!B5) return true;
+      let h = 0; if (e.name) for (let i = 0; i < e.name.length; i++) h = Math.imul(h, 31) + e.name.charCodeAt(i) | 0;
+      return hash3(e.name ? h : e.pts[0][0], e.name ? 7 : e.pts[0][1], 23) < 0.25;
+    };
     for (const e of EDGES) { // tree-lined streets outside the old town
       if (e.rural || e.hw) continue;
       const tw = townAt(Math.floor(e.pts[0][0] / T), Math.floor(e.pts[0][1] / T));
       if (!tw || DISTRICTS[tw.reg].style === 'old' || DISTRICTS[tw.reg].style === 'industrial') continue;
-      const at = edgeWalk(e);
+      const at = edgeWalk(e), keep = lined(e);
       for (let s0 = 110; s0 < e.len - 110; s0 += B5 ? 170 : 110) {
         const [x, y, h] = at(s0), nx = -Math.sin(h), ny = Math.cos(h);
         // (on the pavement: not in the median of a dual carriageway, nor in its other half)
-        for (const sd of [-1, 1]) { const o = e.wd / 2 + 26, px = x + nx * o * sd, py = y + ny * o * sd, k = Math.floor(py / T) * MW + Math.floor(px / T); if (tileAtP(px, py) === WALK && !taken[k] && offKerb(px, py, eR[k]) > 10) tree(px / T, py / T, (9 + srnd() * 3) * TS); }
+        for (const sd of [-1, 1]) { const o = e.wd / 2 + 26, px = x + nx * o * sd, py = y + ny * o * sd, k = Math.floor(py / T) * MW + Math.floor(px / T); if (tileAtP(px, py) === WALK && !taken[k] && offKerb(px, py, eR[k]) > 10) { const tr = (9 + srnd() * 3) * TS; if (keep) tree(px / T, py / T, tr); } }
       }
     }
   }
@@ -2053,10 +2060,10 @@ for (let x = AIRPORT.rx0; x <= AIRPORT.rx1; x += 64) { lamps.push({ x, y: AIRPOR
 // traffic lights: group 0 green, amber, all red, group 1 green, amber, all red
 const LCYC = 18;
 function lightPhase(L) { const t = (time + L.off) % LCYC; return t < 6.5 ? 0 : t < 8 ? 1 : t < 9 ? 4 : t < 15.5 ? 2 : t < 17 ? 3 : 4; }
-// bus stops at mid-block on longer streets, with a shelter on the pavement
+// bus stops at mid-block on longer streets, with a shelter on the pavement (in inner Brno on fewer of them)
 const lanesOf = new Map(); for (const l of LANES) { if (!lanesOf.has(l.e)) lanesOf.set(l.e, []); lanesOf.get(l.e).push(l); }
 for (const e of EDGES) {
-  if (e.hw || e.ring || e.over || e.tunnel || e.len < 420 || srnd() < 0.4) continue;
+  if (e.hw || e.ring || e.over || e.tunnel || e.len < 420 || srnd() < 0.4 || (B5 && hash3(e.pts[0][0], e.pts[0][1], 29) >= 0.25)) continue;
   const Ls = (lanesOf.get(e) || []).filter(l => l.dir === 1), L = Ls[Ls.length - 1]; if (!L) continue; // (the kerbside lane)
   const s = L.len / 2, [x, y, h] = lanePt(L, s), nx = -Math.sin(h), ny = Math.cos(h);
   const sx = x + nx * (L.kerb + 14), sy = y + ny * (L.kerb + 14), k = Math.floor((y + ny * (L.kerb + 24)) / T) * MW + Math.floor((x + nx * (L.kerb + 24)) / T);
