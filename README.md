@@ -21,7 +21,8 @@ Screen"), and once you have played it starts with no connection too, on each map
 
 The game in progress is saved, one per map, every 20 seconds, when you pause and when you switch away; the title
 screen then offers to continue it (C, or tap the line). Kept: where you are and the car you're in, your cash, lives,
-weapons and quantum charges, the arcs, the day. Not a job in progress, nor the wanted level. Game over clears it.
+weapons and quantum charges, the arcs, the day, and the wanted level (the police resume where they lost you). Not a
+job in progress. Game over clears it.
 
 Every released version stays playable: pick one from the version menu on the title screen, or browse
 **https://ondrik.github.io/qta/v/**.

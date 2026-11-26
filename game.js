@@ -11734,8 +11734,9 @@ function newGame() {
 }
 // ---- save and continue: the game in progress is kept, one per map, every 20 s of play, when you pause and when the tab
 // goes to the background; the title screen offers to continue it, and game over clears it. What is kept: you (where you
-// are, and the car you are in), your cash, lives, weapons and quantum gear, the arcs, the day, the quantum computer.
-// Not a job in progress, nor the wanted level. Not the lessons, nor a co-op guest's game.
+// are, and the car you are in), your cash, lives, weapons and quantum gear, the arcs, the day, the quantum computer,
+// and the wanted level with where the police last placed you (so quitting is no way to shake them off).
+// Not a job in progress. Not the lessons, nor a co-op guest's game.
 const SAVE_KEY = 'qta.save.' + MAP_ID;
 let saved = (() => { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); return s && s.v === 1 ? s : null; } catch (e) { return null; } })(), saveT = 20;
 function saveGame() {
@@ -11745,7 +11746,8 @@ function saveGame() {
   const s = { v: 1, t: Date.now(), x: Math.round(o.x), y: Math.round(o.y), a: +(o.angle || 0).toFixed(2), car: keep ? { type: c.type, color: c.color, hp: Math.round(c.hp) } : null,
     hp: Math.round(player.hp), cash: player.cash, lives: player.lives, mult: player.mult, weapons: player.weapons, weapon: player.weapon, marble: !!player.marble,
     nDrops: player.nDrops || 0, tunAgo: Math.round(time - (player.tunT ?? time)), psi: Q.psi, ent: Q.ent, notes: [...Q.notes], arc: arcProg, day: dayN, dayT: +dayT.toFixed(5),
-    qcWins, qcPaid: qcDay === dayN, chshPaid: chshDay === dayN, aodSolved: [...aodSolved], aodPaid: [...aodPaid], dbg: !!DBG.used, start: startSel };
+    qcWins, qcPaid: qcDay === dayN, chshPaid: chshDay === dayN, aodSolved: [...aodSolved], aodPaid: [...aodPaid], dbg: !!DBG.used, start: startSel,
+    heat: +heat.toFixed(2), calm: Math.min(60, Math.round(time - lastCrime)), bel: heat >= 1 ? [Math.round(belief.x), Math.round(belief.y), Math.round(belief.sig)] : null };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); saved = s; } catch (e) { /* storage unavailable, or full */ }
 }
 function clearSave() { saved = null; try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } }
@@ -11765,10 +11767,13 @@ function continueGame() {
     const c = makeCar(s.car.type, x, y, s.a || 0, 'player');
     if (carHitsWall(c, x, y, c.angle)) cars.pop(); else { c.color = s.car.color || c.color; c.hp = s.car.hp || c.hp; player.car = c; }
   }
+  // still wanted: the police pick up where they lost you (from six stars up the level's banner says so again)
+  heat = clamp(+s.heat || 0, 0, 10.99); lastCrime = time - (s.calm || 0);
+  if (heat >= 1) { const b = s.bel || [x, y, 0]; Object.assign(belief, { x: b[0], y: b[1], vx: 0, vy: 0, sig: b[2] || 0, seen: false, seeT: 0 }); }
   updateCamera(0, true); fillSpots(true); for (let i = 0; i < 30; i++) manageSpawns(1);
-  msgs = []; msg(`Welcome back: ${fmt(player.cash)}, ${player.lives} ${player.lives === 1 ? 'life' : 'lives'}, day ${dayN + 1}.`, 4);
+  msgs = []; msg(`Welcome back: ${fmt(player.cash)}, ${player.lives} ${player.lives === 1 ? 'life' : 'lives'}, day ${dayN + 1}${heat >= 1 ? `, and still wanted (${Math.floor(heat)}★)` : ''}.`, 4);
 }
-const savedLine = () => saved && `${fmt(saved.cash)} · ${'♥'.repeat(Math.max(0, Math.min(9, saved.lives)))} · day ${(saved.day || 0) + 1}`;
+const savedLine = () => saved && `${fmt(saved.cash)} · ${'♥'.repeat(Math.max(0, Math.min(9, saved.lives)))} · day ${(saved.day || 0) + 1}${saved.heat >= 1 ? ` · ${Math.floor(saved.heat)}★` : ''}`;
 function titleInit() {
   resetWorld();
   player.hidden = true; player.car = null; dayT = 21 / 24; heat = 0; mission = null;
