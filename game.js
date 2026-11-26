@@ -9676,7 +9676,7 @@ function drawHUD() {
     if (overlay.sub) txt(overlay.sub, W / 2, overlay.y + 40, fs, '#fff', 'center');
     ctx.globalAlpha = 1;
   }
-  if (helpPage) drawHelp();
+  if (helpPage && state !== 'pause') drawHelp(); // (paused, it goes over the pause screen)
 }
 // the big banner (a new wanted level, WASTED, JOB DONE...) never covers the player: it goes just under the HUD at the
 // top, or, when the camera's lead has put the player up there, above the messages at the bottom
@@ -10255,7 +10255,7 @@ function drawAchPage(x, y, w, h) {
   }
   ly += ACH_REV[sel] && !ACH_GOT[sel] ? 63 : 46;
   if (!got.length) {
-    wrapLines('None yet. Each blank tile is one you haven\'t found: nothing tells you what it is until you have it, but the next one\'s name.', w - 40, '12px system-ui, sans-serif').forEach((l, i) => txt(l, W / 2, ly + 6 + i * 18, 12, '#aaa', 'center'));
+    wrapLines('None yet. Each blank tile is one you haven\'t found: nothing tells you what it is until you have it, but the next one\'s name.', w - 40, 'bold 12px ui-monospace, Menlo, Consolas, monospace').forEach((l, i) => txt(l, W / 2, ly + 6 + i * 18, 12, '#aaa', 'center'));
   } else {
     const n = Math.max(1, Math.floor((y + h - 30 - ly) / 19)), show = got.length > n ? got.slice(0, n - 1) : got;
     show.forEach((k, i) => {
@@ -10288,16 +10288,31 @@ function drawTitleAch() {
   ctx.font = '10px system-ui, sans-serif'; ctx.fillStyle = '#888'; ctx.textAlign = 'right'; ctx.fillText(touchOn() ? 'tap: all' : 'H: all', x + pw - 12, ny);
   titleAchRect = { x, y, w: pw, h: ph };
 }
+// the controls for the help's first page: each description wrapped to the box (on a narrow one, under its key), and how
+// tall that makes it
+function helpRows(w) {
+  const narrow = w < 500, kw = narrow ? 0 : 150, font = 'bold 12px ui-monospace, Menlo, Consolas, monospace';
+  const rows = HELP.map(([k, d]) => ({ k, d: wrapLines(d, w - 32 - kw - (narrow ? 12 : 0), font) }));
+  const foot = wrapLines(`Answer ringing payphones for jobs. Spray shops make the cops forget you. Reach ${fmt(GOAL)} to own the city.`, w - 32, font); // (in the font txt draws it in)
+  const lines = rows.reduce((a, r) => a + r.d.length + (narrow ? 1 : 0), 0), rowsH = lines * 15 + rows.length * 7;
+  return { narrow, kw, rows, foot, lines, rowsH, need: 62 + rowsH + 26 + foot.length * 16 + 20 };
+}
 function drawHelp() {
-  const w = Math.min(600, W - 24), h = Math.min(H - 24, 470), x = (W - w) / 2, y = (H - h) / 2;
+  const w = Math.min(600, W - 24), L = helpPage === 1 ? helpRows(w) : null, h = Math.min(H - 24, Math.max(470, L ? L.need : 0)), x = (W - w) / 2, y = (H - h) / 2;
   ctx.fillStyle = state === 'title' ? '#0a0a0e' : 'rgba(10,10,14,.94)'; ctx.fillRect(x, y, w, h); // (over the title's big letters: opaque)
   ctx.strokeStyle = helpPage === 2 ? '#b388ff' : '#ffd54a'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
   if (helpPage === 3) drawAchPage(x, y, w, h);
   else if (helpPage === 1) {
     txt('HOW TO PLAY', W / 2, y + 36, 22, '#ffd54a', 'center', true);
-    HELP.forEach(([k, d], i) => { txt(k, x + 16, y + 74 + i * 26, 13, '#ffd54a'); txt(d, x + 160, y + 74 + i * 26, 12, '#ddd'); });
-    const lines = wrapLines(`Answer ringing payphones for jobs. Spray shops make the cops forget you. Reach ${fmt(GOAL)} to own the city.`, w - 32, '12px system-ui, sans-serif');
-    lines.forEach((l, i) => txt(l, W / 2, y + h - 46 + i * 16, 12, '#aaa', 'center'));
+    const fy = y + h - 30 - (L.foot.length - 1) * 16, f = Math.min(1, (fy - 26 - (y + 62)) / L.rowsH); // (squeezed together on a short screen)
+    const lh = 15 * f, gap = 7 * f, fs = Math.max(9, Math.round(12 * Math.min(1, f * 1.15)));
+    let yy = y + 74;
+    for (const r of L.rows) {
+      txt(r.k, x + 16, yy, fs + 1, '#ffd54a'); if (L.narrow) yy += lh;
+      r.d.forEach((l, j) => txt(l, x + 16 + L.kw + (L.narrow ? 12 : 0), yy + j * lh, fs, '#ddd'));
+      yy += r.d.length * lh + gap;
+    }
+    L.foot.forEach((l, i) => txt(l, W / 2, fy + i * 16, 12, '#aaa', 'center'));
     txt('H: quantum notes', W / 2, y + h - 10, 11, '#777', 'center');
   } else {
     txt('QUANTUM NOTES', W / 2, y + 36, 22, '#b388ff', 'center', true);
@@ -10323,7 +10338,7 @@ function drawTitle() {
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, 'rgba(8,8,12,.55)'); g.addColorStop(1, 'rgba(8,8,12,.88)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  const big = Math.min(88, W / 10);
+  const big = Math.min(88, W / 10, H / 10); // (on a short window smaller, so it keeps clear of the lines below)
   // a "superposed" title: faint offset copies
   for (const [dx, col] of [[-4, 'rgba(179,136,255,.5)'], [4, 'rgba(77,208,225,.5)']]) txt('QUANT THEFT', W / 2 + dx * Math.sin(time * 2), H * 0.28, big, col, 'center', true);
   txt('QUANT THEFT', W / 2, H * 0.28, big, '#ffd54a', 'center', true);
@@ -10335,7 +10350,7 @@ function drawTitle() {
   txt(`${st.sub}  ·  ${touchOn() ? 'tap here to change' : '← → to change'}`, W / 2, H * 0.5 + 22, Math.min(13, W / 40), '#bbb', 'center');
   if (Math.sin(time * 4) > -0.3) txt(touchOn() ? 'TAP LEFT: PLAY · TAP RIGHT: PHYSICS LAB' : 'ENTER: PLAY  ·  L: PHYSICS LAB', W / 2, H * 0.6, Math.min(22, W / 24), '#fff', 'center', true);
   txt(touchOn() ? 'tap here for online co-op' : 'O: ONLINE CO-OP WITH A FRIEND', W / 2, H * 0.6 + 34, Math.min(15, W / 34), '#7dffd8', 'center', true);
-  if (W > 560) HELP.slice(0, 6).forEach(([k, d], i) => txt(`${k}  —  ${d}`, W / 2, H * 0.71 + i * 21, 13, '#bbb', 'center'));
+  if (W > 560) HELP.slice(0, 6).forEach(([k, d], i) => { const t = `${k}  —  ${d}`; ctx.font = 'bold 13px ui-monospace, Menlo, Consolas, monospace'; txt(t, W / 2, H * 0.71 + i * 21, Math.min(13, 13 * (W - 32) / ctx.measureText(t).width), '#bbb', 'center'); });
   if (best > 0) txt(`Best: ${fmt(best)}`, W / 2, H - 24, 14, '#ffd54a', 'center');
   drawTitleAch();
   if (helpPage === 3) drawHelp(); // (the achievements, opened over the title)
@@ -11806,12 +11821,15 @@ function frame(nowT) {
     else guestTick(dt);
   } else if (state === 'pause') {
     if (NET.guest) { NET.snapT -= dt; if (NET.snapT <= 0) { NET.snapT = 0.5; hostSnap(); } } // (keep the guest connected while paused)
-    if (hit('KeyQ') || (lab && hit('KeyL')) || (hit('Tap') && tapAt && tapAt.y > H * 0.75)) { // quit to the title screen
+    if (hit('KeyH')) { helpPage = (helpPage + 1) % 4; achSel = -1; } // (help, the quantum notes, the achievements, over the pause screen)
+    else if (helpPage === 3 && achPageInput()) { /* (a tile or the buy line, tapped) */ }
+    else if (helpPage && hit('Escape')) helpPage = 0;
+    else if (hit('KeyQ') || (lab && hit('KeyL')) || (!helpPage && hit('Tap') && tapAt && tapAt.y > H * 0.75)) { // quit to the title screen
       if (!lab) saveBest();
       if (NET.role) leaveNet();
       lab = null; helpPage = 0; titleInit(); state = 'title';
-    } else if (hit('KeyP', 'Escape', 'Enter')) state = 'play';
-    else if (hit('Tap')) { state = 'play'; helpPage = 1; }
+    } else if (hit('KeyP', 'Escape') || (helpPage !== 3 && hit('Enter'))) { state = 'play'; helpPage = 0; } // (on the achievements Enter buys)
+    else if (hit('Tap')) { if (helpPage) helpPage = (helpPage + 1) % 4; else { state = 'play'; helpPage = 1; } }
   } else if (state === 'aod') {
     updateAOD(dt);
   } else if (state === 'qc') {
@@ -11829,8 +11847,10 @@ function frame(nowT) {
     drawHUD();
     if (state === 'pause') {
       ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(0, 0, W, H);
+      if (helpPage) drawHelp(); else {
       txt('PAUSED', W / 2, H / 2, 64, '#fff', 'center', true);
       txt(touchOn() ? `tap for help, notes & achievements · tap near the bottom to ${lab ? 'leave the lab' : 'quit'}` : `P to resume · H for help, notes & achievements · Q to ${lab ? 'leave the lab' : 'quit to the title screen'}`, W / 2, H / 2 + 36, 14, '#ccc', 'center');
+      }
     }
     if (state === 'over') drawOver();
     if (state === 'aod') drawAOD();
