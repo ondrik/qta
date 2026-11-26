@@ -1,10 +1,10 @@
 #!/bin/sh
-# Rebuild inner Brno at 5 m a tile (the third map) from OpenStreetMap (© OpenStreetMap contributors, ODbL) into
-# ../../brno5_data.js. Needs curl and Python 3 with numpy, scipy, Pillow and shapely; shares ../brno/roads.py, net.py and
-# decks.py with the 15 m map. Overpass is a shared public service: run this rarely (the queries are big).
+# Rebuild inner Brno at 5 m a tile from OpenStreetMap (© OpenStreetMap contributors, ODbL) into ../../brno5_data.js.
+# Needs curl and Python 3 with numpy, scipy, Pillow and shapely; uses ../brno/roads.py (the projection), net.py and
+# decks.py (tracing the overpasses and tunnels), levels.py and gradecheck.py. Overpass is a shared public service: run
+# this rarely (the queries are big).
 set -e
 cd "$(dirname "$0")"
-export QTA_MAP=brno5
 api=${OVERPASS_API:-https://overpass-api.de/api/interpreter}  # (another instance, e.g. https://overpass.kumi.systems/api/interpreter, when that one is full)
 fetch() { curl -sS -A "qta-map-builder/1.0" --data-urlencode "data@$1" "$api" -o "$2"; head -c 1 "$2" | grep -q '{' || { echo "Overpass is busy: try again later, or set OVERPASS_API to another instance"; exit 1; }; }
 fetch q_roads.txt roads.json; sleep 10

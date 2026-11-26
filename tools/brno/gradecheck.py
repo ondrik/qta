@@ -1,12 +1,10 @@
 # Check the built network against OpenStreetMap's grade separations: wherever two roads cross at different layers (a
 # bridge over a street, a tunnel or an underpass beneath one) without meeting, the game must not have a junction there.
-# Usage: python3 gradecheck.py net.json [png]   (QTA_MAP=brno5 for the detailed map; run where roads.json is)
+# Usage: python3 gradecheck.py net5.json [png]   (run where roads.json is)
 import json, math, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from roads import P, MW, MH, SC, resample
-B5 = os.environ.get('QTA_MAP') == 'brno5'
-RK = {'motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link'}
-if B5: RK |= {'residential', 'unclassified', 'living_street'}
+RK = {'motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link', 'residential', 'unclassified', 'living_street'}
 def level(t):
     l = t.get('layer', '').split(';')[0]
     if l.lstrip('-').isdigit(): return int(l)
@@ -15,8 +13,7 @@ def ways():
     out = []
     for e in json.load(open('roads.json'))['elements']:
         t = e['tags']
-        if t.get('highway') not in RK or t.get('area') == 'yes' or (B5 and t.get('access') in ('private', 'no')): continue
-        if not B5 and t.get('highway') == 'tertiary_link': continue
+        if t.get('highway') not in RK or t.get('area') == 'yes' or t.get('access') in ('private', 'no'): continue
         out.append({'id': e['id'], 'name': t.get('name') or t.get('ref') or '', 'lv': level(t), 'nodes': e.get('nodes'), 'pts': [P(g['lat'], g['lon']) for g in e['geometry']], 'hw': t['highway']})
     return out
 def cross_pt(a, b, c, d):
@@ -52,7 +49,7 @@ if __name__ == '__main__':
     ends = {}
     for n, w in enumerate(net):
         for e in (tuple(round(v, 1) for v in w['pts'][0]), tuple(round(v, 1) for v in w['pts'][-1])): ends.setdefault(e, set()).add(n)
-    r = 2.0 if B5 else 1.4
+    r = 2.0
     def follows(w, way, x, y):
         """does game edge w run along OSM way `way` near (x, y)? (a stretch of it within a tile of the way, same direction)"""
         hits = 0
@@ -65,7 +62,7 @@ if __name__ == '__main__':
                 for (a, b) in zip(way['pts'], way['pts'][1:]):
                     L2 = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2 or 1e-9; u = max(0, min(1, ((m[0] - a[0]) * (b[0] - a[0]) + (m[1] - a[1]) * (b[1] - a[1])) / L2))
                     d = math.hypot(a[0] + (b[0] - a[0]) * u - m[0], a[1] + (b[1] - a[1]) * u - m[1]); da = abs(h - math.atan2(b[1] - a[1], b[0] - a[0])) % math.pi
-                    if d < (1.2 if B5 else 0.8) and min(da, math.pi - da) < 0.5: hits += 1; break
+                    if d < 1.2 and min(da, math.pi - da) < 0.5: hits += 1; break
         return hits >= 2
     bad = []
     RS = [resample(w['pts'], 1.0) for w in net]
@@ -82,7 +79,7 @@ if __name__ == '__main__':
     for b in bad: print('  ', b)
     if len(sys.argv) > 2:
         from PIL import Image, ImageDraw
-        S = 2 if B5 else 3; im = Image.new('RGB', (MW * S, MH * S), (35, 45, 35)); d = ImageDraw.Draw(im)
+        S = 2; im = Image.new('RGB', (MW * S, MH * S), (35, 45, 35)); d = ImageDraw.Draw(im)
         for w in net: d.line([(px * S, py * S) for px, py in w['pts']], fill=(255, 60, 200) if w.get('over') else (80, 160, 255) if w.get('tunnel') else (170, 170, 170), width=2)
         for (x, y, *_), i, k in X: d.ellipse([x * S - 3, y * S - 3, x * S + 3, y * S + 3], outline=(60, 220, 60))
         for b in bad: d.ellipse([b[0] * S - 7, b[1] * S - 7, b[0] * S + 7, b[1] * S + 7], outline=(255, 40, 40), width=2)

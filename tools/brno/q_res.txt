@@ -1,3 +1,0 @@
-[out:json][timeout:180];
-way["highway"~"^(residential|unclassified|living_street)$"](49.140,16.500,49.252,16.698);
-out tags geom;

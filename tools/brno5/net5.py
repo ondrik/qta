@@ -3,7 +3,7 @@
 # two one-way roads, slip roads, loops and roundabouts are as mapped, and a road crossing another on a bridge or in a
 # tunnel never meets it. A bridge over a street is a deck and a tunnel under one is a tunnel (as ../brno/decks.py
 # tells them apart); each street keeps its own lanes and width. Writes net5.json (bld5.py and export5.py read it).
-# Run from the data directory, with QTA_MAP=brno5.
+# Run from the data directory.
 import json, math, os, sys
 from collections import defaultdict
 import numpy as np

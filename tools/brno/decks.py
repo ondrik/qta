@@ -1,4 +1,4 @@
-# Overpasses and tunnels for both Brno maps: which bridges cross a street (and which tunnels pass under one), tracing
+# Overpasses and tunnels for the Brno map: which bridges cross a street (and which tunnels pass under one), tracing
 # them apart from the streets, hooking their ends onto the streets they continue, and giving each overpass ramps.
 import math
 from roads import resample, dp, seglen

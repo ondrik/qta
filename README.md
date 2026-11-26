@@ -3,12 +3,12 @@
 A lightweight top-down open-world crime sandbox that runs in the browser. You steal cars, take jobs from
 ringing payphones and shake off the cops. The twist is that some of the rules come from quantum mechanics.
 
-There are three maps: a whole island (a city, farmland, a desert casino town, a forested mountain and a tropical
-coast), **Brno**, and **inner Brno in detail**, with every street and the real buildings. Streets carry their names.
-You can play alone or **online with a friend**.
+There are two maps: a whole island (a city, farmland, a desert casino town, a forested mountain and a tropical
+coast) and **inner Brno**, with every street and the real buildings. Streets carry their names. You can play alone
+or **online with a friend**.
 
-No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 690 KB), plus
-`brno5_data.js` (3 MB) for the detailed map, loaded only when you pick it. Online co-op loads one small library,
+No build step and no dependencies: just `index.html` and `game.js` (plain canvas and WebAudio, about 820 KB), plus
+`brno5_data.js` (3.4 MB) for Brno, loaded only when you pick it. Online co-op loads one small library,
 and only when you open the co-op menu.
 
 Play it at **https://ondrik.github.io/qta/**.
@@ -46,16 +46,17 @@ To release, tag the commit (`git tag -a v7 -m "what changed"`) and push the tag 
 | Space in a tank / fire truck | fire the cannon / spray water |
 | R · M | radio station · minimap (M again shows the whole map, then hides it) |
 | P / Esc · H | pause (Q on the pause screen quits to the title screen) · help (press H again for the quantum notes, and again for your achievements) · N dismisses a note |
-| ← → · ↑ ↓ (title screen) | choose where to start · switch between the island, Brno and inner Brno in detail |
+| ← → · ↑ ↓ (title screen) | choose where to start · switch between the island and inner Brno |
 | L (title screen) | **Physics Lab**: 10 guided lessons (L again from the pause screen to leave) |
 | O (title screen) | **online co-op** with a friend |
+| H (title screen) | your achievements |
 
 On phones and tablets, touch buttons appear automatically. On the title screen, tap the left half to play
 and the right half for the Physics Lab.
 
 For testing there is a hidden **debug console**: type `debug` while playing (best while paused, since E and G also
 act in play). `tp <place>` teleports you to a start, site, district, street, tram stop, faculty and so on (`tp <x> <y>`
-to a tile, and on the Brno maps `tp <lat> <lon>`), `find <text>` lists the places, `where` tells you where you are,
+to a tile, and in Brno `tp <lat> <lon>`), `find <text>` lists the places, `where` tells you where you are,
 `wanted <n>` sets the wanted level, `car <type>` puts you in any vehicle (boats on the nearest water), `god` stops
 damage and arrests, and `stats` shows the frame time and how much is being simulated. `help` lists the rest, Esc
 closes it.
@@ -111,9 +112,10 @@ a tile for each, from the easiest to the hardest: gold for those you have (what 
 first), blank for the rest, but for the next one to find (the easiest you haven't that this map has), whose name
 shows as a hint. Pick a tile (arrow keys, or tap it) to read it; for one you haven't found, Enter (or a tap on its
 line) buys what to do for it, in detail, with the game's cash: the harder it is, the dearer ($500 for the easiest,
-$10,500 for the hardest). What you have bought is kept like the achievements. The title screen counts them. They are
-kept in your browser alone (local storage), and none come in a game where the debug console changed something (a new
-game clears that, unless god mode is still on). In online co-op your friend's go to their own browser.
+$10,500 for the hardest). What you have bought is kept like the achievements. The title screen shows them too, in its
+top right corner (H, or a tap on them, opens the page there). They are kept in your browser alone (local storage),
+and none come in a game where the debug console changed something (a new game clears that, unless god mode is still
+on). In online co-op your friend's go to their own browser.
 
 ## Fishing
 
@@ -160,63 +162,21 @@ screen: Quantum City, Bell's Crossing, Las Ondas, Coral Bay or the top of Mount 
 
 ## Brno
 
-Switch maps with ↑ or ↓ on the title screen (the island, Brno, inner Brno in detail). The Brno map is built from [OpenStreetMap](https://www.openstreetmap.org)
-data (© OpenStreetMap contributors, available under the [ODbL](https://opendatacommons.org/licenses/odbl/)): the
-main roads with their real names, the Svratka and Svitava, the reservoir, the railways, the land use (housing,
-industry, parks, forests, fields and vineyards) and the names of the districts. It covers about 14 × 12.5 km, from
-Bystrc and the reservoir dam in the west to Líšeň and the airport in the east. The map is 960 × 832 tiles, at
-roughly 15 m a tile.
-
-- **The road network** is the city's motorways, the Velký městský okruh, and its primary and secondary roads, plus
-  tertiary roads where they are the main way through a suburb or village. The roads are painted onto a fine grid,
-  thinned to their centre lines and traced, so divided roads and small roundabouts merge into single roads; a dead
-  end is joined to the network along the residential streets that link it in reality (or, where there are none,
-  straight across the gap), so the network is one connected graph. The railways are traced the same way.
-- **Tunnels**: the Královopolský and Husovický tunnels run under the city. The streets above cross them without
-  meeting them, and from the street you see only the ramps going down into the portals. Drive in and the city above
-  fades to show the lit tube. Nobody walks or gets out down there, and the police can't see you, so a tunnel is a
-  good way to shake them off.
-- **Overpasses**: where OpenStreetMap puts a road above one it crosses (on a bridge, or just on a higher layer: the
-  VMO's interchanges, the D1's junctions, Vídeňská, Hlavní, Jihlavská and many more), it rises on ramps to a deck of
-  its own, drawn raised in perspective with its parapets, piers and shadow. The traffic up there and the traffic
-  underneath don't meet, and the deck turns see-through while you drive under it. Two roads that cross at different
-  levels never meet in a junction: a deck that crosses a road stays a deck however short the bridge, a short stretch
-  of street between two decks goes up with them, and the street beyond a short bridge is kept clear of the road
-  underneath. Only a bridge's approaches, which cross nothing, join the streets. `tools/brno/gradecheck.py` checks
-  the built network against every grade-separated crossing in the data.
-- **City blocks**: paved lanes (you can drive down them) cut the big blocks between the main roads into blocks of a
-  real size. Tenement blocks are built around their edges with courtyards inside, industrial estates have yards,
-  housing estates have lawns between the slabs, and the old town is a maze of narrow lanes and little squares
-  between the burgher houses.
-- **Landmarks** sit at their real positions (moved a little if a road is in the way): Náměstí Svobody with the
-  astronomical clock, the Old Town Hall, Zelný trh, the cathedral on Petrov, Moravské náměstí, the Mahen and Janáček
-  theatres, Špilberk, the main station, Vaňkovka, the AZ Tower, Výstaviště, Lužánky, Vila Tugendhat, the observatory,
-  Mendel's abbey, the trauma hospital, the university hospital and Masaryk University's campus in Bohunice, the city
-  stadium, the zoo, the harbour on the reservoir, the quarry on Hády and Brno-Tuřany airport.
-- **The Moulin Rouge** is back where the night club stood until it was pulled down in 2022, on the corner of
-  Slovákova and Kounicova: the pink house with a red carpet at the door, chaser bulbs round the roof and a red mill
-  on the corner whose sails light up at night. Both clubs are marked in pink on the map.
-- **FIT BUT**, the Faculty of Information Technology of Brno University of Technology, is highlighted: the old
-  Carthusian monastery with its cloister and church, the glass wing with the FIT sign, its own marker on the map, a
-  start location of its own and the FIT Hackers story arc in Královo Pole. BUT's other faculties (FEKT, FSI, FCH, FP,
-  FAST, FA and FaVU) stand where they are, each with its letters on the roof in its colour and a diamond on the map.
-- **Districts** get their own buildings: burgher houses in the old town, tenements in the inner districts, villas
-  in Černá Pole, Stránice and Pisárky, panel estates in Lesná, Bystrc, Bohunice, Lískovec, Kohoutovice, Vinohrady
-  and Líšeň, warehouses on industrial land, and villages round the edge.
-
-The data was fetched once through the Overpass API and is embedded in `game.js`, so playing needs no network.
-
-### Inner Brno in detail
-
-The third map is inner Brno at about **5 m a tile**: 2241 × 1690 tiles, 11.2 × 8.5 km from the dam of the Brno
-reservoir, Bystrc and Královo Pole in the north to Komárov in the south, and from Kohoutovice to Židenice. At this
-scale a car, a street and a building are their real size.
+Switch maps with ↑ or ↓ on the title screen. Inner Brno is built from [OpenStreetMap](https://www.openstreetmap.org)
+data (© OpenStreetMap contributors, available under the [ODbL](https://opendatacommons.org/licenses/odbl/)) at about
+**5 m a tile**: 2241 × 1690 tiles, 11.2 × 8.5 km from the dam of the Brno reservoir, Bystrc and Královo Pole in the
+north to Komárov in the south, and from Kohoutovice to Židenice. At this scale a car, a street and a building are
+their real size. (Up to v24 there was also a coarser Brno map at 15 m a tile, covering more of the city; the version
+menu still has it.)
 
 - **Every street** with its name, built straight from OpenStreetMap's ways: a junction wherever ways share a point
   and nowhere else, so a dual carriageway is two one-way roads with its median between them, and every slip road,
   loop ramp and roundabout is where it is mapped (the Žabovřeská interchange, say). A road on a bridge over another is
   an overpass (76 of them, with their ramps) and one beneath another a tunnel: the Husovický, Královopolský and
-  Pisárecký tunnels, each tube on its own. Each street is as wide as its lanes, which come from OpenStreetMap (one to
+  Pisárecký tunnels, each tube on its own. A deck is drawn raised in perspective, with its parapets, piers and
+  shadow, and turns see-through while you drive under it; in a tunnel the city above fades to show the lit tube, and
+  the police can't see you. Two roads that cross at different levels never meet in a junction
+  (`tools/brno/gradecheck.py` checks the built network against every grade-separated crossing in the data). Each street is as wide as its lanes, which come from OpenStreetMap (one to
   four each way), with a dashed centre line, a double one on four lanes or more, and lane lines between lanes going the
   same way. One-way streets are one-way: traffic keeps to its lanes, turns into the kerbside lane after a right turn and
   the inner one after a left, and never takes a one-way street the wrong way (one that would strand it is two-way after
@@ -282,12 +242,12 @@ scale a car, a street and a building are their real size.
   market on Zelný trh, the Moulin Rouge back on its corner, a circus (big top, animal tent and wagons) where the
   Faculty of Informatics of Masaryk University stands on Botanická, the Atom Array Lab, and fishing on the Svratka and the
   Svitava.
-- It takes about 9 s to load and about 500 MB of memory. The data is built by `tools/brno5/build.sh` (from
+- It takes a few seconds to load (building the city from the data) and about 500 MB of memory. The data is built by `tools/brno5/build.sh` (from
   OpenStreetMap, © OpenStreetMap contributors, ODbL) into `brno5_data.js`, which `index.html` loads only for this map.
 
 ### Easter eggs (spoilers)
 
-On both Brno maps (in online co-op, for the host). The clock now keeps weekdays too: a game starts on a Friday.
+In Brno (in online co-op, for the host). The clock now keeps weekdays too: a game starts on a Friday.
 
 - **The orloj's marble**: from about 10:40 a crowd gathers round the astronomical clock on Náměstí Svobody. At 11:00 a
   glass marble rolls out of one of its openings: catch it on foot, and it gets you out of one arrest.

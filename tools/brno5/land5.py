@@ -1,6 +1,6 @@
 # Inner Brno's ground at 5 m a tile: what every tile is when no road or building stands on it (land5.npy, for the
 # game's rules), and the same areas as polygons in paint order (land5poly.json, for drawing their real edges).
-# Run from the data directory, with QTA_MAP=brno5 (the extent and resolution come from ../brno/roads.py).
+# Run from the data directory (the extent and resolution come from ../brno/roads.py).
 import json, math, os, sys
 import numpy as np
 from PIL import Image, ImageDraw

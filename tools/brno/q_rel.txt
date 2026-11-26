@@ -1,8 +1,0 @@
-[out:json][timeout:180];
-(
-  relation["natural"="water"](49.140,16.500,49.252,16.698);
-  relation["landuse"~"^(forest|farmland|vineyard|orchard|meadow|residential|industrial|commercial|retail)$"](49.140,16.500,49.252,16.698);
-  relation["natural"="wood"](49.140,16.500,49.252,16.698);
-  relation["leisure"="park"](49.140,16.500,49.252,16.698);
-);
-out geom;

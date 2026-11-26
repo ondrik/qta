@@ -7,7 +7,9 @@
 <meta name="description" content="A lightweight top-down open-city crime sandbox with quantum mechanics: superposed cars, entangled swaps and uncertain cops.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
+<!-- the title font, without holding up the page: until it arrives (or if it never does) the canvas uses Impact -->
+<link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet"></noscript>
 <style>
   html, body { margin: 0; height: 100%; background: #111; overflow: hidden;
     touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -36,7 +38,7 @@
   <div class="tb" data-p="KeyR"  style="right:20px;top:150px;width:44px;height:44px;font-size:14px">♪</div>
   <div class="tb" data-p="KeyP"  style="right:72px;top:150px;width:44px;height:44px;font-size:14px">II</div>
 </div>
-<script>try { var m = new URLSearchParams(location.search).get('map') || localStorage.getItem('qta.map'); if (m === 'brno5') document.write('<script src="brno5_data.js"><\/script>'); } catch (e) {}</script>
+<script>try { var m = new URLSearchParams(location.search).get('map') || localStorage.getItem('qta.map'); if (m === 'brno5' || m === 'brno') document.write('<script src="brno5_data.js"><\/script>'); } catch (e) {}</script>
 <script src="game.js"></script>
 </body>
 </html>
