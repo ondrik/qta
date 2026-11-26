@@ -80,6 +80,12 @@ charge), **ε** (two entanglement charges) and, once you have lost a life, a **�
 into one to take it. They show on the minimap in their colours, blink when they are about to go, and are gone after
 a minute or once you leave them behind.
 
+**Quantum tunnelling**: hit a wall, in a car or on foot, and now and then you come out on its far side, at the speed
+you hit it and unhurt. The chance (in the corner, after ψ and ε) grows the longer it has been since you last tunnelled,
+1 − e^(−t / 2 min): about a fifth after 30 s, two fifths after a minute, two thirds after two. Once you have, it starts
+again from nothing. A wall too thick, or one that hides a closed courtyard or water, you just hit. No tunnelling in
+the Physics Lab, near the Bureau's detectors, or from eight stars.
+
 Spray shops ($500) clear your wanted level (up to five stars). If you are wasted or busted you come back at the nearest hospital or
 police station, facing the street. Ramming a police car gets you at least one star, and that cruiser gives chase.
 So does killing someone where a cop sees it. If a passer-by sees it instead, they phone the police (☎ over their
@@ -123,7 +129,7 @@ a tile for each, from the easiest to the hardest: gold for those you have (what 
 first), blank for the rest, but for the next one to find (the easiest you haven't that this map has), whose name
 shows as a hint. Pick a tile (arrow keys, or tap it) to read it; for one you haven't found, Enter (or a tap on its
 line) buys what to do for it, in detail, with the game's cash: the harder it is, the dearer ($500 for the easiest,
-$10,700 for the hardest). What you have bought is kept like the achievements. The title screen shows them too, in its
+$12,500 for the hardest). What you have bought is kept like the achievements. The title screen shows them too, in its
 top right corner (H, or a tap on them, opens the page there). They are kept in your browser alone (local storage),
 and none come in a game where the debug console changed something (a new game clears that, unless god mode is still
 on). In online co-op your friend's go to their own browser.
@@ -260,8 +266,12 @@ menu still has it.)
 
 In Brno (in online co-op, for the host). The clock now keeps weekdays too: a game starts on a Friday.
 
-- **The orloj's marble**: from about 10:40 a crowd gathers round the astronomical clock on Náměstí Svobody. At 11:00 a
-  glass marble rolls out of one of its openings: catch it on foot, and it gets you out of one arrest.
+- **The orloj's marble**: from about 10:40 a crowd gathers round the astronomical clock on Náměstí Svobody (a polished
+  black stone bullet six metres tall, where it really stands). At 11:00 a glass marble rolls out of one of its
+  openings: catch it on foot, and it gets you out of one arrest.
+- **Moravské náměstí**: Margrave Jošt on his long-legged bronze horse (Odvaha, Courage), eight metres tall: you can
+  walk right under it. Outside the Supreme Administrative Court, Justice (Spravedlnost) lifts a heavy block on a jet of
+  water, and on some days the jet soaks the pavement: stand by it long enough and you get sprayed.
 - **Noon at eleven**: in 1645 the Swedes were to give up their siege if Brno held out until noon, and Petrov rang noon an
   hour early. Its bells ring at 11:00; wanted (up to five stars) within earshot, you lose two stars.
 - **The Brno dragon**: past midnight the crocodile from the Old Town Hall's passage prowls the old town and eats whoever
@@ -280,8 +290,18 @@ In Brno (in online co-op, for the host). The clock now keeps weekdays too: a gam
 - **Kometa**: on Tuesday, Friday and Sunday evenings the fans in blue and white stream to Hala Rondo, the hall roars
   during the match, and they pour out after it.
 - **Kraví hora** (Cow Hill) has cows.
+- **Animals on the loose**: a sea lion in Starý Lískovec (it barks), a giant panda between the Tesco on Cimburkova and
+  the Kaufland on Sportovní in Ponava (it sits and eats bamboo), and a golden jackal in Bystrc (it runs from you, and
+  howls at night).
+- **The quantum computer at FIT**: by the faculty's door (the QPU sign), press Enter and run Grover's search for the
+  PIN of a bank's vault. Each round the oracle flips the right PIN's amplitude and the diffusion step reflects them all
+  about their mean; measure after about π/4·√N rounds and you almost certainly get it ($1,000 to $5,000, once a day;
+  harder each time you win). Measure at the wrong moment and the dilution refrigerator needs 45 s to cool down again.
+- **The quantum clock at ÚPT**: by the gate of the Institute of Scientific Instruments on Královopolská, an optical
+  atomic clock shows the time to the nanosecond, and what is coming up in Brno (the orloj, the dragon, Kometa...).
 - **The Bren gun** (BRno + ENfield) lies in the old Zbrojovka works.
 - **Hantec**: type `hantec` and the messages speak Brno's slang (šalina, švestky, fáro, Svoboďák, Špilas, Rola...).
+  A browser set to Czech starts with it on; type `hantec` to switch it off (the choice is kept).
 - **The Carthusians**: at night monks in white walk FIT's old monastery cloister. They keep their vow of silence: whatever
   they see, they don't call the police.
 - **The duck** from the FIT students' club U Kachničky: pick it up and the debug console opens with ` (backquote).

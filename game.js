@@ -1469,9 +1469,8 @@ function genMap() {
       }
       // the squares of the old town
       let at;
-      if ((at = atGeo(49.1951, 16.6080, k => map[k] === PLAZA))) { prop('orloj', at[0] + 0.5, at[1] + 0.5); prop('statue', at[0] + 3.5, at[1] - 1.5); lamp(at[0] + 2, at[1] + 2, 55); SITES.unshift({ name: 'Náměstí Svobody', x0: at[0] - 4, y0: at[1] - 4, x1: at[0] + 4, y1: at[1] + 4 }); }
+      if ((at = atGeo(49.19480, 16.60859, k => map[k] === PLAZA))) { prop('orloj', at[0] + 0.5, at[1] + 0.5); prop('statue', at[0] + 3.5, at[1] - 1.5); lamp(at[0] + 2, at[1] + 2, 55); SITES.unshift({ name: 'Náměstí Svobody', x0: at[0] - 4, y0: at[1] - 4, x1: at[0] + 4, y1: at[1] + 4 }); }
       if ((at = atGeo(49.1922, 16.6089, k => map[k] === PLAZA))) { prop('market', at[0] - 1, at[1] + 0.5); prop('market', at[0] + 2, at[1] + 0.5); prop('fountain', at[0] + 0.5, at[1] + 3, { r: 18 }); }
-      if ((at = atGeo(49.1990, 16.6080, k => map[k] === PLAZA || map[k] === GRASS))) prop('statue', at[0] + 0.5, at[1] + 0.5);
       // hospitals, police stations and fire stations: the real buildings, with their vehicles outside
       for (const [am, name, px, py] of BRNO_DATA.pois) {
         if (am !== 'hospital' && am !== 'police' && am !== 'fire_station') continue;
@@ -2374,6 +2373,9 @@ const sfx = {
   splat: () => noise(0.16, 380, 'lowpass', 0.6),
   punch: () => noise(0.06, 900, 'lowpass', 0.5),
   pickup: () => { tone(660, 0.08, 'square', 0.07); tone(990, 0.12, 'square', 0.07, 0, now() + 0.08); },
+  sealion: () => { tone(470, 0.13, 'sawtooth', 0.08, 300); tone(450, 0.13, 'sawtooth', 0.08, 290, now() + 0.22); }, // (ar! ar!)
+  panda: () => { noise(0.07, 1300, 'bandpass', 0.25, 3); noise(0.07, 1100, 'bandpass', 0.25, 3, now() + 0.16); }, // (munching bamboo)
+  jackal: () => { tone(620, 0.55, 'sine', 0.07, 1000); tone(1000, 0.9, 'sine', 0.06, 640, now() + 0.55); }, // (a howl)
   ring: () => { tone(1250, 0.07, 'square', 0.05); tone(1550, 0.07, 'square', 0.05, 0, now() + 0.1); },
   horn: () => { tone(340, 0.28, 'square', 0.05); tone(430, 0.28, 'square', 0.04); },
   good: () => [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.18, 'square', 0.07, 0, now() + i * 0.09)),
@@ -2590,6 +2592,11 @@ const NOTES = {
     body: 'Excite an atom to a huge Rydberg state and it shifts the levels of every atom within a few micrometres, so two close atoms can\'t both be excited: the Rydberg blockade. One laser pulse over the whole entangling zone then gives every close pair a CZ gate at once and leaves lone atoms alone. A third atom within the radius spoils the gate (crosstalk). Qubits wait in a storage zone and are read out in a zone of their own, because the imaging light would disturb any qubit nearby.',
     lib: 'Game liberty: the blockade radius is a few micrometres, and a CZ gate only entangles qubits that start in superpositions. Here a clean pulse simply hands you an entangled pair.',
   },
+  tunnel: {
+    title: 'Quantum tunnelling',
+    body: 'A quantum particle can cross a barrier it hasn\'t the energy to climb. Its wavefunction doesn\'t stop at the wall: it fades away inside it, and if the wall is thin enough a little of it is left on the far side. That little is the chance of finding the particle there. Alpha decay, tunnel diodes, flash memory and the scanning tunnelling microscope all work this way.',
+    lib: 'Game liberty: for anything as big as a car the chance is so small that you would wait far longer than the age of the universe, and it doesn\'t grow while you wait. Here it does, so that it happens.',
+  },
   aod: {
     title: 'Shuttling with an AOD',
     body: 'An acousto-optic deflector makes a grid of moving tweezers from a set of x and y radio tones: there is a tweezer wherever a chosen row meets a chosen column. Moving a tone moves its whole row or column, so many atoms shuttle in parallel, but every atom at a crossing comes along, and rows and columns can never cross or merge. Planning such moves is a puzzle that compilers for neutral-atom quantum computers solve.',
@@ -2713,7 +2720,8 @@ function wallMove(c, dt) {
   return impact;
 }
 function moveCar(c, dt) {
-  const impact = wallMove(c, dt);
+  const vx0 = c.vx, vy0 = c.vy, impact = wallMove(c, dt);
+  const tun = impact > 60 && !c.lay && !CT[c.type].boat && !c.tram && (c === player.car || (NET.guest && c === NET.guest.player.car)) && carTunnel(c, vx0, vy0);
   if ((TUNNELS.length || OVERS.length) && !CT[c.type].boat) { // the layer the car is on: 0 the street, 1 a tunnel (only down a ramp, 2), 3 an overpass (only up a ramp, 4)
     const k = Math.floor(c.y / T) * MW + Math.floor(c.x / T), tz = tunT[k] || 0, oz = ovT[k] || 0, L0 = c.lay;
     if (tz && !(oz && (L0 === 3 || L0 === 4))) c.lay = L0 === undefined ? (tz === 1 && c.ln && c.ln.L.e.tunnel ? 1 : tz === 2 && rampAligned(c) ? 2 : 0)
@@ -2724,12 +2732,48 @@ function moveCar(c, dt) {
     }
     else c.lay = (L0 === 3 || L0 === 4) && onDeck(c.x, c.y) ? L0 : 0; // (by the parapet, past the deck's tiles: still up there)
   }
-  if (impact > 130) {
+  if (impact > 130 && !tun) {
     damageCar(c, (impact - 130) * 0.14, c.driver === 'player' ? 'player' : null);
     if (onScreen(c.x, c.y)) sfx.crash();
     if (c === player.car) { shake = Math.min(1, impact / 500); hardKnock(); if (CT[c.type].bike && impact > 200) bikeThrow(); }
     for (let i = 0; i < 5; i++) addPart(c.x, c.y, rand(-80, 80), rand(-80, 80), 0.3, 2, '#ffd27a');
   }
+}
+// ---- quantum tunnelling: hit a wall, in a car or on foot, and now and then you come out on its far side. The chance grows
+// the longer it has been since you last did (1 - e^(-t / 2 min): a fifth after 30 s, two fifths after a minute, two
+// thirds after two) and starts again from nothing once you have. (Not in the lessons, nor where X and T are blocked.)
+const TUN_TAU = 120;
+const tunChance = P => 1 - Math.exp(-Math.max(0, time - (P.tunT ?? time)) / TUN_TAU);
+const tunOpen = new Map(); // (is a tile out in the open, not in a closed courtyard? a flood fill that stops once it is big)
+function openGround(x, y) {
+  const k0 = Math.floor(y / T) * MW + Math.floor(x / T); if (tunOpen.has(k0)) return tunOpen.get(k0);
+  const seen = new Set([k0]), q = [k0]; let h = 0;
+  while (h < q.length && seen.size < 2500) { const k = q[h++], tx = k % MW, ty = (k / MW) | 0; for (let d = 0; d < 4; d++) { const nx = tx + DX[d], ny = ty + DY[d], n = ny * MW + nx; if (nx < 1 || ny < 1 || nx >= MW - 1 || ny >= MH - 1 || seen.has(n) || solidT(map[n])) continue; seen.add(n); q.push(n); } }
+  const r = seen.size >= 2500; for (const k of q) tunOpen.set(k, r); return r;
+}
+// o is the car or you on foot, P whose chance it is; returns the chance it had when it came off
+function tryTunnel(o, vx, vy, r, P, car) {
+  if (lab || qBlocked() || (P.tunRoll || 0) > time) return 0;
+  P.tunRoll = time + 0.6; // (one try a bump)
+  const v = Math.hypot(vx, vy), p = tunChance(P);
+  if (v < 40 || Math.random() >= p) return 0;
+  const ux = vx / v, uy = vy / v;
+  let d = 2; while (d < 40 && !solidAt(o.x + ux * d, o.y + uy * d)) d += 2; // (the wall ahead)
+  if (d >= 40) return 0;
+  while (d < 320 && solidAt(o.x + ux * d, o.y + uy * d)) d += 3; // (and through it)
+  const x = o.x + ux * (d + r + 4), y = o.y + uy * (d + r + 4);
+  if (d >= 320 || (car ? carHitsWall(o, x, y, o.angle) : circleSolid(x, y, r)) || !openGround(x, y)) return 0;
+  qburst(o.x, o.y, '#3cf0ff'); o.x = x; o.y = y; qburst(x, y, '#3cf0ff'); sfx.quantum();
+  P.tunT = time;
+  const t = `Quantum tunnelling: through the wall! (it had a ${Math.round(p * 100)}% chance; now it starts again from nothing)`;
+  if (P === player) { msg(t, 3.5); note('tunnel'); ach('tunnel'); } else asGuest(() => { msg(t, 3.5); note('tunnel'); ach('tunnel'); });
+  return p;
+}
+function carTunnel(c, vx, vy) {
+  const P = c === player.car ? player : NET.guest.player;
+  if (!tryTunnel(c, vx, vy, CT[c.type].w / 2 + 2, P, true)) return false;
+  c.vx = vx; c.vy = vy; c.speed = vx * Math.cos(c.angle) + vy * Math.sin(c.angle); // (and on at the speed it hit the wall)
+  return true;
 }
 // a hard knock to the player's car shrinks its branch amplitude and rattles Schrödinger's briefcase
 function hardKnock() {
@@ -4067,9 +4111,11 @@ function updatePlayer(dt) {
   if (HQ.bell && !player.isGuest) { updateBell(dt); return; }
   if (player.stun > 0) { player.stun -= dt; player.moving = false; const c = player.car; if (c && !c.tram) applyControls(c, 0, 0, false, dt); return; } // (Agent Spooky's wrist shock: nothing answers for a moment)
   const con = !player.car && CONSOLES.find(c => d2(c.x, c.y, player.x, player.y) < 28 * 28);
+  const qpc = !player.car && !player.isGuest && EA && EA.qpc && d2(EA.qpc.x, EA.qpc.y, player.x, player.y) < 26 * 26;
+  if (!!qpc !== !!player.qpcHint) { if (qpc) msg(`FIT BUT's quantum computer. ${touchOn() ? '⇄' : 'Enter'}: run Grover's search on it.`, 3); player.qpcHint = qpc; }
   const epr = !player.car && heat >= 8 ? eprPhones().findIndex(e => d2(e.x, e.y, player.x, player.y) < 30 * 30) : -1;
   if (epr !== player.eprHint) { if (epr >= 0) msg(`An entangled payphone. ${touchOn() ? '⇄' : 'Enter'}: a Bell measurement, and you teleport to its twin.`, 3); player.eprHint = epr; }
-  if (hit('Enter', 'KeyF', 'KeyE')) { const hz = !player.car && !player.isGuest ? eggHatchAt(player.x, player.y) : -1; if (hz >= 0) { enterCellar(hz); return; } const fs = !player.car && fishSpotAt(player.x, player.y); if (con) { aodOpen(); return; } if (epr >= 0) { startBell(epr); return; } if (fs) startFishing(fs); else enterExit(); }
+  if (hit('Enter', 'KeyF', 'KeyE')) { const hz = !player.car && !player.isGuest ? eggHatchAt(player.x, player.y) : -1; if (hz >= 0) { enterCellar(hz); return; } const fs = !player.car && fishSpotAt(player.x, player.y); if (qpc) { qcOpen(); return; } if (con) { aodOpen(); return; } if (epr >= 0) { startBell(epr); return; } if (fs) startFishing(fs); else enterExit(); }
   if (!player.car) { // walking up to a jetty or the AOD console: say what it is for
     const fs = fishSpotAt(player.x, player.y) || con;
     if (fs && fs !== player.fishHint) msg(fs === con ? `The AOD console: plan atom moves. ${touchOn() ? '⇄' : 'Enter'}: sit down.` : `A fishing jetty. ${touchOn() ? '⇄' : 'Enter'}: fish.`, 2.5);
@@ -4098,6 +4144,10 @@ function updatePlayer(dt) {
     player.angle += (keys.right - keys.left) * 4.2 * dt;
     const mv = keys.up ? 100 : keys.down ? -45 : 0;
     moveFree(player, Math.cos(player.angle) * mv, Math.sin(player.angle) * mv, dt, 4);
+    if (mv) { // (pushing at a wall, or sliding along it: little headway, and the wall right ahead)
+      const ux = Math.cos(player.angle) * Math.sign(mv), uy = Math.sin(player.angle) * Math.sign(mv);
+      if ((player.x - px) * ux + (player.y - py) * uy < Math.abs(mv) * dt * 0.75 && solidAt(player.x + ux * 9, player.y + uy * 9)) tryTunnel(player, ux * Math.abs(mv), uy * Math.abs(mv), 4, player, false);
+    }
     player.vx = (player.x - px) / dt; player.vy = (player.y - py) / dt;
     player.moving = mv !== 0;
     if (mv) player.anim += dt * 15;
@@ -4331,6 +4381,7 @@ function updateDrops(dt) { // (for each player: the host runs it again as the gu
     const u = drops[i], D = DROP[u.k];
     if (!dropShown(u) || d2(u.x, u.y, P0.x, P0.y) > 20 * 20 || (D.can && !D.can())) continue;
     D.give(); msg(D.label, 2); sfx.pickup(); drops.splice(i, 1);
+    if ((player.nDrops = (player.nDrops || 0) + 1) >= 25) ach('drops');
     for (let j = 0; j < 8; j++) addPart(u.x, u.y, rand(-60, 60), rand(-60, 60), 0.4, 2.5, D.c);
   }
 }
@@ -7735,9 +7786,7 @@ function drawProps(v) {
         ctx.font = 'bold 6px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(p.text, x - 1, y + 2); break;
       case 'orloj': { // Brno's astronomical clock: a polished black stone bullet on the square
         ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(x + 6, y + 6, 9, 7, 0, 0, TAU); ctx.fill();
-        const gr = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, 9); gr.addColorStop(0, '#6a6e78'); gr.addColorStop(0.5, '#22252c'); gr.addColorStop(1, '#0c0d10');
-        ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(x, y, 9, 0, TAU); ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1; for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(x, y, 3 + i * 1.6, 0.2 + i, 1.2 + i); ctx.stroke(); }
+        ctx.fillStyle = '#0c0d10'; ctx.beginPath(); ctx.arc(x, y, 7, 0, TAU); ctx.fill(); // (its foot: the stone itself stands six metres tall, drawn with the roofs, see drawOrloj)
         break;
       }
       case 'market': // a row of market stalls under striped awnings
@@ -8889,6 +8938,7 @@ function drawMarkers() {
   for (const s of SPRAYS) mk(s, '#9b59b6', 'SPRAY');
   for (const s of FISH_SPOTS) if (!player.fish || player.fish.s !== s) mk(s, '#29b6f6', 'FISH');
   for (const c of CONSOLES) mk(c, '#b388ff', 'AOD');
+  if (EA && EA.qpc) mk(EA.qpc, '#00a9e0', 'QPU'); // (FIT's quantum computer)
   for (const b of BOOTHS) {
     ctx.fillStyle = b === ringing && pulse > 0.5 ? '#ffe14d' : '#1e5d3a'; ctx.fillRect(b.x - 6, b.y - 6, 12, 12);
     ctx.fillStyle = '#fff'; ctx.fillRect(b.x - 3, b.y - 3, 6, 3);
@@ -9475,7 +9525,7 @@ function drawHUD() {
   drawEggsHUD();
   txt(fmt(player.cash), W - 16, 40 * s, 32 * s, '#ffd54a', 'right', true);
   txt(`x${player.mult}  ${'♥'.repeat(Math.max(0, player.lives))}`, W - 16, 64 * s, 16 * s, '#ff8a8a', 'right');
-  txt(`${eggBadges()}ψ×${Q.psi}  ε×${Q.ent}`, W - 16, 86 * s, 15 * s, '#c9b3ff', 'right');
+  txt(`${eggBadges()}ψ×${Q.psi}  ε×${Q.ent}  ${lab || qBlocked() ? 'tunnel –' : `tunnel ${Math.floor(tunChance(player) * 100)}%`}`, W - 16, 86 * s, 15 * s, '#c9b3ff', 'right'); // (and the chance of tunnelling through the next wall)
   const stars = Math.floor(heat), flash = heat >= 1 && belief.seen && Math.sin(time * 8) > 0;
   for (let i = 0; i < 5; i++) star(W / 2 - 60 + i * 30, 26, 11, i < stars, flash ? '#fff' : '#ffd54a');
   const WLv = WL[Math.min(10, stars)];
@@ -9602,10 +9652,11 @@ function drawHUD() {
   let my2 = H - (touchOn() ? 230 : 80);
   // keep messages clear of the quantum-note panel on the right
   const mx2 = Q.note && W > 700 ? (W - Math.min(380, W - 24) - 12) / 2 : W / 2;
-  for (let i = msgs.length - 1; i >= 0; i--) {
+  for (let i = msgs.length - 1; i >= 0; i--) { // (one too long for the screen goes on two lines, or more)
     ctx.globalAlpha = clamp(msgs[i].t, 0, 1);
-    txt(msgs[i].text, mx2, my2, small ? 13 : 17, '#fff', 'center');
-    my2 -= small ? 20 : 26;
+    const fs = small ? 13 : 17, L = wrapLines(msgs[i].text, Math.min(2 * mx2 - 24, 980), `bold ${fs}px ui-monospace, Menlo, Consolas, monospace`);
+    for (let j = L.length - 1; j >= 0; j--) { txt(L[j], mx2, my2, fs, '#fff', 'center'); my2 -= small ? 18 : 22; }
+    my2 -= small ? 2 : 4;
   }
   ctx.globalAlpha = 1;
   drawAchToast();
@@ -9654,6 +9705,92 @@ const AOD_LV = [
 ];
 AOD_LV[2].target = AOD_LV[2].gates.flat().map(x => [x, 0]);
 let AOD = null;
+// ---- FIT BUT's quantum computer: Grover's search. One of the PINs opens a bank's vault. Each round the oracle flips the
+// sign of the right PIN's amplitude and the diffusion step reflects every amplitude about their mean, which moves
+// amplitude onto it; measure after about π/4·√N rounds and it is almost certain, go on and it swings past and back down
+const QC_LV = [{ n: 2, pay: 1000 }, { n: 4, pay: 2500 }, { n: 6, pay: 5000 }]; // (qubits, and the vault's cash)
+let QC = null, qcWins = 0, qcDay = -1, qcCool = 0;
+function qcOpen() {
+  if (NET.role) { msg('The quantum computer is single-player for now.', 2.5); return; }
+  if (qcCool > time) { msg(`The dilution refrigerator is cooling back down to 10 mK: ${Math.ceil(qcCool - time)} s.`, 2.5); return; }
+  const L = QC_LV[Math.min(qcWins, QC_LV.length - 1)], N = 1 << L.n, a0 = 1 / Math.sqrt(N);
+  QC = { L, N, amp: new Array(N).fill(a0), prev: new Array(N).fill(a0), mark: randi(0, N - 1), k: 0, anim: 0, res: null, btn: [],
+    best: Math.round(Math.PI / (4 * Math.asin(1 / Math.sqrt(N))) - 0.5) };
+  state = 'qc'; touchEl.style.visibility = 'hidden'; sfx.quantum();
+}
+function qcClose() { QC = null; state = 'play'; touchEl.style.visibility = ''; }
+function qcStep() { // one round: the oracle, then the diffusion
+  const a = QC.amp; QC.prev = a.slice();
+  a[QC.mark] = -a[QC.mark];
+  const m = a.reduce((t, v) => t + v, 0) / a.length;
+  for (let i = 0; i < a.length; i++) a[i] = 2 * m - a[i];
+  QC.k++; QC.anim = 0.4; sfx.cast();
+}
+function qcMeasure() {
+  let r = Math.random(), i = 0;
+  for (; i < QC.N - 1; i++) { r -= QC.amp[i] ** 2; if (r < 0) break; }
+  const ok = i === QC.mark, paid = ok && qcDay !== dayN;
+  QC.res = { i, ok, p: QC.amp[QC.mark] ** 2, paid, pay: QC.L.pay };
+  if (ok) { if (paid) { earn(QC.L.pay); qcDay = dayN; } qcWins++; ach('quantumpc'); sfx.good(); }
+  else { qcCool = time + 45; sfx.bad(); }
+}
+function updateQC(dt) {
+  if (QC.anim > 0) QC.anim = Math.max(0, QC.anim - dt);
+  const tp = hit('Tap') && tapAt ? (QC.btn.find(b => tapAt.x > b.x && tapAt.x < b.x + b.w && tapAt.y > b.y && tapAt.y < b.y + b.h) || { k: 'any' }).k : null;
+  if (QC.res) { if (tp || hit('Enter', 'Space', 'Escape', 'KeyE', 'KeyF', 'NumpadEnter')) qcClose(); return; }
+  if (hit('Escape') || tp === 'leave') qcClose();
+  else if ((hit('Space', 'KeyG') || tp === 'round') && QC.anim <= 0) qcStep();
+  else if (hit('Enter', 'KeyM', 'NumpadEnter') || tp === 'measure') qcMeasure();
+}
+function drawFridge(cx, y0, h) { // the dilution refrigerator, the gold "chandelier": plates colder the lower they hang, the chip at the bottom
+  const plates = [[34, '4 K'], [28, '1 K'], [22, '100 mK'], [16, ''], [11, '10 mK']], gap = h / (plates.length + 0.6);
+  ctx.strokeStyle = '#b8903c'; ctx.lineWidth = 2; for (const dx of [-8, 0, 8]) { ctx.beginPath(); ctx.moveTo(cx + dx, y0); ctx.lineTo(cx + dx * 0.6, y0 + gap * (plates.length - 0.2)); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(200,160,90,.7)'; ctx.lineWidth = 1; for (let i = 0; i < 6; i++) { ctx.beginPath(); const x = cx - 20 + i * 8; ctx.moveTo(x, y0); for (let t = 0; t <= 1; t += 0.05) ctx.lineTo(x + Math.sin(t * 18 + i) * 3 * (1 - t), y0 + t * gap * (plates.length - 0.4)); ctx.stroke(); } // (the coax lines, coiled)
+  plates.forEach(([r, lab], i) => {
+    const y = y0 + i * gap, g = ctx.createLinearGradient(cx - r, y, cx + r, y); g.addColorStop(0, '#8a6424'); g.addColorStop(0.45, '#f3d27a'); g.addColorStop(1, '#9c742c');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(cx, y, r, 4.5, 0, 0, TAU); ctx.fill();
+    if (lab) { ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = '#9fb3c8'; ctx.fillText(lab, cx + r + 6, y + 3); }
+  });
+  const yc = y0 + gap * (plates.length - 0.3), pulse = 0.5 + 0.5 * Math.sin(time * 6);
+  ctx.fillStyle = `rgba(60,240,255,${0.25 + 0.35 * pulse})`; ctx.beginPath(); ctx.arc(cx, yc + 6, 12, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#1d2a36'; ctx.fillRect(cx - 7, yc, 14, 12); ctx.fillStyle = '#3cf0ff'; ctx.fillRect(cx - 4, yc + 3, 8, 6);
+}
+function drawQC() {
+  const Q0 = QC; if (!Q0) return;
+  const pw = Math.min(W - 16, 780), ph = Math.min(H - 16, 500), x0 = (W - pw) / 2, y0 = (H - ph) / 2, tch = touchOn(), wide = pw >= 560;
+  ctx.fillStyle = 'rgba(4,8,16,.94)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#0d1624'; ctx.fillRect(x0, y0, pw, ph); ctx.strokeStyle = '#00a9e0'; ctx.lineWidth = 2; ctx.strokeRect(x0, y0, pw, ph);
+  txt('FIT BUT · QUANTUM COMPUTER', x0 + pw / 2, y0 + 32, Math.min(22, pw / 26), '#00a9e0', 'center', true);
+  txt(`Grover's search · ${Q0.N} PINs, ${Q0.L.n} qubits · round ${Q0.k}`, x0 + pw / 2, y0 + 54, 12, '#cfe8f5', 'center');
+  if (wide) drawFridge(x0 + 72, y0 + 92, ph - 220);
+  // the amplitudes: up for plus, down for minus; the dashed line is their mean, the diffusion step reflects about it
+  const bx0 = wide ? x0 + 160 : x0 + 14, bw = x0 + pw - 14 - bx0, by0 = y0 + 76, bh = ph - 236, mid = by0 + bh * 0.62, sc = bh * 0.58;
+  const f = Q0.anim > 0 ? 1 - Q0.anim / 0.4 : 1, amp = Q0.amp.map((a, i) => lerp(Q0.prev[i], a, f * f * (3 - 2 * f)));
+  ctx.strokeStyle = 'rgba(160,190,220,.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(bx0, mid); ctx.lineTo(bx0 + bw, mid); ctx.stroke();
+  const cw = bw / Q0.N;
+  amp.forEach((a, i) => {
+    const hgt = a * sc, sel = Q0.res && Q0.res.i === i;
+    ctx.fillStyle = sel ? (Q0.res.ok ? '#7dff7a' : '#ff6b6b') : a >= 0 ? '#3cf0ff' : '#ff6b9a';
+    ctx.fillRect(bx0 + i * cw + cw * 0.15, Math.min(mid, mid - hgt), Math.max(1, cw * 0.7), Math.max(1, Math.abs(hgt)));
+    if (Q0.N <= 16) { ctx.font = `${Math.min(11, cw * 0.32)}px ui-monospace, monospace`; ctx.textAlign = 'center'; ctx.fillStyle = '#7f93a8'; ctx.fillText(i.toString(2).padStart(Q0.L.n, '0'), bx0 + (i + 0.5) * cw, by0 + bh + 14); }
+  });
+  const mean = amp.reduce((t, v) => t + v, 0) / amp.length;
+  ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(255,225,77,.8)'; ctx.beginPath(); ctx.moveTo(bx0, mid - mean * sc); ctx.lineTo(bx0 + bw, mid - mean * sc); ctx.stroke(); ctx.setLineDash([]);
+  // what it means, or what came out
+  const ty = y0 + ph - 132;
+  ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = '#aab8c8';
+  const tx = wrapLines(`Each round the oracle flips the sign of the right PIN's amplitude, and the diffusion step reflects every amplitude about their mean (the dashed line), which moves amplitude onto it. After about π/4·√N rounds (here ${Q0.best}) the right PIN is almost certain; go on and it swings back down. Measuring gives one PIN, with the chance its bar's height squared.`, pw - 28, '12px system-ui, sans-serif');
+  tx.forEach((l, i) => ctx.fillText(l, x0 + 14, ty + i * 15));
+  if (Q0.res) {
+    const R = Q0.res, pin = R.i.toString(2).padStart(Q0.L.n, '0');
+    txt(R.ok ? `|${pin}⟩: the right PIN! ${R.paid ? `The vault opens: +$${R.pay.toLocaleString('en')}` : 'The vault is already empty today'}` : `|${pin}⟩: wrong PIN (the right one had ${Math.round(R.p * 100)}%). 45 s to cool down again.`, x0 + pw / 2, y0 + ph - 50, 15, R.ok ? '#7dff7a' : '#ff6b6b', 'center');
+    txt(tch ? 'tap to leave' : 'any key to leave', x0 + pw / 2, y0 + ph - 24, 12, '#cfe8f5', 'center'); Q0.btn = [];
+  } else { // the buttons (keys on the labels)
+    const labs = [['round', tch ? 'ROUND' : 'ROUND · Space'], ['measure', tch ? 'MEASURE' : 'MEASURE · Enter'], ['leave', tch ? 'LEAVE' : 'LEAVE · Esc']], bwid = Math.min(190, (pw - 40) / 3);
+    Q0.btn = labs.map(([k, l], i) => ({ k, l, x: x0 + pw / 2 + (i - 1.5) * (bwid + 8) + 4, y: y0 + ph - 58, w: bwid, h: 38 }));
+    for (const b of Q0.btn) { ctx.fillStyle = b.k === 'measure' ? '#0b5c7a' : '#1b2a3a'; ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeStyle = '#00a9e0'; ctx.lineWidth = 1.5; ctx.strokeRect(b.x, b.y, b.w, b.h); txt(b.l, b.x + b.w / 2, b.y + 24, 13, '#fff', 'center'); }
+  }
+}
 const aodPaid = new Set(), aodSolved = new Set(); // (levels paid for and solved, this game or this lab lesson)
 function aodOpen(lv) {
   if (NET.role) { msg('The AOD console is single-player for now.', 2.5); return; }
@@ -9898,6 +10035,15 @@ const ACH = {
   drone: ['Drone Down', 'Shot down the Bureau\'s drone.'],
   carrier: ['Carrier Down', 'Brought down a P.L.A.N.C.K. Helicarrier.'],
   squad: ['The Constants', 'Beat all four of P.L.A.N.C.K.\'s heroes.'],
+  drops: ['Power-Up', 'Took 25 power-ups in one game.'],
+  tunnel: ['Quantum Leak', 'Went through a wall by quantum tunnelling.'],
+  quantumpc: ['Quantum Advantage', 'Found the PIN with Grover\'s search on FIT BUT\'s quantum computer.', 'b'],
+  qclock: ['Atomic Time', 'Read the quantum clock at the Institute of Scientific Instruments.', 'b'],
+  sealion: ['Ar! Ar!', 'Met the sea lion of Starý Lískovec.', 'b'],
+  panda: ['Pandamonium', 'Found the panda between the Tesco and the Kaufland.', 'b'],
+  jackal: ['Golden Jackal', 'Got close to the jackal of Bystrc.', 'b'],
+  jost: ['Under the Horse', 'Walked under Jošt\'s horse on Moravské náměstí.', 'b'],
+  justice: ['Wet Justice', 'Got sprayed by Justice outside the Supreme Administrative Court.', 'b'],
   // quantum
   superpose: ['Both Ways at Once', 'Put your car into a superposition.'],
   swap: ['Spooky Action', 'Measured an entangled pair and swapped places with your twin.'],
@@ -9943,14 +10089,14 @@ const ACH = {
 };
 // from the easiest to the hardest: the order of the tiles, and the next to find is the first you haven't (that can be had
 // on this map: the third field, b or 5 Brno)
-const ACH_ORDER = ['superpose', 'wasted', 'copcar', 'busted', 'swap', 'job', 'day', 'tourist', 'spilberk', 'station', 'jakub', 'tram', 'army', 'tank', 'sail', 'cellars', 'formula', 'bren', 'lab', 'atoms', 'schrodinger', 'wl6', 'kometa', 'cow', 'marble', 'bells', 'duck', 'hantec', 'coop', 'drone', 'wl7', 'qtunnel', 'train', 'arc', 'lucky', 'deadline', 'lowkey', 'ashore', 'wl8', 'teleport', 'mult9', 'monk', 'wl9', 'crowd', 'dragon', 'birk', 'conquer', 'wl10', 'notes', 'ground', 'carrier', 'squad'];
+const ACH_ORDER = ['superpose', 'wasted', 'copcar', 'busted', 'swap', 'job', 'drops', 'tunnel', 'day', 'tourist', 'spilberk', 'station', 'jakub', 'jost', 'qclock', 'tram', 'army', 'tank', 'sail', 'cellars', 'formula', 'bren', 'lab', 'atoms', 'quantumpc', 'schrodinger', 'wl6', 'kometa', 'cow', 'panda', 'sealion', 'jackal', 'justice', 'marble', 'bells', 'duck', 'hantec', 'coop', 'drone', 'wl7', 'qtunnel', 'train', 'arc', 'lucky', 'deadline', 'lowkey', 'ashore', 'wl8', 'teleport', 'mult9', 'monk', 'wl9', 'crowd', 'dragon', 'birk', 'conquer', 'wl10', 'notes', 'ground', 'carrier', 'squad'];
 const achHere = k => { const w = ACH[k][2]; return !w || (w === 'b' && BRNO) || (w === '5' && B5); };
 const ACH_GOT = (() => { try { const o = JSON.parse(localStorage.getItem('qta.ach') || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
 const achToasts = [];
 function ach(id) {
   if (!ACH[id] || ACH_GOT[id] || DBG.used) return;
   if (player.isGuest) { NET.ev.push(['ach', id]); return; } // (the friend's: it goes to their browser)
-  if (state === 'play' || state === 'aod') achGrant(id);
+  if (state === 'play' || state === 'aod' || state === 'qc') achGrant(id);
 }
 function achGrant(id) {
   if (!ACH[id] || ACH_GOT[id]) return;
@@ -10031,6 +10177,15 @@ const ACH_HOW = {
   notes: 'Meet every quantum note: try every quantum trick, from superposition to teleportation, and go fishing.',
   ground: 'At ten stars, drive through two different tunnels from end to end, unseen going in and coming out (on the island, with no tunnels: stay unseen 75 s).',
   carrier: 'At ten stars a P.L.A.N.C.K. Helicarrier comes: bring it down with twelve rockets.',
+  drops: 'Power-ups (ψ, ε and ♥) keep turning up around you: take 25 of them in one game.',
+  tunnel: 'Hit walls, in a car or on foot: now and then you tunnel through one. The chance (in the corner, by ψ and ε) grows the longer it has been since you last did.',
+  quantumpc: 'In Brno, walk up to FIT BUT\'s door (the QPU sign) and run Grover\'s search on its quantum computer: measure after the right number of rounds, and you find the PIN.',
+  qclock: 'In Brno, find the quantum clock by the gate of the Institute of Scientific Instruments (ÚPT AV ČR) on Královopolská.',
+  sealion: 'In Brno, a sea lion has got loose in Starý Lískovec. Go and find it.',
+  panda: 'In Brno, a panda wanders the streets between the Tesco on Cimburkova and the Kaufland on Sportovní, in Ponava.',
+  jackal: 'In Brno, a golden jackal roams Bystrc. It runs from you: get close (a car helps).',
+  jost: 'On Moravské náměstí, walk on foot right under the horse of Margrave Jošt.',
+  justice: 'On Moravské náměstí, stand by the statue of Justice outside the Supreme Administrative Court until its jet sprays you.',
   squad: 'At ten stars the Helicarrier sends down four heroes, one after another: the Collapser, Agent Spooky, Big Bang and the Tunneler. Beat all four (rockets help, and so does running them over, except Big Bang).',
 };
 // what to do for one you haven't found yet, bought with the game's cash (dearer the harder it is), kept like them
@@ -10338,11 +10493,30 @@ const EA = BRNO ? (() => {
   }
   // somewhere for the dragon to drink, failing a fountain: the nearest water
   if (A.hall) A.water = nearT(A.hall.x, A.hall.y, t => t === WATER, 2500);
+  // animals that got loose: a sea lion in Starý Lískovec, a panda between the Tesco (Cimburkova) and the Kaufland
+  // (Sportovní) in Ponava, a golden jackal in Bystrc; each roams the open ground round its spot
+  const roam = (x, y, Rm) => {
+    const R = Math.ceil(Rm / mpt), tx = Math.floor(x / T), ty = Math.floor(y / T), o = [];
+    for (let j = ty - R; j <= ty + R; j++) for (let i = tx - R; i <= tx + R; i++) if ((i - tx) ** 2 + (j - ty) ** 2 <= R * R && open(tile(i, j)) && !solidAt((i + 0.5) * T, (j + 0.5) * T) && outside(i, j)) o.push({ x: (i + 0.5) * T, y: (j + 0.5) * T });
+    return o.length > 400 ? o.filter((_, i) => i % Math.ceil(o.length / 400) === 0) : o;
+  };
+  const plc = n => { const p = BRNO_DATA.places.find(q => q[0] === n); return p ? { x: p[1] * T, y: p[2] * T } : null; };
+  A.zoo = [];
+  for (const [k, at, Rm] of [['sealion', plc('Starý Lískovec'), 220], ['panda', (([x, y]) => ({ x, y }))(P(49.21594, 16.60637)), 190], ['jackal', plc('Bystrc'), 300]]) {
+    const pts = at ? roam(at.x, at.y, Rm) : []; if (pts.length >= 8) A.zoo.push({ k, x: at.x, y: at.y, pts });
+  }
+  // the quantum clock by the gate of the Institute of Scientific Instruments (ÚPT) on Královopolská; FIT's quantum
+  // computer, through the faculty's door
+  A.qclock = nearT(...P(49.22202, 16.58368), (t, i, j) => foot(t) && outside(i, j) && byRoad(i, j), 160) || nearT(...P(49.22202, 16.58368), (t, i, j) => open(t) && outside(i, j), 220);
+  A.qpc = A.fitDoor || null;
+  // Moravské náměstí: Margrave Jošt on his long-legged horse (Odvaha, Courage) and, outside the Supreme Administrative
+  // Court, a man lifting a block on a jet of water (Spravedlnost, Justice)
+  if (B5) { const [jx, jy] = P(49.197636, 16.607535), [sx, sy] = P(49.197482, 16.607103); A.jost = { x: jx, y: jy, a: -Math.PI / 2 }; A.justice = { x: sx, y: sy }; }
   return A;
 })() : null;
-const EGG = { h: null, told: {}, crowdT: 0, marble: null, dragon: null, slain: -1, wheel: null, wheelSt: 'wait', wheelDay: -1, cows: [], cowT: 0, monks: [], student: null, deadDay: -1, roarT: 20, leaveT: 0, boosts: [] };
+const EGG = { h: null, told: {}, crowdT: 0, marble: null, dragon: null, slain: -1, wheel: null, wheelSt: 'wait', wheelDay: -1, cows: [], cowT: 0, monks: [], student: null, deadDay: -1, roarT: 20, leaveT: 0, boosts: [], zoo: [], splashT: 0, atClock: false };
 function eggReset() {
-  Object.assign(EGG, { h: null, told: {}, marble: null, dragon: null, slain: -1, wheel: null, wheelSt: 'wait', wheelDay: -1, cows: [], monks: [], student: null, deadDay: -1, boosts: [] });
+  Object.assign(EGG, { h: null, told: {}, marble: null, dragon: null, slain: -1, wheel: null, wheelSt: 'wait', wheelDay: -1, cows: [], monks: [], student: null, deadDay: -1, boosts: [], zoo: [], splashT: 0, atClock: false });
   player.marble = false; player.lime = false; player.cellar = null;
 }
 const eggOnce = (k, text, t = 4) => { if (EGG.told[k]) return false; EGG.told[k] = 1; msg(text, t); return true; };
@@ -10474,6 +10648,8 @@ function updateEggs(dt) {
   if (w === 5 && at(12)) msg('Friday: the students head home for the weekend, suitcases and all, to the main station.', 5);
   if (w === 0 && at(16)) msg('Sunday evening: the students are coming back to Brno.', 4);
   updateCows(dt, P0, near);
+  updateZoo(dt, P0, you, near);
+  updateSights(dt, P0, you, near);
   updateMonks(dt, h, near);
   updateDeadline(dt, h, at, P0, you, near);
 }
@@ -10663,6 +10839,70 @@ function updateCows(dt, P0, near) {
   }
 }
 const A_GRASS = () => EA.grass;
+// ---- the animals on the loose: each keeps near its spot, wanders, rests, and is bumped aside by cars like the cows;
+// the sea lion barks, the panda sits and eats, the jackal runs from you (and howls at night)
+const ZOO = {
+  sealion: { sp: 16, r: 7, meet: 70, line: 'A sea lion in Starý Lískovec! Nobody knows where it came from. Ar! Ar!' },
+  panda: { sp: 11, r: 7, meet: 70, line: 'A giant panda between the Tesco and the Kaufland. It isn\'t saying which one it came out of.' },
+  jackal: { sp: 46, r: 5, meet: 120, line: 'A golden jackal in Bystrc. They have spread into Moravia by themselves, from the Balkans.' },
+};
+function updateZoo(dt, P0, you, near) {
+  for (const Z of EA.zoo) {
+    let w = EGG.zoo.find(o => o.k === Z.k);
+    if (!w) { if (!near(Z, 1500)) continue; const g = pick(Z.pts); w = { k: Z.k, x: g.x, y: g.y, a: rand(TAU), t: rand(0, 4), g: null, vx: 0, vy: 0, hit: 0, s: randi(0, 9999), run: 0, say: rand(2, 6), anim: 0 }; EGG.zoo.push(w); }
+    else if (!near(Z, 2400)) { EGG.zoo = EGG.zoo.filter(o => o !== w); continue; }
+    const D = ZOO[w.k], d = Math.hypot(w.x - P0.x, w.y - P0.y);
+    w.hit -= dt; w.say -= dt;
+    if (you && d < D.meet && eggOnce(w.k, D.line, 5)) { ach(w.k); sfx[w.k](); }
+    if (w.k === 'jackal' && you && d < 130 && w.run <= 0) { w.run = 2.5; w.g = null; }
+    if (w.run > 0) { // (away from you, at a run)
+      w.run -= dt; const a = Math.atan2(w.y - P0.y, w.x - P0.x); w.a += clamp(wrapA(a - w.a), -dt * 6, dt * 6);
+      moveFree(w, Math.cos(w.a) * 140, Math.sin(w.a) * 140, dt, D.r); w.anim += dt * 40;
+    } else if (Math.abs(w.vx) + Math.abs(w.vy) > 2) { moveFree(w, w.vx, w.vy, dt, D.r); w.vx *= Math.exp(-dt * 4); w.vy *= Math.exp(-dt * 4); }
+    else if (w.t > 0) w.t -= dt;
+    else {
+      if (!w.g) { let b = null; for (let i = 0; i < 12; i++) { const g = pick(Z.pts); if (d2(g.x, g.y, w.x, w.y) < 160 * 160) { b = g; break; } } w.g = b || pick(Z.pts); }
+      const dx = w.g.x - w.x, dy = w.g.y - w.y, l = Math.hypot(dx, dy);
+      if (l < 5) { w.g = null; w.t = w.k === 'panda' ? rand(8, 18) : w.k === 'sealion' ? rand(3, 9) : rand(1, 4); }
+      else {
+        w.a += clamp(wrapA(Math.atan2(dy, dx) - w.a), -dt * 2, dt * 2); const px = w.x, py = w.y;
+        moveFree(w, Math.cos(w.a) * D.sp, Math.sin(w.a) * D.sp, dt, D.r); w.anim += dt * D.sp * 0.4;
+        if (Math.abs(w.x - px) + Math.abs(w.y - py) < 0.02) { w.g = null; w.t = rand(1, 3); }
+      }
+    }
+    if (w.hit <= 0) for (const c of cars) {
+      if (c.dead || c.lay === 1 || CT[c.type].boat || c.tram || d2(c.x, c.y, w.x, w.y) > 18 * 18) continue;
+      const dx = w.x - c.x, dy = w.y - c.y, l = Math.hypot(dx, dy) || 1, sp = Math.abs(c.speed);
+      w.vx = dx / l * (40 + sp * 0.4); w.vy = dy / l * (40 + sp * 0.4); w.hit = 1; w.t = rand(2, 4); w.g = null;
+      c.speed *= 0.5; if (sp > 60) damageCar(c, 4 + sp * 0.03, null);
+      if (onScreen(w.x, w.y)) sfx[w.k]();
+      break;
+    }
+    if (w.say <= 0) { w.say = rand(7, 15); if ((w.k === 'sealion' || (w.k === 'jackal' && darkness() > 0.3)) && d < 600 && onScreen(w.x, w.y, 300)) sfx[w.k](); }
+  }
+}
+// ---- Moravské náměstí: walk under Jošt's horse; Justice, whose jet now and then soaks the pavement. ÚPT's quantum clock
+function updateSights(dt, P0, you, near) {
+  const J = EA.jost, S = EA.justice, C = EA.qclock;
+  EGG.atClock = !!(you && C && near(C, 60));
+  if (!you) return;
+  if (J && near(J, 170)) {
+    eggOnce('jost', 'Odvaha (Courage): Margrave Jošt on a horse eight metres tall. Brno likened it to a giraffe; you can walk right under it.', 6);
+    if (!player.car && near(J, 14) && eggOnce('jostUnder', 'You walked under Jošt\'s horse.', 3)) ach('jost');
+  }
+  if (S && near(S, 150)) {
+    eggOnce('justice', 'Spravedlnost (Justice): a man lifting a heavy block on a jet of water, outside the Supreme Administrative Court.', 6);
+    EGG.splashT -= dt;
+    if (!player.car && near(S, 30) && EGG.splashT <= 0) {
+      EGG.splashT = 5;
+      if (Math.random() < 0.6) {
+        for (let k = 0; k < 18; k++) addPart(S.x + rand(-6, 6), S.y + rand(-6, 6), rand(-90, 90), rand(-90, 90), 0.6, 2.5, '#bfe6ff', 0, true);
+        msg('Justice sprays you. On some days its jet soaks the pavement: Brno calls him the man stealing a bidet.', 5); ach('justice');
+      }
+    }
+  }
+  if (EGG.atClock && eggOnce('qclock', 'ÚPT\'s quantum clock: an optical atomic clock, the most precise time in Brno.', 4)) ach('qclock');
+}
 // ---- the Carthusians at FIT: the faculty's old monastery has its monks back at night, walking the cloister. They have
 // taken a vow of silence: whatever they see, they won't call the police
 function updateMonks(dt, h, near) {
@@ -10744,6 +10984,7 @@ function eggGetIn(c) {
 function drawEggs(v, pass) {
   if (!EA) return;
   const inV = (o, m = 60) => o && o.x > v.x0 - m && o.x < v.x1 + m && o.y > v.y0 - m && o.y < v.y1 + m;
+  if (pass === 2) { if (B5 && EA.orloj && inV(EA.orloj, 120)) drawOrloj(EA.orloj); if (EA.justice && inV(EA.justice, 120)) drawJustice(EA.justice); if (EA.jost && inV(EA.jost, 170)) drawJost(EA.jost); if (EA.qclock && inV(EA.qclock, 100)) drawQClock(EA.qclock); }
   if (pass === 0) {
     for (const q of EA.hatches) if (inV(q)) { // an iron hatch in the paving
       ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(q.x - 7, q.y - 6, 15, 15);
@@ -10760,6 +11001,7 @@ function drawEggs(v, pass) {
     if (EA.board && inV(EA.board, 80)) drawBoard(EA.board);
   } else if (pass === 1) {
     for (const w of EGG.cows) if (inV(w, 30)) drawCow(w);
+    for (const w of EGG.zoo) if (inV(w, 30)) drawAnimal(w);
     if (EGG.dragon && inV(EGG.dragon, 80)) drawDragon(EGG.dragon);
   } else if (pass === 2 && EA.jakub && inV(EA.jakub, 120)) { // (high on the wall: where the walls are drawn, lifted)
     const J = EA.jakub, k = 1 + J.z, x = cam.x + (J.x - cam.x) * k, y = cam.y + (J.y - cam.y) * k;
@@ -10797,6 +11039,98 @@ function drawDragon(d) { // a crocodile seen from above: tail sweeping, legs pad
   if (d.eat > 0 || d.bite > 0.8) { ctx.fillStyle = '#f2efe4'; for (let x = 15; x < 25; x += 2.2) { ctx.fillRect(x, -2.6, 0.9, 0.9); ctx.fillRect(x, 1.7, 0.9, 0.9); } }
   ctx.fillStyle = NIGHT > 0.3 ? '#ffe25a' : '#c9a227'; ctx.beginPath(); ctx.arc(12.5, -3.2, 1.3, 0, TAU); ctx.arc(12.5, 3.2, 1.3, 0, TAU); ctx.fill();
   ctx.restore();
+}
+// ---- the animals, seen from above (facing +x)
+function drawAnimal(w) {
+  ctx.save(); ctx.translate(w.x, w.y); ctx.rotate(w.a);
+  const g = Math.sin(w.anim * 3), rest = w.t > 0 && !(w.run > 0);
+  if (w.k === 'sealion') { // sleek and brown, fore-flippers out, the tail flippers behind
+    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(2, 2, 12, 5, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#3e3024'; ctx.beginPath(); ctx.ellipse(3, -6 - g * 0.6, 4, 1.6, -0.5, 0, TAU); ctx.ellipse(3, 6 + g * 0.6, 4, 1.6, 0.5, 0, TAU); ctx.ellipse(-12, -2.2, 3, 1.3, 0.5, 0, TAU); ctx.ellipse(-12, 2.2, 3, 1.3, -0.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#6b5442'; ctx.beginPath(); ctx.ellipse(0, 0, 10.5, 4.6, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(160,130,100,.45)'; ctx.beginPath(); ctx.ellipse(-1, -1.4, 7, 1.6, 0, 0, TAU); ctx.fill(); // (wet sheen)
+    const hx = rest ? 9 + Math.sin(time * 2 + w.s) * 0.8 : 9.5;
+    ctx.fillStyle = '#6b5442'; ctx.beginPath(); ctx.ellipse(hx, 0, 3.6, 3, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#2a201a'; ctx.beginPath(); ctx.arc(hx + 3.2, 0, 1.1, 0, TAU); ctx.fill(); ctx.fillStyle = '#111'; ctx.fillRect(hx + 0.6, -1.9, 1, 1); ctx.fillRect(hx + 0.6, 0.9, 1, 1);
+    ctx.strokeStyle = 'rgba(240,235,220,.7)'; ctx.lineWidth = 0.4; ctx.beginPath(); for (const v of [-1, 1]) { ctx.moveTo(hx + 3, v * 0.8); ctx.lineTo(hx + 5.6, v * 2.4); } ctx.stroke();
+  } else if (w.k === 'panda') { // black and white, sitting with a bamboo stalk when it rests
+    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(2, 2, 9, 7, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#1b1b1b'; for (const [u, v] of [[4.5, -5.6], [4.5, 5.6], [-4.5, -5.4], [-4.5, 5.4]]) { ctx.beginPath(); ctx.ellipse(u + (u > 0 ? g : -g) * 0.6, v, 2.4, 1.9, 0, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = '#f1f0ea'; ctx.beginPath(); ctx.ellipse(0, 0, 8, 6, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#1b1b1b'; ctx.fillRect(2, -6, 2.6, 12); // (the black band over its shoulders)
+    ctx.fillStyle = '#f1f0ea'; ctx.beginPath(); ctx.arc(8.6, 0, 4.1, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#1b1b1b'; ctx.beginPath(); ctx.arc(7.4, -3.6, 1.5, 0, TAU); ctx.arc(7.4, 3.6, 1.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(10.2, -1.6, 1.3, 0.9, 0.4, 0, TAU); ctx.ellipse(10.2, 1.6, 1.3, 0.9, -0.4, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.arc(12.4, 0, 0.8, 0, TAU); ctx.fill();
+    if (rest) { ctx.strokeStyle = '#6dbb4a'; ctx.lineWidth = 1.3; const b = Math.sin(time * 4 + w.s) * 0.8; ctx.beginPath(); ctx.moveTo(10, 4 + b); ctx.lineTo(17, 8 + b); ctx.stroke(); ctx.fillStyle = '#8fd46a'; ctx.beginPath(); ctx.ellipse(17.5, 8.5 + b, 2, 0.8, 0.5, 0, TAU); ctx.fill(); }
+  } else { // the golden jackal: lean and tawny, a bushy tail with a dark tip
+    ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(1, 2, 10, 4, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#7a5a30'; ctx.lineWidth = 1.2; ctx.beginPath(); for (const [u, v] of [[4, -2.6], [4, 2.6], [-4, -2.6], [-4, 2.6]]) { const o = (u > 0 ? g : -g) * (v > 0 ? 1 : -1) * 1.8; ctx.moveTo(u, v); ctx.lineTo(u + o, v * 1.5); } ctx.stroke();
+    ctx.fillStyle = '#a07a44'; ctx.beginPath(); ctx.ellipse(-10, Math.sin(time * 5 + w.s) * 0.8, 4.2, 1.7, 0, 0, TAU); ctx.fill(); ctx.fillStyle = '#2a1e10'; ctx.beginPath(); ctx.arc(-13.6, 0, 1, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#c19a5b'; ctx.beginPath(); ctx.ellipse(0, 0, 8, 3.2, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#c9a466'; ctx.beginPath(); ctx.ellipse(8, 0, 3, 2.4, 0, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.ellipse(11, 0, 2, 1.2, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#8d6a3a'; ctx.beginPath(); ctx.moveTo(7, -1.8); ctx.lineTo(5.2, -4); ctx.lineTo(8.4, -2.4); ctx.moveTo(7, 1.8); ctx.lineTo(5.2, 4); ctx.lineTo(8.4, 2.4); ctx.fill();
+    ctx.fillStyle = '#1a1208'; ctx.beginPath(); ctx.arc(12.8, 0, 0.7, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+// ---- what stands tall on the squares, drawn with the roofs and lifted by its height (a metre is PXM px; heights over HC)
+const hexOf = (r, g, b) => '#' + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+const ORLOJ_SH = Array.from({ length: 15 }, (_, i) => hexOf(12 + i * 2.2, 13 + i * 2.3, 16 + i * 2.6));
+function drawOrloj(O) { // Brno's astronomical clock: a polished black granite bullet 5.9 m tall, rounded on top
+  const H = 5.87 * PXM / HC, R = 6.5, n = ORLOJ_SH.length - 1;
+  for (let i = 0; i <= n; i++) {
+    const f = i / n, r = f < 0.7 ? R : R * Math.sqrt(Math.max(0, 1 - ((f - 0.7) / 0.3) ** 2));
+    if (r < 0.5) continue;
+    const [x, y] = proj(O.x, O.y, H * f); ctx.fillStyle = tint(ORLOJ_SH[i]); ctx.beginPath(); ctx.arc(x, y, r * (1 + H * f), 0, TAU); ctx.fill();
+  }
+  const [x, y] = proj(O.x, O.y, H * 0.82); ctx.strokeStyle = `rgba(255,255,255,${0.35 * (1 - NIGHT * 0.7)})`; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.arc(x - 0.8, y - 0.8, R * 0.62, 3.3, 4.8); ctx.stroke(); // (the polish)
+}
+function drawJost(J) { // Odvaha: Margrave Jošt on a bronze horse whose legs reach six metres; you can walk under it
+  const z = m => m * PXM / HC, ca = Math.cos(J.a), sa = Math.sin(J.a), at = (u, v, h) => proj(J.x + ca * u - sa * v, J.y + sa * u + ca * v, z(h));
+  const br = tint('#52442f'), hi = tint('#7d6a48');
+  if (SUN.on) { ctx.fillStyle = `rgba(12,18,40,${0.22 * (1 - NIGHT)})`; ctx.beginPath(); ctx.ellipse(J.x + SUN.sx * 36, J.y + SUN.sy * 36, 16, 7, J.a, 0, TAU); ctx.fill(); }
+  ctx.strokeStyle = br; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+  for (const [u, v] of [[9, -3.5], [9, 3.5], [-9, -3.5], [-9, 3.5]]) { const a = at(u * 1.1, v * 1.4, 0), b = at(u, v, 5.6); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+  ctx.lineCap = 'butt';
+  const [bx, by] = at(0, 0, 6), k = 1 + z(6);
+  ctx.save(); ctx.translate(bx, by); ctx.rotate(J.a); ctx.scale(k, k);
+  ctx.strokeStyle = br; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(-12, 0); ctx.quadraticCurveTo(-18, 1, -19, 4); ctx.stroke(); // (the tail)
+  ctx.fillStyle = br; ctx.beginPath(); ctx.ellipse(0, 0, 13, 5, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = hi; ctx.beginPath(); ctx.ellipse(-2, -1.4, 9, 2, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = br; ctx.beginPath(); ctx.ellipse(14, 0, 6, 2.6, 0, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.ellipse(20.5, 0, 4, 2.2, 0, 0, TAU); ctx.fill(); // (neck and head)
+  ctx.restore();
+  const [rx, ry] = at(-1, 0, 7.4), k2 = 1 + z(7.4);
+  ctx.save(); ctx.translate(rx, ry); ctx.rotate(J.a); ctx.scale(k2, k2);
+  ctx.fillStyle = tint('#463a28'); ctx.beginPath(); ctx.ellipse(-1.5, 0, 4.6, 5.6, 0, 0, TAU); ctx.fill(); // (his cloak)
+  ctx.fillStyle = hi; ctx.beginPath(); ctx.arc(1.4, 0, 2.4, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+function drawJustice(S) { // Spravedlnost: a man bent under a heavy block that a jet of water holds up
+  const z = m => m * PXM / HC, br = tint('#5c4a33'), hi = tint('#86704e');
+  ctx.fillStyle = 'rgba(110,150,185,.28)'; ctx.beginPath(); ctx.ellipse(S.x, S.y, 15, 13, 0, 0, TAU); ctx.fill(); // (the wet stone)
+  const [jx, jy] = proj(S.x, S.y, z(2.4));
+  ctx.strokeStyle = 'rgba(205,238,255,.75)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(S.x, S.y); ctx.lineTo(jx, jy); ctx.stroke();
+  const k1 = 1 + z(1.5), [mx, my] = proj(S.x - 3, S.y + 2.5, z(1.5));
+  ctx.fillStyle = br; ctx.beginPath(); ctx.ellipse(mx, my, 3.4 * k1, 4.8 * k1, 0.4, 0, TAU); ctx.fill();
+  ctx.fillStyle = hi; ctx.beginPath(); ctx.arc(mx - k1, my + 2.8 * k1, 2 * k1, 0, TAU); ctx.fill();
+  const k2 = 1 + z(2.7), [bx, by] = proj(S.x, S.y, z(2.7));
+  ctx.save(); ctx.translate(bx, by); ctx.rotate(0.3); ctx.scale(k2, k2);
+  ctx.fillStyle = br; ctx.fillRect(-7.5, -5.5, 15, 11); ctx.fillStyle = hi; ctx.fillRect(-7.5, -5.5, 15, 2.6);
+  ctx.restore();
+  ctx.fillStyle = 'rgba(215,242,255,.85)';
+  for (let i = 0; i < 12; i++) { const a = i * 2.4 + time * 0.7, f = (time * 1.3 + i * 0.37) % 1, r = 6 + f * 17, [px, py] = proj(S.x + Math.cos(a) * r, S.y + Math.sin(a) * r, z(2.5) * (1 - f)); ctx.fillRect(px - 0.8, py - 0.8, 1.6, 1.6); }
+}
+function drawQClock(C) { // ÚPT's quantum clock: a dial on a post, ringed by the violet glow of its lasers
+  const z = 3.2 * PXM / HC, [x, y] = proj(C.x, C.y, z), k = 1 + z;
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(C.x + 4, C.y + 4, 6, 4, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = tint('#3a4450'); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(C.x, C.y); ctx.lineTo(x, y); ctx.stroke();
+  ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(150,110,255,${0.22 + 0.15 * Math.sin(time * 3)})`; ctx.beginPath(); ctx.arc(x, y, 14 * k, 0, TAU); ctx.fill(); ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = tint('#2b3440'); ctx.beginPath(); ctx.arc(x, y, 10 * k, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#eef3ff'; ctx.beginPath(); ctx.arc(x, y, 8 * k, 0, TAU); ctx.fill();
+  ctx.strokeStyle = '#2b3440'; ctx.lineWidth = 0.8; ctx.beginPath(); for (let i = 0; i < 12; i++) { const a = i * TAU / 12; ctx.moveTo(x + Math.cos(a) * 6.4 * k, y + Math.sin(a) * 6.4 * k); ctx.lineTo(x + Math.cos(a) * 7.6 * k, y + Math.sin(a) * 7.6 * k); } ctx.stroke();
+  const hh = dayT * 24, hand = (a, l, w, c) => { ctx.strokeStyle = c; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a - Math.PI / 2) * l * k, y + Math.sin(a - Math.PI / 2) * l * k); ctx.stroke(); };
+  hand((hh % 12) / 12 * TAU, 4.2, 1.6, '#1d2330'); hand((hh % 1) * TAU, 6.4, 1.1, '#1d2330'); hand(((hh * 60) % 1) * TAU, 7, 0.6, '#c0392b');
+  ctx.fillStyle = '#7c4dff'; ctx.beginPath(); ctx.arc(x, y, 1.2 * k, 0, TAU); ctx.fill();
 }
 function drawCow(w) {
   ctx.save(); ctx.translate(w.x, w.y); ctx.rotate(w.a);
@@ -10849,6 +11183,28 @@ function drawDuck(x, y) { // a yellow rubber duck
   ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 4.2, y - 3.4, 0.7, 0, TAU); ctx.fill();
 }
 function drawEggsHUD() {
+  if (EGG.atClock && EA && EA.qclock && state === 'play') { // ÚPT's clock: the exact time, and what is coming up in Brno
+    const w = Math.min(390, W - 24), x = W - w - 12, y = 172, hh = dayT * 24, p2 = n => String(n).padStart(2, '0');
+    const fmt = E => `${p2(Math.floor(E))}:${p2(Math.round((E % 1) * 60))}`;
+    const ev = [[11, 'the orloj\'s marble, Petrov\'s noon'], [0, 'the dragon comes out'], [5, 'Birk\'s wheel waits']];
+    if (matchDay()) ev.push([17.5, 'Kometa\'s face-off']);
+    if (weekday() === 5) ev.push([12, 'students head home']);
+    const up = ev.map(([E, t]) => ({ E, t, d: ((E - hh) % 24 + 24) % 24 })).sort((a, b) => a.d - b.d).slice(0, 3);
+    const body = wrapLines('Strontium atoms held in a lattice of laser light tick 429,228,004,229,873 times a second. A clock like this would drift by less than a second over the age of the universe.', w - 24, '12px system-ui, sans-serif');
+    const lib = wrapLines('Game liberty: no such clock stands at the gate. The Institute of Scientific Instruments works on lasers, electron microscopes and precise measurement.', w - 24, 'italic 11px system-ui, sans-serif');
+    const h = 76 + body.length * 15 + 20 + up.length * 16 + 8 + lib.length * 14 + 10;
+    ctx.fillStyle = 'rgba(12,8,30,.86)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = '#9f7bff'; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, w, h);
+    txt('ÚPT AV ČR · THE QUANTUM CLOCK', x + 12, y + 20, 12, '#b9a2ff');
+    const sec = (hh * 3600) % 60;
+    txt(`${p2(Math.floor(hh))}:${p2(Math.floor((hh % 1) * 60))}:${sec.toFixed(9).padStart(12, '0')}`, x + 12, y + 50, 22, '#ffffff');
+    ctx.textAlign = 'left'; ctx.font = '12px system-ui, sans-serif'; ctx.fillStyle = '#d8d0ff'; body.forEach((l, i) => ctx.fillText(l, x + 12, y + 72 + i * 15));
+    let yy = y + 72 + body.length * 15 + 10;
+    ctx.font = 'bold 12px system-ui, sans-serif'; ctx.fillStyle = '#ffe14d'; ctx.fillText('Coming up in Brno', x + 12, yy); yy += 16;
+    ctx.font = '12px system-ui, sans-serif'; ctx.fillStyle = '#e8e8f0';
+    for (const u of up) { ctx.textAlign = 'left'; ctx.fillText(`${fmt(u.E)}  ${u.t}`, x + 12, yy); ctx.textAlign = 'right'; ctx.fillText(`in ${Math.floor(u.d)} h ${p2(Math.floor((u.d % 1) * 60))} min`, x + w - 12, yy); yy += 16; }
+    ctx.textAlign = 'left';
+    ctx.font = 'italic 11px system-ui, sans-serif'; ctx.fillStyle = '#a99fd0'; lib.forEach((l, i) => ctx.fillText(l, x + 12, yy + 6 + i * 14));
+  }
   if (player.cellar) { // in the dark under the old town: a candle, the vaults
     const c = player.cellar, f = clamp(Math.min(2.6 - c.t, c.t) * 3, 0, 1);
     ctx.fillStyle = `rgba(6,5,4,${0.93 * f})`; ctx.fillRect(0, 0, W, H);
@@ -10942,7 +11298,7 @@ function addGuest() {
   NET.hostCam = cam;
   ach('coop');
   NET.guest = { player: { x: near.x, y: near.y, vx: 0, vy: 0, angle: 0, hp: 100, car: null, weapons: {}, weapon: null, cash: 0, lives: 5, mult: 1, anim: 0, moving: false,
-    shootCd: 0, bust: 0, down: 0, downKind: null, hidden: false, shirt: '#2ee88a', skin: '#c68642', hair: '#2a1a0a', pants: '#24304a', isGuest: true, inPsi: false },
+    shootCd: 0, bust: 0, down: 0, downKind: null, hidden: false, tunT: time, tunRoll: 0, shirt: '#2ee88a', skin: '#c68642', hair: '#2a1a0a', pants: '#24304a', isGuest: true, inPsi: false },
     keys: { up: 0, down: 0, left: 0, right: 0, fire: 0 }, pressed: {}, cam: { x: near.x, y: near.y, zoom: cam.zoom }, msgs: [], overlay: null, curDistrict: -1,
     Q: { psi: 1, ent: 2, link: null, linkT: 0, decoy: null, decoyT: 0, branches: null, supT: 0, grace: 0, obsT: 0, notes: new Set(), note: null }, spawnT: 0, policeCd: 0, serviceCd: 0, rbCd: 6 };
   msg('Your friend joined: they are the one in green.', 4);
@@ -10969,7 +11325,7 @@ function hostSnap() {
   const pk = pickups.map(u => u.cd > 0 ? 0 : 1).join('');
   const snap = { t: 's', time: +time.toFixed(2), dayT: +dayT.toFixed(5), dn: dayN, heat: +heat.toFixed(2), bel: [belief.x | 0, belief.y | 0, belief.sig | 0, belief.seen ? 1 : 0],
     fl: flight.on ? [flight.x | 0, +flight.alt.toFixed(2)] : 0, TR, he: heli ? [heli.x | 0, heli.y | 0, +heli.angle.toFixed(2), +heli.rot.toFixed(2), heli.dead ? 1 : 0, +(heli.fall || 0).toFixed(2), heli.army ? 1 : 0] : 0, C, P, B, hq: HQ,
-    me: [gp.x | 0, gp.y | 0, +gp.angle.toFixed(2), gp.hp | 0, gp.car ? nid(gp.car) : 0, gp.weapons, gp.weapon, gp.cash | 0, gp.lives, gp.mult, +gp.down.toFixed(2), gp.downKind, gp.moving ? 1 : 0, +gp.anim.toFixed(1), gq.psi, gq.ent, gq.link ? nid(gq.link) : 0, gq.branches ? gq.branches.map(b => [b.x | 0, b.y | 0, +b.angle.toFixed(2), b.tint, +(b.amp || 0).toFixed(2)]) : 0],
+    me: [gp.x | 0, gp.y | 0, +gp.angle.toFixed(2), gp.hp | 0, gp.car ? nid(gp.car) : 0, gp.weapons, gp.weapon, gp.cash | 0, gp.lives, gp.mult, +gp.down.toFixed(2), gp.downKind, gp.moving ? 1 : 0, +gp.anim.toFixed(1), gq.psi, gq.ent, gq.link ? nid(gq.link) : 0, gq.branches ? gq.branches.map(b => [b.x | 0, b.y | 0, +b.angle.toFixed(2), b.tint, +(b.amp || 0).toFixed(2)]) : 0, +(gp.tunT ?? time).toFixed(1)],
     ho: [player.x | 0, player.y | 0, +player.angle.toFixed(2), player.car ? nid(player.car) : 0, player.hidden || (player.down && player.downKind === 'busted') ? 1 : 0, player.moving ? 1 : 0, +player.anim.toFixed(1), player.down && player.downKind === 'wasted' ? 1 : 0],
     mt: tg ? [tg.x | 0, tg.y | 0, mission ? 1 : 0] : 0, ml, dr: drops.map(u => [u.id, u.x | 0, u.y | 0, DROP_K.indexOf(u.k), +u.age.toFixed(1)]), rg: ringing ? BOOTHS.indexOf(ringing) : -1, ev: NET.ev };
   if (pk !== NET.pkSent) { snap.pk = pk; NET.pkSent = pk; }
@@ -11034,7 +11390,8 @@ function guestApply(d) {
   cars = cars.filter(c => c.type); // (never draw something whose looks haven't arrived)
   bullets = d.B.map(([x, y, r]) => ({ x, y, rocket: !!r }));
   if (d.TR) { const old = new Map(trams.map(t => [t.id, t])); trams = d.TR.map(([id, ri, s, pi, mi, f, v]) => { const R = TL[ri]; let t = old.get(id); if (!t) { t = newTram(R, s, null, TRAM_MODELS[mi]); t.id = id; } if (t.R !== R) { t.R = R; t.s = s; } t.ts = s; t.prev = pi >= 0 ? TL[pi] : null; t.v = v; t.doors = f & 1; t.dead = !!(f & 2); return t; }); }
-  const [x, y, a, hp, car, w, wp, cash, lives, mult, down, dk, mv, an, psi, ent2, link, br] = d.me;
+  const [x, y, a, hp, car, w, wp, cash, lives, mult, down, dk, mv, an, psi, ent2, link, br, tunT] = d.me;
+  if (tunT !== undefined) player.tunT = tunT;
   Object.assign(player, { tx: x, ty: y, ta: a, hp, weapons: w, weapon: wp, cash, lives, mult, down, downKind: dk, moving: !!mv, anim: an });
   if (Math.hypot(player.x - x, player.y - y) > 300) { player.x = x; player.y = y; }
   player.car = car ? E.get(car) || null : null;
@@ -11175,9 +11532,9 @@ function switchMap() {
 function newGame() {
   resetWorld();
   const at = STARTS[startSel];
-  Object.assign(player, { hp: 100, car: null, weapons: {}, weapon: null, cash: 0, lives: 5, mult: 1, down: 0, bust: 0, hidden: false, x: at.p.x, y: at.p.y, angle: faceOpen(at.p.x, at.p.y), inPsi: false, fish: null, tow: null, fishHint: null, marble: false, marbleT: 0, lime: false, cellar: null });
+  Object.assign(player, { hp: 100, car: null, weapons: {}, weapon: null, cash: 0, lives: 5, mult: 1, down: 0, bust: 0, hidden: false, x: at.p.x, y: at.p.y, angle: faceOpen(at.p.x, at.p.y), inPsi: false, fish: null, tow: null, fishHint: null, marble: false, marbleT: 0, lime: false, cellar: null, nDrops: 0, stun: 0, tunT: time, tunRoll: 0 });
   Object.assign(Q, { psi: 1, ent: 2, link: null, linkT: 0, decoy: null, decoyT: 0, branches: null, note: null, slow: false, bb: null });
-  lab = null; labCars = []; labFlags = {}; arcProg = DISTRICTS.map(() => 0); dayT = 17 / 24; aodPaid.clear(); aodSolved.clear(); dayN = 0;
+  lab = null; labCars = []; labFlags = {}; arcProg = DISTRICTS.map(() => 0); dayT = 17 / 24; aodPaid.clear(); aodSolved.clear(); dayN = 0; qcWins = 0; qcDay = -1; qcCool = 0;
   heat = 0; belief.sig = 0; mission = null; ringing = null; ringCd = 3; won = false; curDistrict = -1; msgs = []; overlay = null;
   updateCamera(0, true);
   fillSpots(true);
@@ -11267,7 +11624,7 @@ function dbgPlaces() {
   try { eprPhones().forEach((e, i) => add('payphone ' + (i + 1), e.x, e.y)); } catch (e) { /* (none on this map) */ }
   if (EA) { // (the easter eggs)
     const e = EA, f = EGG_SPOTS.find(q => q.type === 'formula');
-    if (e.orloj) add('orloj', e.orloj.x, e.orloj.y + 40); if (e.hall) { add('dragon', e.hall.x, e.hall.y); add('Old Town Hall gate', e.hall.x, e.hall.y); }
+    if (e.orloj) add('orloj', e.orloj.x, e.orloj.y + 40); for (const z of e.zoo) add(z.k === 'sealion' ? 'sea lion' : z.k, z.x, z.y); if (e.qclock) add('quantum clock', e.qclock.x, e.qclock.y + 30); if (e.qpc) add('quantum computer', e.qpc.x, e.qpc.y + 30); if (e.jost) add('Jošt', e.jost.x + 40, e.jost.y); if (e.justice) add('Justice', e.justice.x, e.justice.y + 30); if (e.hall) { add('dragon', e.hall.x, e.hall.y); add('Old Town Hall gate', e.hall.x, e.hall.y); }
     if (e.wheel) add('wheel', e.wheel.x + 30, e.wheel.y + 30); e.hatches.forEach((q, i) => add('hatch ' + (i + 1), q.x, q.y + 26));
     if (e.jakub) add('little man', e.jakub.x, e.jakub.y); if (e.board) add('new station', e.board.x, e.board.y + 40); add('mendel', e.mendel.x, e.mendel.y);
     add('rondo', e.rondo.door.x, e.rondo.door.y); add('cows', e.kravi.x, e.kravi.y); if (e.cloister.length) add('cloister', e.cloister[0].x, e.cloister[0].y);
@@ -11457,6 +11814,8 @@ function frame(nowT) {
     else if (hit('Tap')) { state = 'play'; helpPage = 1; }
   } else if (state === 'aod') {
     updateAOD(dt);
+  } else if (state === 'qc') {
+    updateQC(dt);
   } else if (state === 'over') {
     time += dt;
     if (hit('Enter', 'Tap', 'NumpadEnter')) newGame();
@@ -11475,6 +11834,7 @@ function frame(nowT) {
     }
     if (state === 'over') drawOver();
     if (state === 'aod') drawAOD();
+    if (state === 'qc') drawQC();
   }
   dbgDraw(); DBG.ft += (performance.now() - ft0 - DBG.ft) * 0.05;
   for (const k in pressed) delete pressed[k];
