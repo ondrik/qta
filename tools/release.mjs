@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RELEASE = /^v\d+$/;
-const FILES = ['index.html', 'game.js', 'brno5_data.js']; // everything a version needs to run (older ones lack some)
+const FILES = ['index.html', 'game.js', 'brno5_data.js', 'sw.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png']; // everything a version needs to run (older ones lack some)
 
 const git = (...args) => execFileSync('git', args,
   { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();

@@ -16,7 +16,12 @@ On a slower computer the game keeps itself playable. When it falls under 30 fram
 up; once there is room again it goes back up. A browser that holds every page at 30 frames a second, as on battery,
 is left alone.
 
-Play it at **https://ondrik.github.io/qta/**.
+Play it at **https://ondrik.github.io/qta/**. It installs as an app (the browser's "Install" or "Add to Home
+Screen"), and once you have played it starts with no connection too, on each map you have opened.
+
+The game in progress is saved, one per map, every 20 seconds, when you pause and when you switch away; the title
+screen then offers to continue it (C, or tap the line). Kept: where you are and the car you're in, your cash, lives,
+weapons and quantum charges, the arcs, the day. Not a job in progress, nor the wanted level. Game over clears it.
 
 Every released version stays playable: pick one from the version menu on the title screen, or browse
 **https://ondrik.github.io/qta/v/**.
@@ -68,6 +73,18 @@ and how much is being simulated, and `quality <0-5>` fixes the detail level (`qu
 again). `help` lists the rest, Esc closes it.
 
 Goal: reach **$100,000**. Ringing payphones give jobs, and each finished job raises your cash multiplier.
+Among the jobs: a **duel** with one of P.L.A.N.C.K.'s heroes, sent down for you alone; a crate in a **sealed
+courtyard**, walled in on every side, that you can only reach (and leave) by tunnelling through the wall (the barrier
+is thin there: your chance is high); and in Brno, a vault's PIN found with **Grover's search** on FIT's quantum
+computer, then the vault before the PIN changes, and a parcel stamped by **ÚPT's quantum clock**, to be delivered on
+the minute (within three game minutes; a game minute is a second). Those three are also an arc of their own, **The
+Planck Files**, from the payphone in Žabovřesky.
+
+**The Bell test** (the BELL sign: by the Atom Array Lab, and in Brno also at Masaryk University's Faculty of Science
+on Kotlářská): entangled photon pairs fly to Alice and Bob, who each measure at one of two polariser angles,
+picked at random for each pair. Turn the four polarisers (← → picks one, ↑ ↓ turns it by 7.5°) and run 800 pairs: if
+each photon carried its answers with it, |S| = |E(a,b) − E(a,b′) + E(a′,b) + E(a′,b′)| could never pass 2. Get it past
+2.3 and you have broken Bell's inequality ($3,000, once a day).
 **Boats** lie moored along the banks of the reservoir (in Brno) and of the island's sea, lakes and river, and more
 are anchored out on the water: walk up to one on the bank and press Enter. Speedboats, rowing boats and sailing
 dinghies (the wind drives a dinghy, and it can't sail straight into it: the red pennant at its masthead shows which
@@ -119,7 +136,7 @@ and its way out show under the first. From seven stars up a level doesn't fade b
 | 7 · State of emergency | The army: checkpoints of armoured carriers and soldiers on the bridges and at the tunnel mouths ahead, carriers with mounted guns, and an attack helicopter whose rockets land where a red ring marks the street. Way out: lie low for 60 s unseen, or on foot face a wall and press T to spend an ε charge tunnelling through the building, out of their sight, or take a boat across the water and get out on a bank unseen, far from where you put out (about 75 tiles; lose the Bureau's drone first). Either takes you back to five stars. |
 | 8 · The Observer | A measurement sweep every 20 s: wherever you are, they know. No superposition or entanglement at all, no ε pickups. Jets strafe your street (a red strip marks their run). Way out: one of the entangled payphones, cyan on the map (at the Atom Array Lab and, in Brno, at FIT BUT). A Bell measurement there (press Space as the arrow crosses the window, two out of three) teleports you to the other one, and you are down to three stars. |
 | 9 · Demolition | Armoured bulldozers come straight through the buildings. Hide behind one and a wrecking crew brings it down on you, leaving rubble across the street. Fuel tankers lie jack-knifed and burning in the junctions ahead, and a crane swings a wrecking ball over a main junction. Way out: 45 s unseen in a pedestrian zone or square, back to five stars. |
-| 10 · Air assault | Swarms of kamikaze drones (a red ring marks where each dives; shoot them down), paratroopers, squads roped down from helicopters onto the street ahead, and a P.L.A.N.C.K. Helicarrier that comes in over the city and circles beside you while its searchlight hunts for you (twelve rockets bring it down; bullets pass under it). It sends down its heroes one after another: the **Collapser**, an armoured flyer whose visor beam burns and keeps you seen; **Agent Spooky**, a spy entangled with you, who appears beside you, shoots, and stuns you (or stalls your car) with a wrist shock; **Big Bang**, a giant who leaps after you, lands with a shockwave and throws cars at you; and the **Tunneler**, who walks straight through buildings, digs ahead of you and grabs your car. Shoot them, rocket them or run them over (Big Bang stops a car dead); beaten, each is beamed back up. Way out: go to ground, through two different tunnels from end to end, unseen going in and coming out, back to five stars. On the island, with no tunnels, lie low 75 s unseen. |
+| 10 · Air assault | Swarms of kamikaze drones every 18 s (a red ring marks where each dives, 1.2 s ahead; two hits take you down; shoot them down), paratroopers, squads roped down from helicopters onto the street ahead, and a P.L.A.N.C.K. Helicarrier that comes in over the city and circles beside you while its searchlight hunts for you (twelve rockets bring it down; bullets pass under it). It sends down its heroes one after another, two at most at a time: the **Collapser**, an armoured flyer whose visor beam burns and keeps you seen; **Agent Spooky**, a spy entangled with you, who appears beside you, shoots, and stuns you (or stalls your car) with a wrist shock; **Big Bang**, a giant who leaps after you, lands with a shockwave and throws cars at you; and the **Tunneler**, who walks straight through buildings, digs ahead of you and grabs your car. Shoot them, rocket them or run them over (Big Bang stops a car dead); beaten, each is beamed back up. Way out: go to ground, through two different tunnels from end to end, unseen going in and coming out, back to five stars. On the island, with no tunnels, lie low 75 s unseen. |
 
 ### Achievements
 
@@ -129,7 +146,7 @@ a tile for each, from the easiest to the hardest: gold for those you have (what 
 first), blank for the rest, but for the next one to find (the easiest you haven't that this map has), whose name
 shows as a hint. Pick a tile (arrow keys, or tap it) to read it; for one you haven't found, Enter (or a tap on its
 line) buys what to do for it, in detail, with the game's cash: the harder it is, the dearer ($500 for the easiest,
-$12,500 for the hardest). What you have bought is kept like the achievements. The title screen shows them too, in its
+$12,700 for the hardest). What you have bought is kept like the achievements. The title screen shows them too, in its
 top right corner (H, or a tap on them, opens the page there). They are kept in your browser alone (local storage),
 and none come in a game where the debug console changed something (a new game clears that, unless god mode is still
 on). In online co-op your friend's go to their own browser.

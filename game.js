@@ -2592,6 +2592,11 @@ const NOTES = {
     body: 'Excite an atom to a huge Rydberg state and it shifts the levels of every atom within a few micrometres, so two close atoms can\'t both be excited: the Rydberg blockade. One laser pulse over the whole entangling zone then gives every close pair a CZ gate at once and leaves lone atoms alone. A third atom within the radius spoils the gate (crosstalk). Qubits wait in a storage zone and are read out in a zone of their own, because the imaging light would disturb any qubit nearby.',
     lib: 'Game liberty: the blockade radius is a few micrometres, and a CZ gate only entangles qubits that start in superpositions. Here a clean pulse simply hands you an entangled pair.',
   },
+  bell: {
+    title: 'Bell\'s theorem & the CHSH test',
+    body: 'If each particle carried its answers with it from the start (local hidden variables), the correlations between measurements far apart would obey Bell\'s inequality: in the CHSH form |S| ≤ 2. Entangled pairs break it, up to 2√2 ≈ 2.83 (Tsirelson\'s bound), so no such story can explain them. It sends no message faster than light: each side alone sees only random results.',
+    lib: 'Real tests have to close loopholes (detectors that miss photons, settings chosen too slowly); in 2015 experiments closed them all at once, and the 2022 Nobel Prize in Physics went to Aspect, Clauser and Zeilinger for this line of work.',
+  },
   tunnel: {
     title: 'Quantum tunnelling',
     body: 'A quantum particle can cross a barrier it hasn\'t the energy to climb. Its wavefunction doesn\'t stop at the wall: it fades away inside it, and if the wall is thin enough a little of it is left on the far side. That little is the chance of finding the particle there. Alpha decay, tunnel diodes, flash memory and the scanning tunnelling microscope all work this way.',
@@ -2762,12 +2767,34 @@ function tryTunnel(o, vx, vy, r, P, car) {
   if (d >= 40) return 0;
   while (d < 320 && solidAt(o.x + ux * d, o.y + uy * d)) d += 3; // (and through it)
   const x = o.x + ux * (d + r + 4), y = o.y + uy * (d + r + 4);
-  if (d >= 320 || (car ? carHitsWall(o, x, y, o.angle) : circleSolid(x, y, r)) || !openGround(x, y)) return 0;
+  if (d >= 320 || (car ? carHitsWall(o, x, y, o.angle) : circleSolid(x, y, r)) || (!openGround(x, y) && !(mission && mission.type === 'barrier' && mission.region.has(Math.floor(y / T) * MW + Math.floor(x / T))))) return 0;
   qburst(o.x, o.y, '#3cf0ff'); o.x = x; o.y = y; qburst(x, y, '#3cf0ff'); sfx.quantum();
   P.tunT = time;
   const t = `Quantum tunnelling: through the wall! (it had a ${Math.round(p * 100)}% chance; now it starts again from nothing)`;
   if (P === player) { msg(t, 3.5); note('tunnel'); ach('tunnel'); } else asGuest(() => { msg(t, 3.5); note('tunnel'); ach('tunnel'); });
   return p;
+}
+function findSealed(P0, min = 250, max = 1500) {
+  const R = Math.ceil(max / T), tx0 = Math.floor(P0.x / T), ty0 = Math.floor(P0.y / T), done = new Set(), found = [];
+  for (let ty = Math.max(1, ty0 - R); ty <= Math.min(MH - 2, ty0 + R); ty++) for (let tx = Math.max(1, tx0 - R); tx <= Math.min(MW - 2, tx0 + R); tx++) {
+    const k0 = ty * MW + tx, x = (tx + 0.5) * T, y = (ty + 0.5) * T;
+    if (done.has(k0) || solidT(map[k0]) || openGround(x, y)) continue;
+    const reg = [k0], seen = new Set(reg); // (the closed region it belongs to)
+    for (let h = 0; h < reg.length; h++) { const k = reg[h], i = k % MW, j = (k / MW) | 0; for (let d = 0; d < 4; d++) { const n = (j + DY[d]) * MW + i + DX[d]; if (!seen.has(n) && !solidT(map[n])) { seen.add(n); reg.push(n); } } }
+    for (const k of reg) done.add(k);
+    if (reg.length < 8) continue;
+    let cx = 0, cy = 0; for (const k of reg) { cx += k % MW; cy += (k / MW) | 0; } cx = (cx / reg.length + 0.5) * T; cy = (cy / reg.length + 0.5) * T;
+    const dc = Math.hypot(cx - P0.x, cy - P0.y); if (dc < min || dc > max) continue;
+    const ck = reg.reduce((b, k) => { const d = Math.hypot((k % MW + 0.5) * T - cx, (((k / MW) | 0) + 0.5) * T - cy); return d < b.d ? { k, d } : b; }, { k: reg[0], d: 1e9 }).k;
+    const crate = { x: (ck % MW + 0.5) * T, y: (((ck / MW) | 0) + 0.5) * T };
+    if (circleSolid(crate.x, crate.y, 8)) continue;
+    let way = null; // (a way in: from open ground outside, through no more than 150 px of wall)
+    for (const k of reg) { if (way) break; const i = k % MW, j = (k / MW) | 0;
+      for (let d = 0; d < 4 && !way; d++) { let n = 1; while (n < 6 && solidT(tile(i + DX[d] * n, j + DY[d] * n))) n++; if (n === 1 || n >= 6) continue;
+        const ox = (i + DX[d] * (n + 1) + 0.5) * T, oy = (j + DY[d] * (n + 1) + 0.5) * T; if (!circleSolid(ox, oy, 8) && openGround(ox, oy)) way = { x: ox, y: oy }; } }
+    if (way) found.push({ x: crate.x, y: crate.y, ox: way.x, oy: way.y, region: new Set(reg) });
+  }
+  return found.length ? pick(found) : null;
 }
 function carTunnel(c, vx, vy) {
   const P = c === player.car ? player : NET.guest.player;
@@ -3171,7 +3198,7 @@ function updateHeli(dt) {
   // the army's helicopter fires rockets: a red ring marks where each will land
   HQ.rocketCd -= dt;
   if (h.army && !leaving && HQ.rocketCd <= 0 && (belief.seen || d2(h.lx, h.ly, P0.x, P0.y) < 140 * 140)) {
-    HQ.rocketCd = stars >= 8 ? 2.6 : 4;
+    HQ.rocketCd = stars >= 10 ? 4.5 : stars >= 8 ? 2.6 : 4; // (at ten stars fewer: the swarms, the paratroopers and the heroes are on you too)
     HQ.strikes.push({ x: P0.x + (P0.vx || 0) * 1.1 + rand(-20, 20), y: P0.y + (P0.vy || 0) * 1.1 + rand(-20, 20), t: 1.3, r: 52, k: 'rocket' });
     if (onScreen(h.x, h.y, 300)) sfx.rocket();
   }
@@ -3487,7 +3514,7 @@ function addDecal(d) { decals.push(d); if (decals.length > 500) decals.shift(); 
 function qburst(x, y, color, n = 24) {
   for (let i = 0; i < n; i++) { const a = i / n * TAU; addPart(x, y, Math.cos(a) * 140, Math.sin(a) * 140, 0.5, 2.5, color, 0, true); }
 }
-function explode(x, y, r, src) {
+function explode(x, y, r, src, pow = 1) { // (pow: a lighter blast, for a kamikaze drone's)
   if (NET.guest) NET.ev.push(['boom', x | 0, y | 0, r]);
   if (onScreen(x, y, 200)) { sfx.boom(); shake = 1; }
   if (!seeThrough(x, y)) addDecal({ k: 'scorch', x, y, r: r * 0.55 });
@@ -3498,7 +3525,7 @@ function explode(x, y, r, src) {
     const d = Math.hypot(c.x - x, c.y - y);
     if (d < r + 20) {
       const f = 1 - d / (r + 20);
-      damageCar(c, f * 260, src);
+      damageCar(c, f * 260 * pow, src);
       c.vx += (c.x - x) / (d || 1) * 260 * f; c.vy += (c.y - y) / (d || 1) * 260 * f;
     }
   }
@@ -3508,11 +3535,11 @@ function explode(x, y, r, src) {
   scare(x, y, r * 4);
   if (!player.car && !player.hidden) {
     const d = Math.hypot(player.x - x, player.y - y);
-    if (d < r) hurtPlayer((1 - d / r) * 130 + 10);
+    if (d < r) hurtPlayer(((1 - d / r) * 130 + 10) * pow);
   }
   if (NET.guest && !NET.guest.player.car && !NET.guest.player.hidden) {
     const d = Math.hypot(NET.guest.player.x - x, NET.guest.player.y - y);
-    if (d < r) asGuest(() => hurtPlayer((1 - d / r) * 130 + 10));
+    if (d < r) asGuest(() => hurtPlayer(((1 - d / r) * 130 + 10) * pow));
   }
 }
 
@@ -4086,7 +4113,7 @@ function respawn() {
   player.x = where.x; player.y = where.y; player.angle = faceOpen(where.x, where.y); player.lime = false; player.cellar = null;
   if (spil) { msg('Let out of Špilberk, the old "prison of nations", with a warning.', 4); ach('spilberk'); }
   heat = 0; caller = null; player.mult = Math.max(1, player.mult - 1);
-  if (player.lives <= 0) { if (player.isGuest) { player.lives = 5; player.cash = Math.floor(player.cash / 2); msg('Out of lives: half your cash for five more.', 4); } else { state = 'over'; saveBest(); } }
+  if (player.lives <= 0) { if (player.isGuest) { player.lives = 5; player.cash = Math.floor(player.cash / 2); msg('Out of lives: half your cash for five more.', 4); } else { state = 'over'; saveBest(); clearSave(); } }
 }
 function earn(v) {
   player.cash += v;
@@ -4112,10 +4139,12 @@ function updatePlayer(dt) {
   if (player.stun > 0) { player.stun -= dt; player.moving = false; const c = player.car; if (c && !c.tram) applyControls(c, 0, 0, false, dt); return; } // (Agent Spooky's wrist shock: nothing answers for a moment)
   const con = !player.car && CONSOLES.find(c => d2(c.x, c.y, player.x, player.y) < 28 * 28);
   const qpc = !player.car && !player.isGuest && EA && EA.qpc && d2(EA.qpc.x, EA.qpc.y, player.x, player.y) < 26 * 26;
+  const chs = !player.car && !player.isGuest && chshSpots().find(b => d2(b.x, b.y, player.x, player.y) < 26 * 26);
+  if (!!chs !== !!player.chshHint) { if (chs) msg(`A Bell test (CHSH). ${touchOn() ? '⇄' : 'Enter'}: set the polarisers and beat the classical limit.`, 3); player.chshHint = chs; }
   if (!!qpc !== !!player.qpcHint) { if (qpc) msg(`FIT BUT's quantum computer. ${touchOn() ? '⇄' : 'Enter'}: run Grover's search on it.`, 3); player.qpcHint = qpc; }
   const epr = !player.car && heat >= 8 ? eprPhones().findIndex(e => d2(e.x, e.y, player.x, player.y) < 30 * 30) : -1;
   if (epr !== player.eprHint) { if (epr >= 0) msg(`An entangled payphone. ${touchOn() ? '⇄' : 'Enter'}: a Bell measurement, and you teleport to its twin.`, 3); player.eprHint = epr; }
-  if (hit('Enter', 'KeyF', 'KeyE')) { const hz = !player.car && !player.isGuest ? eggHatchAt(player.x, player.y) : -1; if (hz >= 0) { enterCellar(hz); return; } const fs = !player.car && fishSpotAt(player.x, player.y); if (qpc) { qcOpen(); return; } if (con) { aodOpen(); return; } if (epr >= 0) { startBell(epr); return; } if (fs) startFishing(fs); else enterExit(); }
+  if (hit('Enter', 'KeyF', 'KeyE')) { const hz = !player.car && !player.isGuest ? eggHatchAt(player.x, player.y) : -1; if (hz >= 0) { enterCellar(hz); return; } const fs = !player.car && fishSpotAt(player.x, player.y); if (qpc) { qcOpen(); return; } if (chs) { chshOpen(chs); return; } if (con) { aodOpen(); return; } if (epr >= 0) { startBell(epr); return; } if (fs) startFishing(fs); else enterExit(); }
   if (!player.car) { // walking up to a jetty or the AOD console: say what it is for
     const fs = fishSpotAt(player.x, player.y) || con;
     if (fs && fs !== player.fishHint) msg(fs === con ? `The AOD console: plan atom moves. ${touchOn() ? '⇄' : 'Enter'}: sit down.` : `A fishing jetty. ${touchOn() ? '⇄' : 'Enter'}: fish.`, 2.5);
@@ -4414,6 +4443,7 @@ if (BRNO) { // Brno's arcs, by district
   ARCS[B_['Královo Pole']] = { name: 'FIT Hackers', jobs: ['qkd', 'race', 'entangle'], lines: ['A FIT BUT lab needs its qubits carried across town. Someone is listening.', 'The faculty bets on the fastest lap through Královo Pole. Checkpoints, now.', 'A rival\'s car is entangled with a decoy. Use what they teach at FIT.'] };
   ARCS[B_['Štýřice']] = { name: 'Tower Money', jobs: ['race', 'qkd', 'getaway'], lines: ['A trader in the AZ Tower needs a courier who drives like a lunatic.', 'The tower\'s keys travel as qubits tonight.', 'The big job went loud. Get away clean.'] };
   ARCS[B_['Líšeň']] = { name: 'Líšeň Nights', jobs: ['wreck', 'getaway', 'hit'], lines: ['Send the rival crew a message. Wreck their cars.', 'The deal went sideways. Lose the police in the estates.', 'Someone talked. Find him.'] };
+  ARCS[B_['Žabovřesky']] = { name: 'The Planck Files', jobs: ['sync', 'grover', 'duel'], lines: ['ÚPT\'s clock keeps Brno\'s best time. A parcel stamped by it has to arrive on the minute.', 'FIT has a quantum computer, and a bank has a vault. Put the two together.', 'P.L.A.N.C.K. has noticed you. They send one of their heroes to see what you can do.'] };
   ARCS[B_['Bystrc']] = { name: 'Dam Smugglers', jobs: ['deliver', 'escort', 'entangle'], lines: ['A crate from the harbour has to reach the city. Mind the bumps.', 'The boatman needs a lift. Smooth ride.', 'Their courier\'s car is entangled with a decoy. Use it.'] };
 } else {
 ARCS[R_VILLAGE] = { name: 'Valley Moonshiners', jobs: ['deliver', 'race', 'getaway'], lines: ['The still needs a delivery run. Mind the potholes.', 'Prove you can outrun the sheriff. Checkpoints, now.', 'The barn raid went sideways. Lose the law.'] };
@@ -4428,8 +4458,10 @@ function startMission(forced, booth) {
     const d = districtAt(booth.x, booth.y);
     if (ARCS[d] && arcProg[d] < 3) { arc = d; type = ARCS[d].jobs[arcProg[d]]; msg(`${ARCS[d].name} (${arcProg[d] + 1}/3): ${ARCS[d].lines[arcProg[d]]}`, 6); }
   }
-  if (!type) type = pick(['deliver', 'steal', 'hit', 'race', 'wreck', 'entangle', 'escort', 'getaway', 'qkd', ...(ATOM_LAB && !player.isGuest ? ['cz'] : [])]);
+  if (!type) type = pick(['deliver', 'steal', 'hit', 'race', 'wreck', 'entangle', 'escort', 'getaway', 'qkd', 'barrier', 'duel', ...(ATOM_LAB && !player.isGuest ? ['cz'] : []), ...(EA && EA.qpc && !NET.role ? ['grover'] : []), ...(EA && EA.qclock ? ['sync'] : [])]);
   if (type === 'cz' && !ATOM_LAB) type = 'deliver';
+  if ((type === 'grover' && !(EA && EA.qpc && !NET.role)) || (type === 'sync' && !(EA && EA.qclock))) type = 'deliver';
+  const sealed = type === 'barrier' ? findSealed(pp()) : null; if (type === 'barrier' && !sealed) type = 'deliver'; // (no sealed courtyard near: another job)
   const reward = 2000 + randi(0, 6) * 250;
   const P0 = pp();
   if (type === 'deliver') {
@@ -4480,6 +4512,21 @@ function startMission(forced, booth) {
     Object.assign(q, { mission: true, parked: true, color: '#a970ff', qubit: true }); sp.c = q; sp.tried = true;
     mission = { type, stage: 0, q, reward: reward + 2500, timer: 0, ng: 0 };
     msg('Job: a two-qubit gate at the Atom Array Lab. Pick up the violet qubit car in storage (G).', 6); note('rydberg');
+  } else if (type === 'duel') { // P.L.A.N.C.K. tests you: one of its heroes, sent down for you alone
+    const k = pick(['spooky', 'bigbang', 'tunneler', 'collapser']), a = rand(TAU);
+    launchHero(k, { x: P0.x + Math.cos(a) * 700, y: P0.y + Math.sin(a) * 700 }, P0, true);
+    mission = { type, stage: 0, hero: k, tries: 0, reward: reward + 2500, timer: k === 'bigbang' ? 150 : 120 };
+    msg(`Job: P.L.A.N.C.K. wants to see what you can do. Beat ${HEROES[k].name} before the clock runs out.`, 5);
+  } else if (type === 'barrier') { // a crate in a sealed courtyard: in and out through the wall, by tunnelling
+    mission = { type, stage: 0, x: sealed.x, y: sealed.y, ox: sealed.ox, oy: sealed.oy, region: sealed.region, reward: reward + 2000, timer: 0, boost: 0 };
+    msg('Job: a crate of qubit chips sits in a sealed courtyard, walled in on every side. The only way in is through a wall: tunnel (on foot it\'s easiest).', 6);
+    note('tunnel');
+  } else if (type === 'grover') { // a vault's PIN from FIT's quantum computer, then the vault, before they change it
+    mission = { type, stage: 0, x: EA.qpc.x, y: EA.qpc.y, reward: reward + 2500, timer: 0 };
+    msg('Job: find a bank vault\'s PIN with Grover\'s search on FIT\'s quantum computer (the QPU sign by its door), then get to the vault before they change it.', 6);
+  } else if (type === 'sync') { // a parcel stamped by ÚPT's quantum clock, to be delivered on the minute
+    mission = { type, stage: 0, x: EA.qclock.x, y: EA.qclock.y, reward: reward + 2000, timer: 0, due: 0 };
+    msg('Job: pick up a parcel time-stamped by ÚPT\'s quantum clock on Královopolská. It has to arrive on the minute: not early, not late.', 6);
   } else if (type === 'getaway') {
     const t = farTile(1200, 2400);
     mission = { type, stage: 1, x: t.x, y: t.y, reward: reward + 2000, timer: 150 };
@@ -4531,6 +4578,10 @@ function missionLine() {
     case 'escort': line = mission.stage ? 'Drive the VIP to the marker' : 'Pick up the VIP in gold'; break;
     case 'getaway': line = belief.seen ? 'Reach the safehouse: lose the cops!' : 'Reach the safehouse unseen'; break;
     case 'qkd': line = `Deliver the qubits${mission.tapped ? ' · Eve tapped in!' : ''}`; break;
+    case 'duel': line = `Beat ${HEROES[mission.hero].name}`; break;
+    case 'barrier': line = mission.stage ? 'Tunnel back out with the crate' : mission.inside ? 'Grab the crate' : 'Tunnel into the sealed courtyard'; break;
+    case 'grover': line = mission.stage ? 'To the vault, before the PIN changes' : 'Find the PIN on FIT\'s quantum computer (QPU)'; break;
+    case 'sync': line = mission.stage ? `Deliver at ${hhmm(mission.due)} sharp · now ${hhmm(dayT * 24)}` : 'Pick up the parcel at ÚPT\'s quantum clock'; break;
     case 'cz': line = mission.stage === 0 ? 'Pick up the violet qubit (back up to it, G)' : mission.stage === 1 ? `Into the entangling zone with it · pulse in ${Math.ceil(ATOM_LAB.ent.t)} s`
       : 'Drop it in the readout bay (G), then back out'; break;
   }
@@ -4546,6 +4597,8 @@ function missionTarget() {
     case 'escort': return mission.stage === 0 ? mission.ped : mission;
     case 'race': return mission.pts[mission.stage];
     case 'wreck': return null;
+    case 'duel': return HQ.heroes.find(h => h.duel) || null;
+    case 'barrier': return mission.stage ? { x: mission.ox, y: mission.oy } : mission;
     case 'entangle': return mission.a.dead ? mission.b : mission.a;
     case 'cz': { const z = mission.stage === 1 ? ATOM_LAB.ent : ATOM_LAB.read; return mission.stage === 0 ? mission.q : { x: (z.x0 + z.x1) / 2, y: (z.y0 + z.y1) / 2 }; }
     default: return mission;
@@ -4653,6 +4706,30 @@ function updateMissions(dt) {
       } else if (player.car !== m.car) failMission('You left the VIP behind.');
       else if (m.car.hp < m.carHp - CT[m.car.type].hp * 0.45) failMission('The VIP jumped out of your wreck.');
       else if (near(m, 40)) completeMission();
+    } else if (m.type === 'duel') {
+      const h = HQ.heroes.find(o => o.duel);
+      if (!h) { if (m.tries++ < 5) { const a = rand(TAU); launchHero(m.hero, { x: P0.x + Math.cos(a) * 700, y: P0.y + Math.sin(a) * 700 }, P0, true); } }
+      else if (h.ph === 'down') completeMission(1, 'HERO BEATEN');
+    } else if (m.type === 'barrier') {
+      const k = Math.floor(P0.y / T) * MW + Math.floor(P0.x / T); m.inside = m.region.has(k);
+      if (m.boost < 1 && !m.stage && near({ x: m.ox, y: m.oy }, 160) || m.boost < 2 && m.stage && m.inside) { // (the barrier is thin here: a good chance at once)
+        m.boost = m.stage ? 2 : 1; player.tunT = Math.min(player.tunT ?? time, time - 110); msg('The barrier is thin here: your chance of tunnelling is high. Walk into the wall.', 3.5);
+      }
+      if (!m.stage && near(m, 22)) { m.stage = 1; sfx.pickup(); msg('Got the crate. Now out the way you came: through the wall.', 3.5); }
+      else if (m.stage && !m.inside && openGround(P0.x, P0.y)) completeMission(1, 'OUT THROUGH THE WALL');
+    } else if (m.type === 'grover') {
+      if (m.stage === 1 && near(m, 40)) { completeMission(1, 'VAULT EMPTIED'); addHeat(1.5); msg('The vault\'s alarm goes off.', 3); }
+    } else if (m.type === 'sync') {
+      const now = dayN * 24 + dayT * 24;
+      if (m.stage === 0 && near(m, 40)) {
+        const t = farTile(800, 1800), d = Math.hypot(t.x - P0.x, t.y - P0.y);
+        m.due = Math.ceil((now + (d / 150 + 30) / 60) * 12) / 12; // (a whole five minutes, with time to get there: a game minute is a second)
+        Object.assign(m, { stage: 1, x: t.x, y: t.y, timer: (m.due - now) * 60 + 3 }); sfx.pickup();
+        msg(`Parcel stamped. Deliver it at ${hhmm(m.due)} sharp: within three minutes of it.`, 4);
+      } else if (m.stage === 1 && near(m, 40)) {
+        if (now >= m.due - 3 / 60) completeMission(1, 'ON THE MINUTE');
+        else if (!m.told) { m.told = true; msg(`Early: wait here for ${hhmm(m.due)}.`, 3); }
+      }
     } else if (m.type === 'getaway') {
       if (near(m, 40)) {
         if (belief.seen && heat >= 1) { if (!m.warned) { msg('They\'re watching you! Lose them before you go in.', 2.5); m.warned = true; } }
@@ -5928,7 +6005,7 @@ const DRONE_Z = 0.25, KAMI_Z = 0.12, CARRIER_Z = 0.9, JET_Z = 0.55, ROPE_Z = 0.4
 // (plain data only: the host sends it to a co-op guest as it is)
 function hqNew() { return { lv: 0, det: false, drone: null, droneCd: 0, spikes: [], spikeCd: 6, strikes: [], rocketCd: 4, jet: null, jetCd: 8,
   sweepT: 12, sweep: 0, low: 0, plaza: 0, hideT: 0, tun: [], tunIn: null, pl: 0, rubble: [], tankerCd: 10, crane: null, craneCd: 14,
-  kami: [], kamiCd: 5, paras: [], paraCd: 8, rope: null, ropeCd: 12, carrier: null, bell: null, heroes: [], beat: [] }; }
+  kami: [], kamiCd: 10, paras: [], paraCd: 8, rope: null, ropeCd: 12, carrier: null, bell: null, heroes: [], beat: [] }; }
 
 // the entangled pair of payphones: at the Atom Array Lab, and at FIT BUT in Brno (or, elsewhere, the booth farthest off)
 function eprPhones() {
@@ -6112,7 +6189,7 @@ function updateWanted(dt) {
   // ★7: lie low a minute, unseen
   if (stars >= 7 && !belief.seen) HQ.low += dt; else HQ.low = 0;
   if (stars === 7 && HQ.low >= 60) { heat = 5.5; bigText('EMERGENCY LIFTED', '#9ccc65', 3, 'They lost you: five stars'); sfx.good(); ach('lowkey'); }
-  for (const s of HQ.strikes) { s.t -= dt; if (s.t <= 0 && !s.cancel) explode(s.x, s.y, s.r, 'cop'); }
+  for (const s of HQ.strikes) { s.t -= dt; if (s.t <= 0 && !s.cancel) explode(s.x, s.y, s.r, 'cop', s.k === 'kami' ? 0.55 : 1); } // (a kamikaze drone's blast is lighter than a rocket's: two take you down, not one)
   HQ.strikes = HQ.strikes.filter(s => s.t > 0 && !s.cancel);
   // ★8: the sweeps, and jets from 8 up
   if (stars === 8) {
@@ -6173,8 +6250,8 @@ function updateWanted(dt) {
   // ★10: the swarms, the paratroopers, the squads roped down ahead, the Helicarrier; and going to ground
   if (stars >= 10 && !player.down) {
     if ((HQ.kamiCd -= dt) <= 0) {
-      HQ.kamiCd = 15; const a0 = rand(TAU);
-      for (let i = 0; i < 5; i++) { const a = a0 + rand(-0.45, 0.45), r = rand(850, 1050); HQ.kami.push({ x: P0.x + Math.cos(a) * r, y: P0.y + Math.sin(a) * r, vx: 0, vy: 0, life: 30, dive: 0, w: rand(TAU), hp: 1 }); }
+      HQ.kamiCd = 18; const a0 = rand(TAU);
+      for (let i = 0; i < 4; i++) { const a = a0 + rand(-0.45, 0.45), r = rand(850, 1050); HQ.kami.push({ x: P0.x + Math.cos(a) * r, y: P0.y + Math.sin(a) * r, vx: 0, vy: 0, life: 30, dive: 0, w: rand(TAU), hp: 1 }); }
       msg('Drone swarm incoming! Shoot them down, or get under cover.', 2.5);
     }
     if ((HQ.paraCd -= dt) <= 0) {
@@ -6196,8 +6273,8 @@ function updateWanted(dt) {
     const dx = tx - q.x, dy = ty - q.y, dd = Math.hypot(dx, dy) || 1;
     q.vx += (dx / dd * 290 - q.vx) * Math.min(1, dt * 2); q.vy += (dy / dd * 290 - q.vy) * Math.min(1, dt * 2); q.x += q.vx * dt; q.y += q.vy * dt;
     if (lock && d2(q.x, q.y, P0.x, P0.y) < 130 * 130) {
-      q.dive = 0.9; q.tx = P0.x + (P0.vx || 0) * 0.75; q.ty = P0.y + (P0.vy || 0) * 0.75;
-      q.st = { x: q.tx, y: q.ty, t: 0.9, r: 40, k: 'kami' }; HQ.strikes.push(q.st);
+      q.dive = 1.2; q.tx = P0.x + (P0.vx || 0) * 0.75; q.ty = P0.y + (P0.vy || 0) * 0.75; // (1.2 s of red ring: time to get clear, if you look)
+      q.st = { x: q.tx, y: q.ty, t: 1.2, r: 40, k: 'kami' }; HQ.strikes.push(q.st);
     }
   }
   HQ.kami = HQ.kami.filter(q => !q.gone && q.life > 0);
@@ -6226,7 +6303,7 @@ function updateWanted(dt) {
       const near = d2(bl.x, bl.y, P0.x, P0.y) < 560 * 560, hx = near ? P0.x : belief.x + Math.cos(time * 0.7) * Math.min(belief.sig, 260), hy = near ? P0.y : belief.y + Math.sin(time * 0.9) * Math.min(belief.sig, 260);
       const lx = hx - bl.lx, ly = hy - bl.ly, ld = Math.hypot(lx, ly) || 1, st = Math.min(ld, 190 * dt); bl.lx += lx / ld * st; bl.ly += ly / ld * st;
       bl.see = !hid && d2(bl.lx, bl.ly, P0.x, P0.y) < 140 * 140;
-      if (bl.sent < SQUAD.length && (bl.sendT -= dt) <= 0) bl.sendT = launchHero(SQUAD[bl.sent], bl, P0) ? (bl.sent++, 10) : 2; // (its heroes, one after another)
+      if (bl.sent < SQUAD.length && (bl.sendT -= dt) <= 0 && HQ.heroes.filter(h => !h.duel && (h.ph === 'go' || h.ph === 'drop')).length < 2) bl.sendT = launchHero(SQUAD[bl.sent], bl, P0) ? (bl.sent++, 10) : 2; // (its heroes, one after another, two at most at a time)
     }
   }
   updateHeroes(dt, stars, P0, hid, pc);
@@ -6252,12 +6329,12 @@ const HEROES = {
 };
 const SQUAD = Object.keys(HEROES), COLL_Z = 0.2;
 const heroSpot = (P, min, max) => randomTile([WALK, PLAZA, GRASS, ROAD, SAND], p => !circleSolid(p.x, p.y, 8), { x: P.x, y: P.y, min, max });
-function launchHero(k, bl, P0) {
+function launchHero(k, bl, P0, duel) {
   const q = k === 'collapser' ? { x: P0.x + rand(-150, 150), y: P0.y + rand(-150, 150) } : heroSpot(P0, 110, 220);
   if (!q) return false;
   HQ.heroes.push({ k, x: bl.x, y: bl.y, z: CARRIER_Z, a: Math.atan2(q.y - bl.y, q.x - bl.x), hp: HEROES[k].hp, ph: 'drop', t: 0, sx: bl.x, sy: bl.y, tx: q.x, ty: q.y,
-    vx: 0, vy: 0, cd: 2, gun: 1.5, blink: 4, leap: 2, dig: 6, ram: 0, hit: 0, lift: 0, anim: 0, stuck: 0, orb: rand(TAU), see: false, wall: false, beam: null, wave: null, jump: null });
-  msg(HEROES[k].line, 4.5); sfx.bad();
+    vx: 0, vy: 0, cd: 2, gun: 1.5, blink: 4, leap: 2, dig: 6, ram: 0, hit: 0, lift: 0, anim: 0, stuck: 0, orb: rand(TAU), see: false, wall: false, beam: null, wave: null, jump: null, duel: !!duel });
+  if (!duel) msg(HEROES[k].line, 4.5); sfx.bad();
   return true;
 }
 function heroHurt(h, n) {
@@ -6266,7 +6343,7 @@ function heroHurt(h, n) {
   if (h.hp <= 0) {
     h.ph = 'down'; h.t = 0; h.beam = null; h.jump = null; h.see = false; earn(1500);
     msg(`${HEROES[h.k].name} is down!`, 3); sfx.good();
-    if (!HQ.beat.includes(h.k)) HQ.beat.push(h.k);
+    if (!h.duel && !HQ.beat.includes(h.k)) HQ.beat.push(h.k);
     if (HQ.beat.length === SQUAD.length) { earn(5000); ach('squad'); bigText('P.L.A.N.C.K.\'S HEROES BEATEN', '#ef5350', 3.5, 'All four, beamed back up to the Helicarrier'); }
   } else if (h.k === 'spooky' && Math.random() < 0.3) heroBlink(h, pp(), 80, 140); // (she doesn't stay where she was hit)
 }
@@ -6327,7 +6404,7 @@ function updateHeroes(dt, stars, P0, hid, pc) {
     if (h.wave && (h.wave.t += dt) > 0.55) h.wave = null;
     if (h.ph === 'up') { h.t += dt; h.z = h.z0 + h.t * 0.6; if (h.t > 1.4) h.gone = 1; continue; }
     if (h.ph === 'down') { h.t += dt; if (h.k === 'collapser') h.z = Math.max(0, COLL_Z * (1 - h.t / 0.8)); if (h.t > 2.5) { h.ph = 'up'; h.t = 0; h.z0 = h.z; qburst(h.x, h.y, '#9fe8ff', 12); } continue; }
-    if (leave) { h.ph = 'up'; h.t = 0; h.z0 = h.z; h.see = false; h.beam = null; h.jump = null; continue; }
+    if (h.duel ? player.down || !(mission && mission.type === 'duel') : leave) { h.ph = 'up'; h.t = 0; h.z0 = h.z; h.see = false; h.beam = null; h.jump = null; continue; } // (one sent for a duel stays until the duel is over)
     if (h.ph === 'drop') { // down from the Helicarrier's deck
       h.t += dt; const f = Math.min(1, h.t / 1.6), e = f * (2 - f);
       h.x = lerp(h.sx, h.tx, e); h.y = lerp(h.sy, h.ty, e); h.z = h.k === 'collapser' ? lerp(CARRIER_Z, COLL_Z, f) : CARRIER_Z * (1 - f);
@@ -8939,6 +9016,7 @@ function drawMarkers() {
   for (const s of FISH_SPOTS) if (!player.fish || player.fish.s !== s) mk(s, '#29b6f6', 'FISH');
   for (const c of CONSOLES) mk(c, '#b388ff', 'AOD');
   if (EA && EA.qpc) mk(EA.qpc, '#00a9e0', 'QPU'); // (FIT's quantum computer)
+  for (const b of chshSpots()) mk(b, '#7dffd8', 'BELL'); // (the Bell test)
   for (const b of BOOTHS) {
     ctx.fillStyle = b === ringing && pulse > 0.5 ? '#ffe14d' : '#1e5d3a'; ctx.fillRect(b.x - 6, b.y - 6, 12, 12);
     ctx.fillStyle = '#fff'; ctx.fillRect(b.x - 3, b.y - 3, 6, 3);
@@ -8951,6 +9029,7 @@ function drawMarkers() {
     ctx.fillStyle = pk.c; ctx.fillRect(u.x - 8, u.y - 9 + bob, 16, 16);
     ctx.fillStyle = '#111'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(pk.l, u.x, u.y + 3 + bob);
   }
+  if (mission && mission.type === 'barrier' && !mission.stage && onScreen(mission.x, mission.y)) { const m = mission; ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(m.x - 6, m.y - 4, 15, 13); ctx.fillStyle = '#9b6b36'; ctx.fillRect(m.x - 8, m.y - 8, 16, 16); ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 1.4; ctx.strokeRect(m.x - 7.3, m.y - 7.3, 14.6, 14.6); ctx.beginPath(); ctx.moveTo(m.x - 8, m.y - 8); ctx.lineTo(m.x + 8, m.y + 8); ctx.stroke(); ctx.fillStyle = '#3cf0ff'; ctx.fillRect(m.x - 2, m.y - 2, 4, 4); } // (the job's crate of chips)
   for (const u of drops) if (dropShown(u) && onScreen(u.x, u.y) && !(u.age > DROP_LIFE - 8 && Math.sin(time * 14) < -0.3)) drawDrop(u); // (blinking before it goes)
 }
 // a power-up that turned up: it pops in, then bobs like the others; ψ and ε look like theirs, the heart is a heart
@@ -9732,6 +9811,7 @@ function qcMeasure() {
   const ok = i === QC.mark, paid = ok && qcDay !== dayN;
   QC.res = { i, ok, p: QC.amp[QC.mark] ** 2, paid, pay: QC.L.pay };
   if (ok) { if (paid) { earn(QC.L.pay); qcDay = dayN; } qcWins++; ach('quantumpc'); sfx.good(); }
+  if (ok && mission && mission.type === 'grover' && mission.stage === 0) { const t = farTile(700, 1600); Object.assign(mission, { stage: 1, x: t.x, y: t.y, timer: 25 + Math.hypot(t.x - player.x, t.y - player.y) / 140 }); msg('Got the PIN. To the vault, before they change it!', 4); }
   else { qcCool = time + 45; sfx.bad(); }
 }
 function updateQC(dt) {
@@ -9790,6 +9870,94 @@ function drawQC() {
     Q0.btn = labs.map(([k, l], i) => ({ k, l, x: x0 + pw / 2 + (i - 1.5) * (bwid + 8) + 4, y: y0 + ph - 58, w: bwid, h: 38 }));
     for (const b of Q0.btn) { ctx.fillStyle = b.k === 'measure' ? '#0b5c7a' : '#1b2a3a'; ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeStyle = '#00a9e0'; ctx.lineWidth = 1.5; ctx.strokeRect(b.x, b.y, b.w, b.h); txt(b.l, b.x + b.w / 2, b.y + 24, 13, '#fff', 'center'); }
   }
+}
+// ---- the Bell test (CHSH). A source sends entangled photon pairs to Alice and Bob; for each pair each picks, at random,
+// one of their two polariser angles (a or a′, b or b′) and gets +1 or −1. E is the average of the products, and
+// S = E(a,b) − E(a,b′) + E(a′,b) + E(a′,b′). If each photon carried its answers with it (local hidden variables), |S|
+// could never pass 2; the entangled pairs give E = cos 2(α − β), and |S| up to 2√2 at a = 0°, a′ = 45°, b = 22.5°,
+// b′ = 67.5°. Set the angles, run 800 pairs, and beat the classical limit (by enough to be sure: 2.3)
+let CHSH = null, chshDay = -1, CHSH_AT = null;
+const CHSH_N = 800, CHSH_PASS = 2.3;
+const chshSpots = () => CHSH_AT || (CHSH_AT = [EA && EA.chsh, ATOM_LAB && (() => { const t = findTileNear(Math.floor(ATOM_LAB.con.x / T) + 3, Math.floor(ATOM_LAB.con.y / T) + 1, WALK); return t && tileCenter(t); })()].filter(Boolean));
+function chshOpen(at) {
+  if (NET.role) { msg('The Bell test is single-player for now.', 2.5); return; }
+  CHSH = { ang: [0, 90, 0, 90], sel: 0, res: null, run: 0, btn: [], mu: !!(at && EA && at === EA.chsh) }; // (to start with, exactly the classical limit: S = 2)
+  state = 'chsh'; touchEl.style.visibility = 'hidden'; note('bell'); sfx.quantum();
+}
+function chshClose() { CHSH = null; state = 'play'; touchEl.style.visibility = ''; }
+const chshE = (al, be) => Math.cos(2 * (al - be) * Math.PI / 180); // (what quantum mechanics predicts for the pair)
+function chshRun() {
+  const [a, a2, b, b2] = CHSH.ang, set = [[a, b], [a, b2], [a2, b], [a2, b2]], n = [0, 0, 0, 0], sum = [0, 0, 0, 0];
+  for (let k = 0; k < CHSH_N; k++) { const i = randi(0, 3), same = Math.random() < (1 + chshE(set[i][0], set[i][1])) / 2; n[i]++; sum[i] += same ? 1 : -1; }
+  const E = sum.map((v, i) => n[i] ? v / n[i] : 0), S = E[0] - E[1] + E[2] + E[3], ok = Math.abs(S) > CHSH_PASS, paid = ok && chshDay !== dayN;
+  CHSH.res = { E, S, ok, paid }; CHSH.run = 1.2; sfx.cast();
+  if (ok) { if (paid) { earn(3000); chshDay = dayN; } ach('bell'); }
+}
+function updateCHSH(dt) {
+  const B = CHSH; if (B.run > 0) { B.run = Math.max(0, B.run - dt); if (!B.run && B.res) (B.res.ok ? sfx.good : sfx.bad)(); }
+  const tp = hit('Tap') && tapAt ? (B.btn.find(b => tapAt.x > b.x && tapAt.x < b.x + b.w && tapAt.y > b.y && tapAt.y < b.y + b.h) || { k: '' }).k : null;
+  if (hit('Escape') || tp === 'leave') chshClose();
+  else if (hit('ArrowLeft', 'KeyA') || tp === 'prev') B.sel = (B.sel + 3) % 4;
+  else if (hit('ArrowRight', 'KeyD', 'Tab') || tp === 'next') B.sel = (B.sel + 1) % 4;
+  else if (hit('ArrowUp', 'KeyW') || tp === 'plus') { B.ang[B.sel] = (B.ang[B.sel] + 7.5) % 180; B.res = null; }
+  else if (hit('ArrowDown', 'KeyS') || tp === 'minus') { B.ang[B.sel] = (B.ang[B.sel] + 172.5) % 180; B.res = null; }
+  else if ((hit('Enter', 'Space', 'NumpadEnter') || tp === 'run') && B.run <= 0) chshRun();
+}
+function drawCHSH() {
+  const B = CHSH; if (!B) return;
+  const pw = Math.min(W - 16, 780), ph = Math.min(H - 16, 520), x0 = (W - pw) / 2, y0 = (H - ph) / 2, tch = touchOn(), names = ['a', 'a′', 'b', 'b′'];
+  ctx.fillStyle = 'rgba(4,10,12,.95)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#0c1a1c'; ctx.fillRect(x0, y0, pw, ph); ctx.strokeStyle = '#7dffd8'; ctx.lineWidth = 2; ctx.strokeRect(x0, y0, pw, ph);
+  txt('BELL TEST · CHSH', x0 + pw / 2, y0 + 32, Math.min(22, pw / 24), '#7dffd8', 'center', true);
+  txt(B.mu ? 'Masaryk University, Faculty of Science' : 'the Atom Array Lab', x0 + pw / 2, y0 + 52, 12, '#cfe8e2', 'center');
+  // Alice, the source, Bob: each polariser with its two angles (the chosen one bright)
+  const cy = y0 + 130, R = Math.min(52, pw / 10), ax = x0 + pw * 0.2, bx = x0 + pw * 0.8, sx = x0 + pw / 2;
+  for (const [cx, who, i0] of [[ax, 'ALICE', 0], [bx, 'BOB', 2]]) {
+    ctx.strokeStyle = '#2f4f4a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
+    for (const i of [i0, i0 + 1]) {
+      const t = -B.ang[i] * Math.PI / 180, sel = B.sel === i;
+      ctx.strokeStyle = sel ? '#ffe14d' : i === i0 ? '#7dffd8' : '#3cb7a0'; ctx.lineWidth = sel ? 3.5 : 2; ctx.setLineDash(i === i0 ? [] : [6, 4]);
+      ctx.beginPath(); ctx.moveTo(cx - Math.cos(t) * R, cy - Math.sin(t) * R); ctx.lineTo(cx + Math.cos(t) * R, cy + Math.sin(t) * R); ctx.stroke(); ctx.setLineDash([]);
+    }
+    txt(who, cx, cy + R + 20, 13, '#cfe8e2', 'center');
+    txt(`${names[i0]} ${B.ang[i0]}°   ${names[i0 + 1]} ${B.ang[i0 + 1]}°`, cx, cy + R + 38, 12, '#ffe14d', 'center');
+  }
+  ctx.fillStyle = '#b388ff'; ctx.beginPath(); ctx.arc(sx, cy, 9, 0, TAU); ctx.fill(); txt('source', sx, cy + 26, 11, '#c9b3ff', 'center');
+  if (B.run > 0) { // the photon pairs, flying apart
+    ctx.fillStyle = '#e8d8ff';
+    for (let k = 0; k < 8; k++) { const f = ((1.2 - B.run) * 2.2 + k / 8) % 1, dx = (bx - sx - R) * f; ctx.beginPath(); ctx.arc(sx + dx, cy + Math.sin(k * 7) * 6 * f, 2.6, 0, TAU); ctx.arc(sx - dx, cy + Math.sin(k * 7) * 6 * f, 2.6, 0, TAU); ctx.fill(); }
+  }
+  // the outcome: the four correlations, and S against the classical limit and Tsirelson's
+  let yy = cy + R + 66;
+  const gx = x0 + 40, gw = pw - 80;
+  if (B.res && B.run <= 0) {
+    const R0 = B.res, lab4 = ['E(a,b)', 'E(a,b′)', 'E(a′,b)', 'E(a′,b′)'];
+    txt(lab4.map((l, i) => `${l} ${R0.E[i] >= 0 ? '+' : '−'}${Math.abs(R0.E[i]).toFixed(2)}`).join('   '), x0 + pw / 2, yy, 12, '#cfe8e2', 'center');
+    yy += 22;
+  } else { txt(`Run ${CHSH_N} pairs to measure: each pair, each side uses one of its two angles at random`, x0 + pw / 2, yy, 12, '#8fb3ad', 'center'); yy += 22; }
+  const toX = v => gx + clamp(v / 3, 0, 1) * gw;
+  ctx.fillStyle = '#18302c'; ctx.fillRect(gx, yy, gw, 14);
+  ctx.fillStyle = 'rgba(255,107,107,.25)'; ctx.fillRect(gx, yy, toX(2) - gx, 14);
+  ctx.strokeStyle = '#ff6b6b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(toX(2), yy - 4); ctx.lineTo(toX(2), yy + 18); ctx.stroke();
+  ctx.strokeStyle = '#b388ff'; ctx.beginPath(); ctx.moveTo(toX(2 * Math.SQRT2), yy - 4); ctx.lineTo(toX(2 * Math.SQRT2), yy + 18); ctx.stroke();
+  ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#ff9b9b'; ctx.fillText('2: the classical limit', toX(2), yy + 30); ctx.fillStyle = '#c9b3ff'; ctx.fillText('2√2', toX(2 * Math.SQRT2), yy - 7);
+  if (B.res && B.run <= 0) { const v = Math.abs(B.res.S); ctx.fillStyle = B.res.ok ? '#7dff7a' : '#ffe14d'; ctx.fillRect(gx, yy + 3, toX(v) - gx, 8); }
+  yy += 50;
+  if (B.res && B.run <= 0) {
+    const R0 = B.res;
+    txt(R0.ok ? `|S| = ${Math.abs(R0.S).toFixed(2)}: Bell's inequality is broken! ${R0.paid ? 'The lab pays you $3,000' : 'No more pay today, but well done'}` : `|S| = ${Math.abs(R0.S).toFixed(2)}: no proof yet (it has to pass ${CHSH_PASS}). Turn the polarisers.`, x0 + pw / 2, yy, 14, R0.ok ? '#7dff7a' : '#ffe14d', 'center');
+    yy += 22;
+  }
+  const tx = wrapLines('If each photon carried its answers with it, S = E(a,b) − E(a,b′) + E(a′,b) + E(a′,b′) could never pass 2, whatever the angles. The entangled pair gives E = cos 2(α − β): find the angles that push |S| up toward 2√2.', pw - 28, '12px system-ui, sans-serif');
+  ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = '#9fbdb7';
+  tx.forEach((l, i) => ctx.fillText(l, x0 + 14, Math.min(yy + 6, y0 + ph - 74 - tx.length * 15) + i * 15));
+  // the buttons (keys on the labels)
+  const labs = [['prev', '◀'], ['next', '▶'], ['minus', '−7.5°'], ['plus', '+7.5°'], ['run', tch ? 'RUN' : 'RUN · Enter'], ['leave', tch ? 'LEAVE' : 'LEAVE · Esc']];
+  const ws2 = [44, 44, 70, 70, 130, 120].map(v => v * Math.min(1, (pw - 60) / 520)), tot = ws2.reduce((a, b) => a + b, 0) + 8 * (labs.length - 1);
+  let bxx = x0 + (pw - tot) / 2;
+  B.btn = labs.map(([k, l], i) => { const b = { k, l, x: bxx, y: y0 + ph - 52, w: ws2[i], h: 36 }; bxx += ws2[i] + 8; return b; });
+  for (const b of B.btn) { ctx.fillStyle = b.k === 'run' ? '#0f5a4c' : '#16302c'; ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeStyle = '#7dffd8'; ctx.lineWidth = 1.5; ctx.strokeRect(b.x, b.y, b.w, b.h); txt(b.l, b.x + b.w / 2, b.y + 23, 13, '#fff', 'center'); }
+  if (!tch) txt('← → pick a polariser · ↑ ↓ turn it', x0 + pw / 2, y0 + ph - 60, 11, '#8fb3ad', 'center');
 }
 const aodPaid = new Set(), aodSolved = new Set(); // (levels paid for and solved, this game or this lab lesson)
 function aodOpen(lv) {
@@ -10037,6 +10205,7 @@ const ACH = {
   squad: ['The Constants', 'Beat all four of P.L.A.N.C.K.\'s heroes.'],
   drops: ['Power-Up', 'Took 25 power-ups in one game.'],
   tunnel: ['Quantum Leak', 'Went through a wall by quantum tunnelling.'],
+  bell: ['Spooky Action', 'Broke a Bell inequality: |S| past 2.'],
   quantumpc: ['Quantum Advantage', 'Found the PIN with Grover\'s search on FIT BUT\'s quantum computer.', 'b'],
   qclock: ['Atomic Time', 'Read the quantum clock at the Institute of Scientific Instruments.', 'b'],
   sealion: ['Ar! Ar!', 'Met the sea lion of Starý Lískovec.', 'b'],
@@ -10089,14 +10258,14 @@ const ACH = {
 };
 // from the easiest to the hardest: the order of the tiles, and the next to find is the first you haven't (that can be had
 // on this map: the third field, b or 5 Brno)
-const ACH_ORDER = ['superpose', 'wasted', 'copcar', 'busted', 'swap', 'job', 'drops', 'tunnel', 'day', 'tourist', 'spilberk', 'station', 'jakub', 'jost', 'qclock', 'tram', 'army', 'tank', 'sail', 'cellars', 'formula', 'bren', 'lab', 'atoms', 'quantumpc', 'schrodinger', 'wl6', 'kometa', 'cow', 'panda', 'sealion', 'jackal', 'justice', 'marble', 'bells', 'duck', 'hantec', 'coop', 'drone', 'wl7', 'qtunnel', 'train', 'arc', 'lucky', 'deadline', 'lowkey', 'ashore', 'wl8', 'teleport', 'mult9', 'monk', 'wl9', 'crowd', 'dragon', 'birk', 'conquer', 'wl10', 'notes', 'ground', 'carrier', 'squad'];
+const ACH_ORDER = ['superpose', 'wasted', 'copcar', 'busted', 'swap', 'job', 'drops', 'tunnel', 'day', 'tourist', 'spilberk', 'station', 'jakub', 'jost', 'qclock', 'tram', 'army', 'tank', 'sail', 'cellars', 'formula', 'bren', 'lab', 'atoms', 'quantumpc', 'bell', 'schrodinger', 'wl6', 'kometa', 'cow', 'panda', 'sealion', 'jackal', 'justice', 'marble', 'bells', 'duck', 'hantec', 'coop', 'drone', 'wl7', 'qtunnel', 'train', 'arc', 'lucky', 'deadline', 'lowkey', 'ashore', 'wl8', 'teleport', 'mult9', 'monk', 'wl9', 'crowd', 'dragon', 'birk', 'conquer', 'wl10', 'notes', 'ground', 'carrier', 'squad'];
 const achHere = k => { const w = ACH[k][2]; return !w || (w === 'b' && BRNO) || (w === '5' && B5); };
 const ACH_GOT = (() => { try { const o = JSON.parse(localStorage.getItem('qta.ach') || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
 const achToasts = [];
 function ach(id) {
   if (!ACH[id] || ACH_GOT[id] || DBG.used) return;
   if (player.isGuest) { NET.ev.push(['ach', id]); return; } // (the friend's: it goes to their browser)
-  if (state === 'play' || state === 'aod' || state === 'qc') achGrant(id);
+  if (state === 'play' || state === 'aod' || state === 'qc' || state === 'chsh') achGrant(id);
 }
 function achGrant(id) {
   if (!ACH[id] || ACH_GOT[id]) return;
@@ -10179,6 +10348,7 @@ const ACH_HOW = {
   carrier: 'At ten stars a P.L.A.N.C.K. Helicarrier comes: bring it down with twelve rockets.',
   drops: 'Power-ups (ψ, ε and ♥) keep turning up around you: take 25 of them in one game.',
   tunnel: 'Hit walls, in a car or on foot: now and then you tunnel through one. The chance (in the corner, by ψ and ε) grows the longer it has been since you last did.',
+  bell: 'At a Bell test console (BELL: by the Atom Array Lab, and in Brno also at Masaryk University\'s Faculty of Science), set the four polariser angles so that |S| passes 2 (2.3, to be sure).',
   quantumpc: 'In Brno, walk up to FIT BUT\'s door (the QPU sign) and run Grover\'s search on its quantum computer: measure after the right number of rounds, and you find the PIN.',
   qclock: 'In Brno, find the quantum clock by the gate of the Institute of Scientific Instruments (ÚPT AV ČR) on Královopolská.',
   sealion: 'In Brno, a sea lion has got loose in Starý Lískovec. Go and find it.',
@@ -10348,9 +10518,10 @@ function drawTitle() {
   txt(`MAP: ${B5 ? 'INNER BRNO' : 'QUANTUM ISLAND'}  ·  ${touchOn() ? 'tap here for' : '↑ ↓ for'} ${B5 ? 'the island' : 'inner Brno'}`, W / 2, H * 0.5 - 30, Math.min(13, W / 40), '#ffd54a', 'center');
   txt(`◀   START IN ${st.name.toUpperCase()}   ▶`, W / 2, H * 0.5, Math.min(20, W / 26), '#7dffd8', 'center', true);
   txt(`${st.sub}  ·  ${touchOn() ? 'tap here to change' : '← → to change'}`, W / 2, H * 0.5 + 22, Math.min(13, W / 40), '#bbb', 'center');
-  if (Math.sin(time * 4) > -0.3) txt(touchOn() ? 'TAP LEFT: PLAY · TAP RIGHT: PHYSICS LAB' : 'ENTER: PLAY  ·  L: PHYSICS LAB', W / 2, H * 0.6, Math.min(22, W / 24), '#fff', 'center', true);
-  txt(touchOn() ? 'tap here for online co-op' : 'O: ONLINE CO-OP WITH A FRIEND', W / 2, H * 0.6 + 34, Math.min(15, W / 34), '#7dffd8', 'center', true);
-  if (W > 560) HELP.slice(0, 6).forEach(([k, d], i) => { const t = `${k}  —  ${d}`; ctx.font = 'bold 13px ui-monospace, Menlo, Consolas, monospace'; txt(t, W / 2, H * 0.71 + i * 21, Math.min(13, 13 * (W - 32) / ctx.measureText(t).width), '#bbb', 'center'); });
+  if (Math.sin(time * 4) > -0.3) txt(touchOn() ? 'TAP LEFT: PLAY · TAP RIGHT: PHYSICS LAB' : saved ? 'ENTER: NEW GAME  ·  L: PHYSICS LAB' : 'ENTER: PLAY  ·  L: PHYSICS LAB', W / 2, H * 0.6, Math.min(22, W / 24), '#fff', 'center', true);
+  if (saved) txt(`${touchOn() ? 'tap here to continue' : 'C: CONTINUE'}  ·  ${savedLine()}`, W / 2, H * 0.6 + 26, Math.min(15, W / 34), '#ffd54a', 'center', true);
+  txt(touchOn() ? 'tap here for online co-op' : 'O: ONLINE CO-OP WITH A FRIEND', W / 2, H * 0.6 + (saved ? 52 : 34), Math.min(15, W / 34), '#7dffd8', 'center', true);
+  if (W > 560) HELP.slice(0, saved ? 5 : 6).forEach(([k, d], i) => { const t = `${k}  —  ${d}`; ctx.font = 'bold 13px ui-monospace, Menlo, Consolas, monospace'; txt(t, W / 2, H * 0.71 + (saved ? 24 : 0) + i * 21, Math.min(13, 13 * (W - 32) / ctx.measureText(t).width), '#bbb', 'center'); });
   if (best > 0) txt(`Best: ${fmt(best)}`, W / 2, H - 24, 14, '#ffd54a', 'center');
   drawTitleAch();
   if (helpPage === 3) drawHelp(); // (the achievements, opened over the title)
@@ -10524,6 +10695,8 @@ const EA = BRNO ? (() => {
   // computer, through the faculty's door
   A.qclock = nearT(...P(49.22202, 16.58368), (t, i, j) => foot(t) && outside(i, j) && byRoad(i, j), 160) || nearT(...P(49.22202, 16.58368), (t, i, j) => open(t) && outside(i, j), 220);
   A.qpc = A.fitDoor || null;
+  // the Bell test's console, at Masaryk University's Faculty of Science on Kotlářská
+  { const u = (BRNO_DATA.unis || []).find(q => /^Přírodovědecká fakulta/.test(q[0])); if (u) { const c = u[1]; let sx = 0, sy = 0; for (let i = 0; i < c.length; i += 2) { sx += c[i]; sy += c[i + 1]; } A.chsh = nearT(sx / (c.length / 2) * T, sy / (c.length / 2) * T, (t, i, j) => foot(t) && outside(i, j), 160); } }
   // Moravské náměstí: Margrave Jošt on his long-legged horse (Odvaha, Courage) and, outside the Supreme Administrative
   // Court, a man lifting a block on a jet of water (Spravedlnost, Justice)
   if (B5) { const [jx, jy] = P(49.197636, 16.607535), [sx, sy] = P(49.197482, 16.607103); A.jost = { x: jx, y: jy, a: -Math.PI / 2 }; A.justice = { x: sx, y: sy }; }
@@ -11549,7 +11722,7 @@ function newGame() {
   const at = STARTS[startSel];
   Object.assign(player, { hp: 100, car: null, weapons: {}, weapon: null, cash: 0, lives: 5, mult: 1, down: 0, bust: 0, hidden: false, x: at.p.x, y: at.p.y, angle: faceOpen(at.p.x, at.p.y), inPsi: false, fish: null, tow: null, fishHint: null, marble: false, marbleT: 0, lime: false, cellar: null, nDrops: 0, stun: 0, tunT: time, tunRoll: 0 });
   Object.assign(Q, { psi: 1, ent: 2, link: null, linkT: 0, decoy: null, decoyT: 0, branches: null, note: null, slow: false, bb: null });
-  lab = null; labCars = []; labFlags = {}; arcProg = DISTRICTS.map(() => 0); dayT = 17 / 24; aodPaid.clear(); aodSolved.clear(); dayN = 0; qcWins = 0; qcDay = -1; qcCool = 0;
+  lab = null; labCars = []; labFlags = {}; arcProg = DISTRICTS.map(() => 0); dayT = 17 / 24; aodPaid.clear(); aodSolved.clear(); dayN = 0; qcWins = 0; qcDay = -1; qcCool = 0; chshDay = -1;
   heat = 0; belief.sig = 0; mission = null; ringing = null; ringCd = 3; won = false; curDistrict = -1; msgs = []; overlay = null;
   updateCamera(0, true);
   fillSpots(true);
@@ -11559,6 +11732,43 @@ function newGame() {
   if (HANTEC_ON && !HANTEC_SET && !lab) msg('Your browser speaks Czech, so Brno speaks Hantec: type "hantec" to switch it off.', 7);
   state = 'play'; helpPage = 0; DBG.used = DBG.god; achMap();
 }
+// ---- save and continue: the game in progress is kept, one per map, every 20 s of play, when you pause and when the tab
+// goes to the background; the title screen offers to continue it, and game over clears it. What is kept: you (where you
+// are, and the car you are in), your cash, lives, weapons and quantum gear, the arcs, the day, the quantum computer.
+// Not a job in progress, nor the wanted level. Not the lessons, nor a co-op guest's game.
+const SAVE_KEY = 'qta.save.' + MAP_ID;
+let saved = (() => { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); return s && s.v === 1 ? s : null; } catch (e) { return null; } })(), saveT = 20;
+function saveGame() {
+  if (lab || NET.role === 'guest' || player.down || player.hidden || player.cellar || !['play', 'pause', 'qc', 'chsh', 'aod'].includes(state)) return;
+  const c = player.car, keep = c && !c.dead && !c.lay && !c.tram && !CT[c.type].boat && c.type !== 'wheel' && !c.mission && !c.egg;
+  const o = keep ? c : player;
+  const s = { v: 1, t: Date.now(), x: Math.round(o.x), y: Math.round(o.y), a: +(o.angle || 0).toFixed(2), car: keep ? { type: c.type, color: c.color, hp: Math.round(c.hp) } : null,
+    hp: Math.round(player.hp), cash: player.cash, lives: player.lives, mult: player.mult, weapons: player.weapons, weapon: player.weapon, marble: !!player.marble,
+    nDrops: player.nDrops || 0, tunAgo: Math.round(time - (player.tunT ?? time)), psi: Q.psi, ent: Q.ent, notes: [...Q.notes], arc: arcProg, day: dayN, dayT: +dayT.toFixed(5),
+    qcWins, qcPaid: qcDay === dayN, chshPaid: chshDay === dayN, aodSolved: [...aodSolved], aodPaid: [...aodPaid], dbg: !!DBG.used, start: startSel };
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); saved = s; } catch (e) { /* storage unavailable, or full */ }
+}
+function clearSave() { saved = null; try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } }
+function continueGame() {
+  const s = saved; if (!s) { newGame(); return; }
+  startSel = Math.min(STARTS.length - 1, s.start || 0); newGame();
+  Object.assign(player, { hp: s.hp, cash: s.cash, lives: s.lives, mult: s.mult, weapons: s.weapons || {}, weapon: s.weapon || null, marble: !!s.marble, nDrops: s.nDrops || 0, tunT: time - (s.tunAgo || 0) });
+  Q.psi = s.psi; Q.ent = s.ent; for (const n of s.notes || []) Q.notes.add(n);
+  arcProg = DISTRICTS.map((_, i) => (s.arc && s.arc[i]) || 0); dayN = s.day || 0; dayT = s.dayT ?? dayT; EGG.h = null;
+  qcWins = s.qcWins || 0; qcDay = s.qcPaid ? dayN : -1; chshDay = s.chshPaid ? dayN : -1;
+  aodSolved.clear(); for (const v of s.aodSolved || []) aodSolved.add(v); aodPaid.clear(); for (const v of s.aodPaid || []) aodPaid.add(v);
+  DBG.used = DBG.used || !!s.dbg;
+  let x = s.x, y = s.y;
+  if (!(x > 0 && y > 0 && x < MW * T && y < MH * T) || circleSolid(x, y, 8)) { const t = tileCenter(findTileNear(clamp(Math.floor(x / T), 1, MW - 2), clamp(Math.floor(y / T), 1, MH - 2), WALK)); x = t.x; y = t.y; }
+  player.x = x; player.y = y; player.angle = s.a || 0;
+  if (s.car && CT[s.car.type]) {
+    const c = makeCar(s.car.type, x, y, s.a || 0, 'player');
+    if (carHitsWall(c, x, y, c.angle)) cars.pop(); else { c.color = s.car.color || c.color; c.hp = s.car.hp || c.hp; player.car = c; }
+  }
+  updateCamera(0, true); fillSpots(true); for (let i = 0; i < 30; i++) manageSpawns(1);
+  msgs = []; msg(`Welcome back: ${fmt(player.cash)}, ${player.lives} ${player.lives === 1 ? 'life' : 'lives'}, day ${dayN + 1}.`, 4);
+}
+const savedLine = () => saved && `${fmt(saved.cash)} · ${'♥'.repeat(Math.max(0, Math.min(9, saved.lives)))} · day ${(saved.day || 0) + 1}`;
 function titleInit() {
   resetWorld();
   player.hidden = true; player.car = null; dayT = 21 / 24; heat = 0; mission = null;
@@ -11797,12 +12007,14 @@ function frame(nowT) {
     updateWorld(dt); updateCamera(dt);
     cam.zoom = clamp(Math.min(W, H) / 760, 0.55, 1.6) * 0.9;
     if (hit('KeyH') || onAch) { helpPage = 3; achSel = -1; }
-    else if (hit('KeyO') || (tapAt && Math.abs(tapAt.y - (H * 0.6 + 34)) < 16)) netPanel(true);
+    else if (saved && (hit('KeyC') || (tapAt && Math.abs(tapAt.y - (H * 0.6 + 26)) < 11))) continueGame();
+    else if (hit('KeyO') || (tapAt && Math.abs(tapAt.y - (H * 0.6 + (saved ? 52 : 34))) < (saved ? 13 : 16))) netPanel(true);
     else if (tapAt && Math.abs(tapAt.y - (H * 0.5 + 6)) < 30) pick2(tapAt.x > W / 2 ? 1 : -1);
     else if (hit('KeyL') || (tapAt && touchOn() && tapAt.x > W / 2)) startLab();
     else if (hit('Enter', 'Space', 'Tap', 'NumpadEnter')) newGame();
   } else if (state === 'play') {
-    if (hit('KeyP', 'Escape')) state = 'pause';
+    if (hit('KeyP', 'Escape')) { state = 'pause'; saveGame(); }
+    if ((saveT -= dt) <= 0) { saveT = 20; saveGame(); }
     if (hit('KeyH')) { helpPage = (helpPage + 1) % 4; achSel = -1; }
     if (hit('KeyM')) showMap = (showMap + 1) % 3;
     if (hit('KeyR')) { radio = (radio + 1) % STATIONS.length; msg(radio ? `♪ ${STATIONS[radio].name}` : 'Radio off', 2); }
@@ -11834,6 +12046,8 @@ function frame(nowT) {
     updateAOD(dt);
   } else if (state === 'qc') {
     updateQC(dt);
+  } else if (state === 'chsh') {
+    updateCHSH(dt);
   } else if (state === 'over') {
     time += dt;
     if (hit('Enter', 'Tap', 'NumpadEnter')) newGame();
@@ -11855,6 +12069,7 @@ function frame(nowT) {
     if (state === 'over') drawOver();
     if (state === 'aod') drawAOD();
     if (state === 'qc') drawQC();
+    if (state === 'chsh') drawCHSH();
   }
   dbgDraw(); DBG.ft += (performance.now() - ft0 - DBG.ft) * 0.05;
   for (const k in pressed) delete pressed[k];
@@ -11862,6 +12077,8 @@ function frame(nowT) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
+addEventListener('pagehide', () => saveGame());
 // debug/test hook
 window.__gridlock = { get EGG() { return EGG; }, EA, EGG_SPOTS, get dayN() { return dayN; }, set dayN(v) { dayN = v; }, enterCellar, eggHatchAt, get HANTEC_ON() { return HANTEC_ON; }, hx, BOAT_SPOTS, WBN, boatShore, spawnBoat, enterExit, updateWorld, updateCamera, get WIND() { return WIND; }, set WIND(v) { WIND = v; }, get HQ() { return HQ; }, eprPhones, teleport, get tankerCars() { return tankerCars; }, get trams() { return trams; }, dbgRun, dbgShow, DBG, get tramsFar() { return tramsFar; }, TL, TRAM_STOPS, get heli() { return heli; }, placeRoadblock, map, MW, buildings, redStop, lightPhase, NODES, EDGES, LANES, LIGHT_NODES, BUS_STOPS, SITES, XW, XE, nearestLanePt, get time() { return time; }, player, Q, belief, get cars() { return cars; }, get peds() { return peds; }, get state() { return state; }, get heat() { return heat; }, set heat(v) { heat = v; }, get mission() { return mission; }, get lab() { return lab; }, get dayT() { return dayT; }, set dayT(v) { dayT = v; },
   newGame, startLab, setupLesson, makeCar, superpose, collapse, entangle, startMission, bb84, keys, pressed, labFlags: () => labFlags, arcProg: () => arcProg,
