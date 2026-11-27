@@ -1577,7 +1577,7 @@ function genMap() {
       if (pz) { Object.assign(pz, { ht: 0.18, dome: { r: 1e4, h: 0.34, c: '#b4c0c8' }, wall: '#dfe3e6', roof: '#c8d0d6', win: 'ribbon', mmc: '#c8d4e0', det: [], kit: 0 }); pz.top = 0.55; site5('Pavilon Z', [pz]); }
       if ((pz = pieceAt(49.18764, 16.5820, 2))) { Object.assign(pz, { dome: { r: 1e4, h: 0.16, c: '#9fb8c8' }, mmc: '#c8d4e0', det: [], kit: 0 }); pz.top = pz.ht + 0.2; site5('Pavilon A', [pz]); }
       if ((g = named('Vila Tugendhat')).length) { look(g, { wall: '#f4f2ec', roof: '#e2e0da', win: 'ribbon', mmc: '#f4f2ec' }); site5('Vila Tugendhat', g); }
-      if ((g = named('Mahenovo divadlo')).length) look(g, { win: 'columns', wall: '#e8dcc6' });
+      if ((g = named('Mahenovo divadlo')).length) look(g, { win: 'columns', wall: '#e8dcc6', edison: true }); // (it lights up first at dusk: see mahenLit)
       if ((g = named('Janáčkovo divadlo')).length) look(g, { wall: '#ecebe6', win: 'ribbon' });
       if ((g = nearG(49.2040, 16.5838, 4)).length) site5('Hvězdárna a planetárium', g);
       if ((g = named('Winning Group Arena')).length) { look(g, { wall: '#c8ccd0', roof: '#9aa2aa' }); site5('Hala Rondo', g); }
@@ -2336,7 +2336,7 @@ function los(x0, y0, x1, y1) {
 }
 
 // ============================================================ audio
-let AC = null, master, noiseBuf, engOsc, engGain, engFilt, sirenOsc, sirenGain, musicGain;
+let AC = null, master, noiseBuf, engOsc, engGain, engFilt, sirenOsc, sirenGain, musicGain, wxSrc, wxFilt, wxGain;
 function initAudio() {
   if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
   try {
@@ -2352,6 +2352,8 @@ function initAudio() {
     sirenGain = AC.createGain(); sirenGain.gain.value = 0;
     sirenOsc.connect(sirenGain).connect(master); sirenOsc.start();
     musicGain = AC.createGain(); musicGain.gain.value = 0; musicGain.connect(master);
+    wxSrc = AC.createBufferSource(); wxSrc.buffer = noiseBuf; wxSrc.loop = true; wxFilt = AC.createBiquadFilter(); wxFilt.type = 'lowpass'; wxFilt.frequency.value = 1800;
+    wxGain = AC.createGain(); wxGain.gain.value = 0; wxSrc.connect(wxFilt).connect(wxGain).connect(master); wxSrc.start();
   } catch (e) { AC = null; }
 }
 function noise(dur, freq, type, vol, q = 1, when = 0, dest = master) {
@@ -2518,6 +2520,8 @@ let state = 'title', time = 0, heat = 0, lastCrime = -99, shake = 0, overlay = n
 let showMap = 1, helpPage = 0, won = false, mission = null, ringing = null, ringCd = 4, ringBeep = 0;
 let rbCd = 6, spawnT = 0, policeCd = 0, heatCd = 0, curDistrict = -1, sprayCd = 0, serviceCd = 0;
 let dayT = 17 / 24, tapAt = null, lab = null, labFlags = {}, labCars = [], labRect = null;
+const WX = { k: 'clear', f: 0, max: 1, to: 'clear', nextK: 'clear', next: 240, wet: 0, cover: 0, crashT: 8, told: {} }; // (the weather: see updateWeather)
+const GAR = []; // (the cars in your garages: see the garages)
 const DAY_LEN = 1440; // seconds per in-game day (24 minutes: an hour of the day a minute)
 const flight = { t: 8, x: 0, v: 0, alt: 0, on: false };
 let best = 0; try { best = +localStorage.getItem('gridlock.best') || 0; } catch (e) { /* storage unavailable */ }
@@ -2634,11 +2638,13 @@ function applyControls(c, throttle, steer, hand, dt) {
   if (t.boat) { boatControls(c, throttle, steer, hand, dt); return; }
   if (c.dead) { throttle = 0; steer = 0; hand = true; }
   // acceleration tapers off toward top speed, so cars build up speed progressively
-  if (throttle > 0) c.speed += t.acc * dt * throttle * (c.speed < 0 ? 2.2 : 1 - 0.7 * clamp(c.speed / t.max, 0, 1));
-  else if (throttle < 0) c.speed -= (c.speed > 0 ? t.acc * 1.7 : t.acc * 0.6) * dt;
-  else c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), 90 * dt);
+  // (the weather: on wet roads and in snow the tyres grip less, so the car pulls away, brakes and holds a bend worse)
+  const g = wxGrip(c), gb = 0.35 + 0.65 * g;
+  if (throttle > 0) c.speed += t.acc * dt * throttle * (c.speed < 0 ? 2.2 : 1 - 0.7 * clamp(c.speed / t.max, 0, 1)) * (1 - 0.45 * (1 - g));
+  else if (throttle < 0) c.speed -= (c.speed > 0 ? t.acc * 1.7 * gb : t.acc * 0.6) * dt;
+  else c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), 90 * dt * gb);
   c.brk = hand || (throttle < 0 && c.speed > 0);
-  if (hand) c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), 200 * dt);
+  if (hand) c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), 200 * dt * gb);
   // off the road a car is much slower: sand and ploughed fields bog it down, grass drags (tractors and the tank don't mind;
   // in a tunnel or up on an overpass the car is on its road whatever the ground above or below it is).
   // Traffic only brushes the verge on the bends of its lanes, so it gets off lightly.
@@ -2661,8 +2667,12 @@ function applyControls(c, throttle, steer, hand, dt) {
   const hs = c.driver === 'player' ? 1 / (1 + Math.max(0, c.speed) / 380) : 1;
   c.angle += steer * t.turn * sf * hs * dt * (hand ? 1.6 : 1);
   if (carHitsWall(c, c.x, c.y, c.angle)) c.angle = pa;
+  if (c.skid > 0) { // (a skid on the snow: the car spins on, and goes where it was going)
+    c.skid -= dt; const pa2 = c.angle; c.angle += c.spin * dt; c.spin *= Math.exp(-dt * 0.6);
+    if (carHitsWall(c, c.x, c.y, c.angle)) c.angle = pa2;
+  }
   const hx = Math.cos(c.angle), hy = Math.sin(c.angle);
-  const k = Math.min(1, (hand ? 1.6 : 8) * dt);
+  const k = Math.min(1, (c.skid > 0 ? 0.35 : (hand ? 1.6 : 8) * g) * dt);
   c.vx += (hx * c.speed - c.vx) * k; c.vy += (hy * c.speed - c.vy) * k;
   if (!c.ghost && Math.abs(-hy * c.vx + hx * c.vy) > 70 && Math.random() < 0.7) skid(c);
 }
@@ -2678,7 +2688,7 @@ function carHitsWall(c, x, y, a) {
   if (HQ.rubble.length && !c.ghost && rubbleHit(c, x, y, a)) return true;
   const t = carTrunk(c, x, y, a);
   if (t && c.lay === 2 && tunT[Math.floor(t.y / T) * MW + Math.floor(t.x / T)]) return false; // (down a ramp, in the cutting: the trees are up above)
-  if (t) { if ((c.type === 'tank' || c.type === 'dozer') && !c.ghost) { knockTree(t); return false; } return true; }
+  if (t) { if ((c.type === 'tank' || c.type === 'dozer' || c.plough) && !c.ghost) { knockTree(t); return false; } return true; } // (and the story's detector vans, leaving the fair)
   return false;
 }
 // is (x, y) up on a deck: within its carriageway and the parapets (8 px past each kerb)?
@@ -2735,6 +2745,7 @@ function wallMove(c, dt) {
 }
 function moveCar(c, dt) {
   const vx0 = c.vx, vy0 = c.vy, impact = wallMove(c, dt);
+  if (impact > 70 && c.skid > 0) wxCrash(c);
   const tun = impact > 60 && !c.lay && !CT[c.type].boat && !c.tram && (c === player.car || (NET.guest && c === NET.guest.player.car)) && carTunnel(c, vx0, vy0);
   if ((TUNNELS.length || OVERS.length) && !CT[c.type].boat) { // the layer the car is on: 0 the street, 1 a tunnel (only down a ramp, 2), 3 an overpass (only up a ramp, 4)
     const k = Math.floor(c.y / T) * MW + Math.floor(c.x / T), tz = tunT[k] || 0, oz = ovT[k] || 0, L0 = c.lay;
@@ -2776,14 +2787,14 @@ function tryTunnel(o, vx, vy, r, P, car) {
   if (d >= 40) return 0;
   while (d < 320 && solidAt(o.x + ux * d, o.y + uy * d)) d += 3; // (and through it)
   const x = o.x + ux * (d + r + 4), y = o.y + uy * (d + r + 4);
-  if (d >= 320 || (car ? carHitsWall(o, x, y, o.angle) : circleSolid(x, y, r)) || (!openGround(x, y) && !(mission && mission.type === 'barrier' && mission.region.has(Math.floor(y / T) * MW + Math.floor(x / T))))) return 0;
+  if (d >= 320 || (car ? carHitsWall(o, x, y, o.angle) : circleSolid(x, y, r)) || (!openGround(x, y) && !(mission && (mission.type === 'barrier' ? mission.region : mission.type === 'camp' && mission.R && mission.R.region) || new Set()).has(Math.floor(y / T) * MW + Math.floor(x / T)))) return 0;
   qburst(o.x, o.y, '#3cf0ff'); o.x = x; o.y = y; qburst(x, y, '#3cf0ff'); sfx.quantum();
   P.tunT = time;
   const t = `Quantum tunnelling: through the wall! (it had a ${Math.round(p * 100)}% chance; now it starts again from nothing)`;
   if (P === player) { msg(t, 3.5); note('tunnel'); ach('tunnel'); } else asGuest(() => { msg(t, 3.5); note('tunnel'); ach('tunnel'); });
   return p;
 }
-function findSealed(P0, min = 250, max = 1500) {
+function findSealed(P0, min = 250, max = 1500, all = false) {
   const R = Math.ceil(max / T), tx0 = Math.floor(P0.x / T), ty0 = Math.floor(P0.y / T), done = new Set(), found = [];
   for (let ty = Math.max(1, ty0 - R); ty <= Math.min(MH - 2, ty0 + R); ty++) for (let tx = Math.max(1, tx0 - R); tx <= Math.min(MW - 2, tx0 + R); tx++) {
     const k0 = ty * MW + tx, x = (tx + 0.5) * T, y = (ty + 0.5) * T;
@@ -2803,7 +2814,7 @@ function findSealed(P0, min = 250, max = 1500) {
         const ox = (i + DX[d] * (n + 1) + 0.5) * T, oy = (j + DY[d] * (n + 1) + 0.5) * T; if (!circleSolid(ox, oy, 8) && openGround(ox, oy)) way = { x: ox, y: oy }; } }
     if (way) found.push({ x: crate.x, y: crate.y, ox: way.x, oy: way.y, region: new Set(reg) });
   }
-  return found.length ? pick(found) : null;
+  return all ? found : found.length ? pick(found) : null;
 }
 function carTunnel(c, vx, vy) {
   const P = c === player.car ? player : NET.guest.player;
@@ -2986,6 +2997,7 @@ function pickGoal(c) { // somewhere a fair way off, but not across the island (t
 }
 function aiTraffic(c, dt, straightP = 0.65, avoid = true) {
   const a = c.ai;
+  if (c.hazT > 0) { c.hazT -= dt; c.skid = 0; applyControls(c, 0, 0, true, dt); return; } // (crashed: hazard lights on, waiting)
   a.np = (a.np || 0) + dt; // time since the car last made progress
   if (!c.ln || a.np > 8) {
     if (!laneAcquire(c, a.np > 8 ? 160 : 96)) { applyControls(c, 0, 0, true, dt); return; }
@@ -3006,7 +3018,7 @@ function aiTraffic(c, dt, straightP = 0.65, avoid = true) {
   // slow for bends in the road and for the turn at the next junction
   let turn = Math.abs(wrapA(lanePt(L, Math.min(ln.s + 90, L.len))[2] - lanePt(L, ln.s)[2]));
   if (ln.nx && L.len - ln.s < 110) turn = Math.max(turn, Math.abs(wrapA(ln.nx.h[0] - L.h[L.n - 1])));
-  let target = a.cruise * (L.hw ? 1.7 : 1) * (1 - Math.min(1, turn / 1.6) * 0.62);
+  let target = a.cruise * (L.hw ? 1.7 : 1) * (1 - Math.min(1, turn / 1.6) * 0.62) * wxSlow();
   target *= 1 - Math.min(Math.abs(wrapA(Math.atan2(ty - c.y, tx - c.x) - c.angle)), 1) * 0.5;
   if (!ln.nx && L.len - ln.s < 30) target = 0; // dead end
   a.horn -= dt; a.stopCd = (a.stopCd || 0) - dt;
@@ -3028,7 +3040,7 @@ function aiTraffic(c, dt, straightP = 0.65, avoid = true) {
     if (ob.ai && (ob.ai.queued || ob.ai.dwell > 0)) { a.queued = true; a.blocked = 0; a.np = 0; }
     else a.blocked += dt;
     // a wreck, a parked or abandoned car, or a long jam: steer around it through the opposite lane
-    const still = ob.type && (ob.dead || !ob.driver || ob.parked || (ob.driver === 'player' && Math.abs(ob.speed) < 5));
+    const still = ob.type && (ob.dead || !ob.driver || ob.parked || ob.hazT > 0 || (ob.driver === 'player' && Math.abs(ob.speed) < 5));
     if ((still && a.blocked > 1) || a.blocked > 7) { a.byp = 2.2; a.bypObj = ob; a.blocked = 0; }
     else target = 0;
     if (a.blocked > 1.5 && a.horn <= 0 && onScreen(c.x, c.y) && !(ob.ai && ob.ai.blocked > 0.5)) { sfx.horn(); a.horn = 5; }
@@ -3061,6 +3073,7 @@ function navTo(c, gx, gy, sp, dt) {
 // 2 stars, the radio calls in nearby cars and they ram. 3 stars, roadblocks and armed officers.
 // 4 stars, SWAT vans and the helicopter. 5 stars, the tank.
 function aiPolice(c, dt) {
+  if (c.dazzle > 0) { c.dazzle -= dt; c.chase = false; applyControls(c, 0, 0, true, dt); return; } // (its crew blinded by the flash)
   if (CT[c.type].boat) { aiBoatCop(c, dt); return; }
   if (c.lay === 1 || c.lay === 3) { aiTraffic(c, dt); return; } // (in a tunnel, or up on an overpass, a cruiser can only drive on through)
   const stars = Math.floor(heat);
@@ -3070,7 +3083,7 @@ function aiPolice(c, dt) {
   if (heat < 1 || player.down || player.hidden) { c.chase = false; c.lostT = 0; aiTraffic(c, dt); return; }
   const P0 = copTarget(c), d = Math.hypot(P0.x - c.x, P0.y - c.y), tank = c.type === 'tank', swat = c.type === 'swat';
   const heavy = c.type === 'apc' || c.type === 'dozer';
-  if ((tank && stars < 5) || (swat && stars < 4) || (c.type === 'bureau' && stars < 6) || (c.type === 'apc' && stars < 7) || (c.type === 'dozer' && stars < 9)) { c.chase = false; c.recall = true; aiTraffic(c, dt); return; } // stood down: head back to base
+  if ((tank && stars < 5) || (swat && stars < 4) || (c.type === 'bureau' && stars < 6 && !c.camp) || (c.type === 'apc' && stars < 7) || (c.type === 'dozer' && stars < 9)) { c.chase = false; c.recall = true; aiTraffic(c, dt); return; } // stood down: head back to base
   const see = !Q.branches && d < (tank ? 320 : 240) && los(c.x, c.y, P0.x, P0.y);
   if (!c.chase) { // patrols join in only when they see you or get the call on the radio
     if (see || d < 200 || (stars >= 2 && d < 1000) || stars >= 3) c.chase = true;
@@ -3294,10 +3307,11 @@ function updatePed(p, dt) {
   if (p.held) { p.moving = true; p.anim = (p.anim || 0) + dt * 20; return; } // (being dragged out of a car)
   if (p.vip) { p.moving = false; p.angle += Math.sin(time * 2) * dt; return; }
   if (p.monk && !(p.flee > 0)) { monkStep(p, dt); return; }
+  if (p.dazzle > 0) { p.dazzle -= dt; p.moving = false; p.angle += Math.sin(time * 7 + p.x) * dt * 2; return; } // (blinded by the ultraviolet catastrophe)
   p.moving = true;
   const P0 = pp(), pd = Math.hypot(P0.x - p.x, P0.y - p.y);
   const tg = copTarget(p), tp = tg === P0 ? player : NET.guest.player, td = tg === P0 ? pd : Math.hypot(tg.x - p.x, tg.y - p.y);
-  if (p.cop && heat >= 1 && !tp.down && !tp.hidden && !tp.cellar && td < 520 && (belief.sig < 80 || (td < 250 && los(p.x, p.y, tg.x, tg.y)))) {
+  if (p.cop && heat >= 1 && !tp.down && !tp.hidden && !tp.cellar && td < 520 * wxSight() && (belief.sig < 80 || (td < 250 * wxSight() && los(p.x, p.y, tg.x, tg.y)))) {
     const P0 = tg, pd = td, player = tp; // (this officer is after whichever of you is nearer)
     const a = Math.atan2(P0.y - p.y, P0.x - p.x), sees = los(p.x, p.y, P0.x, P0.y);
     p.angle = a; p.path = null; p.idle = 0;
@@ -3507,9 +3521,10 @@ function copNear(x, y, r) {
 // does any cop currently have eyes on point (x, y)?
 function copSees(x, y) {
   if (player.car && player.car.lay === 1 && d2(player.car.x, player.car.y, x, y) < 40 * 40) return false; // (nobody sees you in a tunnel)
-  for (const p of peds) if (p.cop && !p.dead) { const dd = d2(p.x, p.y, x, y); if (dd < 70 * 70 || (dd < 260 * 260 && los(p.x, p.y, x, y))) return true; }
+  const sk = wxSight();
+  for (const p of peds) if (p.cop && !p.dead && !(p.dazzle > 0)) { const dd = d2(p.x, p.y, x, y); if (dd < 70 * 70 || (dd < (260 * sk) ** 2 && los(p.x, p.y, x, y))) return true; }
   if (HQ.sweep > 0 || (HQ.drone && HQ.drone.lock && !HQ.drone.fall) || (HQ.carrier && HQ.carrier.see) || HQ.heroes.some(h => h.see)) return true; // (the sweep, the Bureau's drone, the Helicarrier's light, the Collapser)
-  for (const c of cars) if ((c.type === 'police' || c.type === 'policeboat' || c.type === 'tank' || c.type === 'swat' || c.type === 'bureau' || c.type === 'apc' || c.type === 'dozer') && c.driver === 'police') { const dd = d2(c.x, c.y, x, y); if (dd < 70 * 70 || (dd < 300 * 300 && los(c.x, c.y, x, y))) return true; }
+  for (const c of cars) if ((c.type === 'police' || c.type === 'policeboat' || c.type === 'tank' || c.type === 'swat' || c.type === 'bureau' || c.type === 'apc' || c.type === 'dozer') && c.driver === 'police' && !(c.dazzle > 0)) { const dd = d2(c.x, c.y, x, y); if (dd < 70 * 70 || (dd < (300 * sk) ** 2 && los(c.x, c.y, x, y))) return true; }
   if (heli && !heli.dead && d2(heli.lx, heli.ly, x, y) < 120 * 120) return true; // the helicopter sees everything under its searchlight
   return false;
 }
@@ -3540,7 +3555,7 @@ function explode(x, y, r, src, pow = 1) { // (pow: a lighter blast, for a kamika
   }
   for (const t of trams) for (const S of t.sec) { const d = Math.hypot(S.x - x, S.y - y); if (!S.lv && d < r + S.l / 2) { damageTram(t, (1 - d / (r + S.l / 2)) * 420, src); break; } }
   for (const p of peds) if (!p.dead && Math.hypot(p.x - x, p.y - y) < r) killPed(p, src, true);
-  if (src === 'player') heroBlast(x, y, r);
+  if (src === 'player') { heroBlast(x, y, r); campBlast(x, y, r); }
   scare(x, y, r * 4);
   if (!player.car && !player.hidden) {
     const d = Math.hypot(player.x - x, player.y - y);
@@ -3642,6 +3657,7 @@ function entangle() {
   const o = pp(); let c = null, bd = 130 * 130;
   const wet = boatOf(player.car); // (a boat swaps places only with a boat, a car or you only with a car)
   for (const q of cars) { if (q === player.car || q.dead || q.ghost || boatOf(q) !== wet) continue; const d = d2(q.x, q.y, o.x, o.y); if (d < bd) { bd = d; c = q; } }
+  for (const q of cars) if (q.qfar && !q.dead && q !== player.car && d2(q.x, q.y, o.x, o.y) < 270 * 270) c = q; // (the story's van: further off, through a wall)
   if (!c) { msg(wet ? 'Get close to another boat to entangle with it.' : 'Get close to a car to entangle with it.', 1.5); return; }
   Q.ent--; Q.link = c; Q.linkT = 60; c.linked = true;
   if (c.labGo) { c.driver = 'ai'; c.ln = null; c.labGo = false; }
@@ -3699,7 +3715,7 @@ function updateBelief(dt) {
     belief.x = clamp(belief.x + belief.vx * dt, T, (MW - 2) * T);
     belief.y = clamp(belief.y + belief.vy * dt, T, (MH - 2) * T);
     const f = Math.exp(-dt * 0.25); belief.vx *= f; belief.vy *= f;
-    belief.sig = Math.min(900, belief.sig + dt * (35 + 0.1 * Math.hypot(belief.vx, belief.vy)));
+    belief.sig = Math.min(900, belief.sig + dt * (35 + 0.1 * Math.hypot(belief.vx, belief.vy)) * (1 + (WX.k === 'fog' ? WX.f : 0))); // (in fog, twice as fast)
     if (belief.sig > 150) note('uncertainty');
   }
 }
@@ -4156,7 +4172,7 @@ function updatePlayer(dt) {
   if (!!qpc !== !!player.qpcHint) { if (qpc) msg(`FIT BUT's quantum computer. ${touchOn() ? '⇄' : 'Enter'}: run Grover's search on it.`, 3); player.qpcHint = qpc; }
   const epr = !player.car && heat >= 8 ? eprPhones().findIndex(e => d2(e.x, e.y, player.x, player.y) < 30 * 30) : -1;
   if (epr !== player.eprHint) { if (epr >= 0) msg(`An entangled payphone. ${touchOn() ? '⇄' : 'Enter'}: a Bell measurement, and you teleport to its twin.`, 3); player.eprHint = epr; }
-  if (hit('Enter', 'KeyF', 'KeyE')) { const hz = !player.car && !player.isGuest ? eggHatchAt(player.x, player.y) : -1; if (hz >= 0) { enterCellar(hz); return; } const fs = !player.car && fishSpotAt(player.x, player.y); if (qpc) { qcOpen(); return; } if (chs) { chshOpen(chs); return; } if (con) { aodOpen(); return; } if (epr >= 0) { startBell(epr); return; } if (fs) startFishing(fs); else enterExit(); }
+  if (hit('Enter', 'KeyF', 'KeyE')) { if (garageEnter() || (!player.isGuest && campEnter())) return; const hz = !player.car && !player.isGuest ? eggHatchAt(player.x, player.y) : -1; if (hz >= 0) { enterCellar(hz); return; } if (!player.car && !player.isGuest && eggPostAt(player.x, player.y)) { eggPost(); return; } if (!player.car && !player.isGuest && bulbAt(player.x, player.y)) { bulbOpen(); return; } const fs = !player.car && fishSpotAt(player.x, player.y); if (qpc) { qcOpen(); return; } if (chs) { chshOpen(chs); return; } if (con) { aodOpen(); return; } if (epr >= 0) { startBell(epr); return; } if (fs) startFishing(fs); else enterExit(); }
   if (!player.car) { // walking up to a jetty or the AOD console: say what it is for
     const fs = fishSpotAt(player.x, player.y) || con;
     if (fs && fs !== player.fishHint) msg(fs === con ? `The AOD console: plan atom moves. ${touchOn() ? '⇄' : 'Enter'}: sit down.` : `A fishing jetty. ${touchOn() ? '⇄' : 'Enter'}: fish.`, 2.5);
@@ -4248,6 +4264,7 @@ function collideCars(active) {
           damageCar(a, dmg * clamp(mb / ma, 0.3, 5), b.driver === 'player' ? 'player' : null);
           damageCar(b, dmg * clamp(ma / mb, 0.3, 5), a.driver === 'player' ? 'player' : null);
           if (onScreen(a.x, a.y)) sfx.crash();
+          if (a.skid > 0 || b.skid > 0 || WX.cover > 0.35) { wxCrash(a); wxCrash(b); } // (a crash in the snow: the traffic stops there a while)
           if (a === player.car || b === player.car) { shake = Math.min(1, -vn / 400); if (-vn > 130) hardKnock(); if (player.car && CT[player.car.type].bike && -vn > 150) bikeThrow(); }
           for (let k = 0; k < 4; k++) addPart(ca[u][0] + nx * ca[2], ca[u][1] + ny * ca[2], rand(-60, 60), rand(-60, 60), 0.3, 2, '#ffd27a');
         }
@@ -4331,6 +4348,7 @@ function updateBullets(dt) {
       }
       if (done) break;
       if (b.owner === 'player' && airHit(b)) { done = true; break; } // (the drones, the Helicarrier)
+      if (b.owner === 'player' && campHit(b)) { done = true; break; } // (the story's detectors)
       if (b.owner === 'player') {
         for (const p of peds) {
           if (p.dead || d2(p.x, p.y, b.x, b.y) > 7 * 7) continue;
@@ -4579,6 +4597,7 @@ function advanceSteal() {
 }
 function missionLine() {
   if (!mission) return null;
+  if (mission.type === 'camp') return campLine();
   let line = '';
   switch (mission.type) {
     case 'deliver': line = mission.stage ? `Deliver the case · P(bomb) ${Math.round(mission.bomb * 100)}%` : 'Pick up the briefcase'; break;
@@ -4604,6 +4623,7 @@ function missionTarget() {
   if (NET.role === 'guest') return NET.mt ? { x: NET.mt[0], y: NET.mt[1] } : ringing;
   if (!mission) return lab ? lab.target : eggTarget(true) || ringing || eggTarget();
   switch (mission.type) {
+    case 'camp': return CHAP[mission.ch].goal(mission);
     case 'deadline': return mission;
     case 'steal': return mission.stage === 0 ? mission.car : mission;
     case 'hit': return mission.ped;
@@ -4620,10 +4640,12 @@ function missionTarget() {
 function completeMission(factor = 1, title = 'JOB DONE') {
   if (!mission) return;
   const m = mission;
+  if (m.council) factor *= 2 / 3; // (the Old Town Hall pays short, as it paid Pilgram)
   const r = Math.round(m.reward * player.mult * factor);
   earn(r);
   bigText(title, factor < 1 ? '#e67e22' : '#2ecc71', 2.5, `+${fmt(r)} · multiplier x${Math.min(9, player.mult + 1)}`);
   player.mult = Math.min(9, player.mult + 1); ach('job'); if (player.mult >= 9) ach('mult9');
+  if (m.council) eggPilgram();
   if (m.type === 'steal' && m.car) {
     const c = m.car;
     if (player.car === c) { if (Q.branches) Q.branches = null; player.car = null; const s = sideSpot(c) || c; player.x = s.x; player.y = s.y; }
@@ -4646,6 +4668,7 @@ function completeMission(factor = 1, title = 'JOB DONE') {
   }
 }
 function cleanupMission(m) {
+  if (m.type === 'camp') { CHAP[m.ch].end(m); return; }
   if (m.type === 'steal' && m.car) m.car.mission = false;
   if (m.type === 'hit' && m.ped) m.ped.target = false;
   if (m.type === 'entangle') { m.a.mission = false; m.b.mission = false; }
@@ -4660,15 +4683,18 @@ function cleanupMission(m) {
 function failMission(why) {
   if (!mission) return;
   if (mission.type === 'entangle') { mission.a.twin = null; mission.b.twin = null; }
+  const camp = mission.type === 'camp';
   cleanupMission(mission);
-  mission = null; ringCd = 8;
+  mission = null; ringCd = 8; if (camp) campFail();
   if (lab) labFlags.missionDone = true;
   if (why) bigText('JOB FAILED', '#e67e22', 2.5, why);
 }
 function updateMissions(dt) {
   sprayCd -= dt;
   const P0 = pp();
-  if (!mission) {
+  campTick(dt);
+  if (mission && mission.type === 'camp') { if (mission.timer > 0 && (mission.timer -= dt) <= 0) failMission('Out of time.'); else if (!player.down) CHAP[mission.ch].tick(mission, dt); }
+  else if (!mission) {
     ringCd -= dt;
     if (!ringing && ringCd <= 0) {
       ringing = pick(BOOTHS.filter(b => d2(b.x, b.y, P0.x, P0.y) > 300 * 300)) || pick(BOOTHS);
@@ -4678,7 +4704,7 @@ function updateMissions(dt) {
       ringBeep -= dt;
       if (ringBeep <= 0 && d2(ringing.x, ringing.y, P0.x, P0.y) < 500 * 500) { sfx.ring(); ringBeep = 1.2; }
       const slow = !player.car || Math.abs(player.car.speed) < 60;
-      if (!player.down && slow && d2(ringing.x, ringing.y, P0.x, P0.y) < 24 * 24) startMission(null, ringing);
+      if (!player.down && slow && d2(ringing.x, ringing.y, P0.x, P0.y) < 24 * 24) { const b = ringing; startMission(null, b); eggCouncil(b); }
     }
   } else {
     const m = mission;
@@ -4775,7 +4801,7 @@ function updateMissions(dt) {
     if (heat < 1) { msg('Spray shop: you\'re not wanted. Come back when you are.', 2); break; }
     if (heat >= 6) { msg('Spray shop: with the state after you? Nobody here will touch your car.', 2.5); break; }
     if (player.cash < 500) { msg('Spray shop: a respray costs $500. Come back with cash.', 2); break; }
-    player.cash -= 500; heat = 0; player.car.color = pick(SHIRTS);
+    player.cash -= 500; heat = 0; player.car.color = pick(SHIRTS); player.car.orn = false; // (plain paint: Loos would approve)
     if (player.car.type === 'police') player.car.type = 'sedan';
     sfx.spray(); msg('Fresh paint, new plates. The cops lost you. (-$500)', 3);
     break;
@@ -5408,7 +5434,7 @@ function boardTram(t) {
     const p = makePed(S.x + ca * (S.l / 2 - 14) - sa * (t.w / 2 + 8), S.y + sa * (S.l / 2 - 14) + ca * (t.w / 2 + 8), {});
     p.shirt = '#34495e'; p.pants = '#2c3e50'; p.flee = 6; p.fx = player.x; p.fy = player.y;
     if (copNear(t.x, t.y, 380)) addHeat(0.6);
-    msg(t.train ? `You hijacked a train: ${R.ref} to ${R.dest}!` : `You hijacked a tram: line ${R.ref} to ${R.dest}!`, 3); ach(t.train ? 'train' : 'tram');
+    msg(t.train ? `You hijacked a train: ${R.ref} to ${R.dest}!` : `You hijacked a tram: line ${R.ref} to ${R.dest}!`, 3); ach(t.train ? 'train' : 'tram'); eggHijack(t);
   }
   t.left = false; t.dwell = 0; t.wait = 0; t.endT = 0; t.doors = 0;
   t.cab = { type: t.train ? 'train' : 'tram', tram: t, x: t.x, y: t.y, angle: t.angle, vx: 0, vy: 0, speed: 0, hp: t.hp, driver: 'player', lay: 0, ai: {}, color: t.m.body, fire: 0 };
@@ -6168,13 +6194,15 @@ function updateWanted(dt) {
   }
   const hid = hiddenAbove(P0);
   // ★6: the detectors, the drone, the spike strips
-  HQ.det = stars >= 6 && cars.some(c => c.type === 'bureau' && c.driver === 'police' && !c.dead && d2(c.x, c.y, P0.x, P0.y) < 260 * 260);
+  HQ.det = !campBlind() && (cars.some(c => c.type === 'bureau' && c.driver === 'police' && !c.dead && (stars >= 6 || c.camp) && d2(c.x, c.y, P0.x, P0.y) < 260 * 260)
+    || !!(campM('zeno') && mission.dets && mission.dets.some(D => D.hp > 0 && d2(D.x, D.y, P0.x, P0.y) < 300 * 300))); // (and the story's: its vans at any level, the dome's detectors)
+  const droneOn = stars >= 6 || !!(campM() && mission.drone);
   if (HQ.det || stars >= 8) {
     if (Q.branches) collapse(stars >= 8 ? 'the Observer measured you' : 'the Bureau\'s detector measured you');
     if (Q.link) { unlink(); msg('Your entanglement is broken: they measured your twin.', 2.5); }
   }
   HQ.droneCd -= dt;
-  if (stars >= 6 && !HQ.drone && HQ.droneCd <= 0 && !player.down) {
+  if (droneOn && !HQ.drone && HQ.droneCd <= 0 && !player.down) {
     const a = rand(TAU); HQ.drone = { x: P0.x + Math.cos(a) * 900, y: P0.y + Math.sin(a) * 900, vx: 0, vy: 0, a: 0, rot: 0, hp: 60, lock: false, fall: 0 };
     msg('A Bureau drone is on you. Lose it under trees or an overpass, in a tunnel, or shoot it down.', 3.5);
   }
@@ -6182,7 +6210,7 @@ function updateWanted(dt) {
   if (d) {
     d.rot += dt * 40;
     if (d.fall) { d.fall += dt; d.x += d.vx * dt; d.y += d.vy * dt; d.vx *= 0.97; d.vy *= 0.97; if (d.fall > 1.1) { explode(d.x, d.y, 26, 'player'); HQ.drone = null; HQ.droneCd = 25; } }
-    else if (stars < 6 || player.down) { d.lock = false; const a = Math.atan2(d.y - P0.y, d.x - P0.x); d.x += Math.cos(a) * 320 * dt; d.y += Math.sin(a) * 320 * dt; if (!onScreen(d.x, d.y, 500)) HQ.drone = null; }
+    else if (!droneOn || player.down) { d.lock = false; const a = Math.atan2(d.y - P0.y, d.x - P0.x); d.x += Math.cos(a) * 320 * dt; d.y += Math.sin(a) * 320 * dt; if (!onScreen(d.x, d.y, 500)) HQ.drone = null; }
     else {
       d.lock = !hid && d2(d.x, d.y, P0.x, P0.y) < 300 * 300;
       const r = Math.min(belief.sig, 300) * 0.7, tx = d.lock ? P0.x + (P0.vx || 0) * 0.3 : belief.x + Math.cos(time * 0.8) * r, ty = d.lock ? P0.y + (P0.vy || 0) * 0.3 : belief.y + Math.sin(time * 1.1) * r;
@@ -6351,7 +6379,7 @@ function launchHero(k, bl, P0, duel) {
   return true;
 }
 function heroHurt(h, n) {
-  if ((h.ph !== 'go' && h.ph !== 'drop') || n <= 0) return;
+  if ((h.ph !== 'go' && h.ph !== 'drop') || n <= 0 || h.calm) return;
   h.hp -= n; h.hit = 0.15;
   if (h.hp <= 0) {
     h.ph = 'down'; h.t = 0; h.beam = null; h.jump = null; h.see = false; earn(1500);
@@ -6417,7 +6445,7 @@ function updateHeroes(dt, stars, P0, hid, pc) {
     if (h.wave && (h.wave.t += dt) > 0.55) h.wave = null;
     if (h.ph === 'up') { h.t += dt; h.z = h.z0 + h.t * 0.6; if (h.t > 1.4) h.gone = 1; continue; }
     if (h.ph === 'down') { h.t += dt; if (h.k === 'collapser') h.z = Math.max(0, COLL_Z * (1 - h.t / 0.8)); if (h.t > 2.5) { h.ph = 'up'; h.t = 0; h.z0 = h.z; qburst(h.x, h.y, '#9fe8ff', 12); } continue; }
-    if (h.duel ? player.down || !(mission && mission.type === 'duel') : leave) { h.ph = 'up'; h.t = 0; h.z0 = h.z; h.see = false; h.beam = null; h.jump = null; continue; } // (one sent for a duel stays until the duel is over)
+    if (h.duel ? player.down || !(mission && (mission.type === 'duel' || (mission.type === 'camp' && (mission.hero === h.k || mission.calm === h.k)))) : leave) { h.ph = 'up'; h.t = 0; h.z0 = h.z; h.see = false; h.beam = null; h.jump = null; continue; } // (one sent for a duel stays until the duel is over)
     if (h.ph === 'drop') { // down from the Helicarrier's deck
       h.t += dt; const f = Math.min(1, h.t / 1.6), e = f * (2 - f);
       h.x = lerp(h.sx, h.tx, e); h.y = lerp(h.sy, h.ty, e); h.z = h.k === 'collapser' ? lerp(CARRIER_Z, COLL_Z, f) : CARRIER_Z * (1 - f);
@@ -6425,6 +6453,11 @@ function updateHeroes(dt, stars, P0, hid, pc) {
         h.ph = 'go'; h.z = h.k === 'collapser' ? COLL_Z : 0;
         if (h.k === 'bigbang') heroShock(h); else if (h.k === 'spooky') qburst(h.x, h.y, '#3cf0ff', 16);
       }
+      continue;
+    }
+    if (h.calm) { // (one sent only to watch: he hovers where he was sent, and looks at you)
+      h.orb += dt * 0.5; const gx = h.hx + Math.cos(h.orb) * 60, gy = h.hy + Math.sin(h.orb) * 40;
+      h.x += (gx - h.x) * Math.min(1, dt * 1.5); h.y += (gy - h.y) * Math.min(1, dt * 1.5); h.a = Math.atan2(P0.y - h.y, P0.x - h.x); h.see = false;
       continue;
     }
     const dx = P0.x - h.x, dy = P0.y - h.y, d = Math.hypot(dx, dy) || 1;
@@ -6539,7 +6572,7 @@ function airHit(b) {
   if (d && !d.fall) { const [x, y] = at(d, DRONE_Z); if (d2(b.x, b.y, x, y) < 13 * 13) { d.hp -= b.rocket ? 99 : b.dmg; if (d.hp <= 0) { d.fall = 0.01; earn(200); addHeat(0.25, true); msg('You shot down the Bureau\'s drone!', 2.5); ach('drone'); } return true; } }
   for (const q of HQ.kami) { const [x, y] = at(q, KAMI_Z); if (d2(b.x, b.y, x, y) < 10 * 10) { q.gone = 1; if (q.st) q.st.cancel = true; for (let k = 0; k < 8; k++) addPart(x, y, rand(-60, 60), rand(-60, 60), 0.4, 3, pick(['#ff9c2a', '#555']), 4, true); earn(40); return true; } }
   for (const h of HQ.heroes) { // (a rocket's blast does the rest, on the ground)
-    if ((h.ph !== 'go' && h.ph !== 'drop') || h.wall) continue;
+    if ((h.ph !== 'go' && h.ph !== 'drop') || h.wall || h.calm) continue;
     const [x, y] = at(h, h.z), r = h.k === 'bigbang' ? 11 : 8;
     if (d2(b.x, b.y, x, y) < r * r) { heroHurt(h, b.rocket ? (h.z > 0.05 ? 120 : 0) : b.dmg); for (let k = 0; k < 4; k++) addPart(b.x, b.y, rand(-60, 60), rand(-60, 60), 0.25, 2, '#ffe08a', 0, true); return true; }
   }
@@ -6800,6 +6833,7 @@ function drawWantedHUD() {
 function updateWorld(dt) {
   time += dt;
   heatCd -= dt;
+  updateWeather(dt); updateGarages();
   { const nd = dayT + dt / DAY_LEN; if (nd >= 1) { dayN++; ach('day'); } dayT = nd % 1; } // (and the days go by: see weekday)
   flight.t -= dt;
   if (!flight.on && flight.t <= 0) Object.assign(flight, { on: true, x: AIRPORT.rx0 + 30, v: 0, alt: 0 });
@@ -6825,6 +6859,7 @@ function updateWorld(dt) {
     else if (c.driver === 'eve') aiEve(c, dt);
     else if (c.driver === 'service') aiService(c, dt);
     else if (c.driver === 'boat') aiBoat(c, dt);
+    else if (c.driver === 'camp') aiCamp(c, dt);
     else if (c.driver !== 'player') applyControls(c, 0, 0, true, dt);
     moveCar(c, dt);
     if (c.parked && (Math.abs(c.x - px) > 0.5 || Math.abs(c.y - py) > 0.5)) c.moved = true;
@@ -6915,6 +6950,8 @@ function updateAudio() {
   if (state === 'play' && heat >= 1) for (const q of cars) if (q.chase && q.driver === 'police' && !q.dead && d2(q.x, q.y, player.x, player.y) < 700 * 700) { chase = true; break; }
   sirenGain.gain.setTargetAtTime(chase ? 0.035 : 0, t, 0.2);
   sirenOsc.frequency.setTargetAtTime(Math.sin(time * 5) > 0 ? 960 : 720, t, 0.03);
+  const under = !!(c && c.lay === 1), wf = state === 'play' && !under ? WX.f : 0; // (the rain's hiss, the snow's wind; not in a tunnel)
+  wxGain.gain.setTargetAtTime(WX.k === 'rain' ? 0.07 * wf : WX.k === 'snow' ? 0.035 * wf : 0, t, 0.5); wxFilt.frequency.setTargetAtTime(WX.k === 'snow' ? 420 + 120 * Math.sin(time * 0.7) : 1800, t, 0.3);
   musicTick(!!c && radio > 0 && state === 'play');
 }
 
@@ -8109,6 +8146,10 @@ function drawWall(b, ax, ay, bx, by, nx, ny, i, z0, z1, win, top) {
       qn(pd, 0.02, 0.98, 0.05, 0.86);
       for (let c = 0; c < nc; c++) quad(pc, (c + 0.3) / nc, (c + 0.7) / nc, 0.03, 0.88);
       ctx.fillStyle = tint('#3a3530', L); fillQuads(pd);
+      if (b.edison) { // (the Mahen Theatre: from dusk its windows light up one by one, as Edison's bulbs did in 1882)
+        const ml = mahenLit();
+        if (ml > 0) { const lq = []; for (let c = 0; c < nc; c++) if (((Math.imul((b.sd + i * 97) ^ (c * 40503), 2654435761) >>> 0) % 1000) < ml * 1000) qn(lq, c / nc + 0.012, (c + 1) / nc - 0.012, 0.07, 0.85); ctx.fillStyle = '#ffd98a'; ctx.globalAlpha = 0.6 + 0.4 * NIGHT; fillQuads(lq); ctx.globalAlpha = 1; }
+      }
       ctx.fillStyle = tint('#f3eee3', L); ctx.fill(pc);
       ctx.fillStyle = tint('#000000', 1); ctx.globalAlpha = 0.2; fillQuads(pe); ctx.globalAlpha = 1;
       wallPath(); return; // (the wall's own outline is left as the path, as it always was)
@@ -9026,6 +9067,7 @@ function drawMarkers() {
   if (heat >= 8) for (const e of eprPhones()) mk(e, '#3cf0ff', 'EPR'); // (the entangled payphones)
   for (const h of POLICE_POSTS) mk(h, '#3498db', 'PD');
   for (const s of SPRAYS) mk(s, '#9b59b6', 'SPRAY');
+  drawGarages();
   for (const s of FISH_SPOTS) if (!player.fish || player.fish.s !== s) mk(s, '#29b6f6', 'FISH');
   for (const c of CONSOLES) mk(c, '#b388ff', 'AOD');
   if (EA && EA.qpc) mk(EA.qpc, '#00a9e0', 'QPU'); // (FIT's quantum computer)
@@ -9117,6 +9159,10 @@ function drawPed(p, isPlayer) {
   ctx.fillStyle = p.hair; ctx.beginPath(); ctx.arc(-0.5, 0, 3, Math.PI * 0.5, Math.PI * 1.5); ctx.fill();
   if (p.cop) { ctx.fillStyle = p.army ? '#3b4a1f' : p.swat ? '#121418' : '#0d1b4a'; ctx.beginPath(); ctx.arc(0, 0, p.swat ? 3.6 : 3.2, 0, TAU); ctx.fill(); }
   if (caller && caller.p === p) { ctx.fillStyle = '#111'; ctx.fillRect(-1, 3, 4, 2); } // (the phone at their ear)
+  if (WX.k === 'rain' && WX.f > 0.35 && !isPlayer && !p.cop && !p.monk) { // (in the rain, an umbrella over most heads)
+    if (p.umb === undefined) p.umb = Math.random() < 0.6 ? pick(UMBS) : 0;
+    if (p.umb) { ctx.fillStyle = p.umb; ctx.beginPath(); ctx.arc(1, 0, 7.5, 0, TAU); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 0.6; ctx.beginPath(); for (let k = 0; k < 8; k++) { ctx.moveTo(1, 0); ctx.lineTo(1 + Math.cos(k * Math.PI / 4) * 7.5, Math.sin(k * Math.PI / 4) * 7.5); } ctx.stroke(); }
+  }
   ctx.restore();
   if (caller && caller.p === p) { // and a ringing handset over their head
     ctx.globalAlpha = 0.6 + 0.4 * Math.sin(time * 9); ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
@@ -9155,6 +9201,8 @@ function drawCar(c) {
   const dmg = 1 - clamp(c.hp / t.hp, 0, 1);
   ctx.fillStyle = c.dead ? '#242424' : c.color; rrect(-l / 2, -w / 2, l, w, c.type === 'tank' ? 2 : 4);
   if (c.dead) { ctx.fillStyle = '#111'; ctx.fillRect(-l * 0.25, -w / 2 + 2, l * 0.5, w - 4); ctx.restore(); return; }
+  if (c.orn) drawOrn(l, w); // (the respray by the Loos memorial)
+  if (c.hazT > 0 && Math.sin(time * 9) > 0) { ctx.fillStyle = '#ffae00'; for (const [u, v] of [[l / 2 - 2, w / 2 - 1.5], [l / 2 - 2, -w / 2 + 1.5], [-l / 2 + 2, w / 2 - 1.5], [-l / 2 + 2, -w / 2 + 1.5]]) { ctx.beginPath(); ctx.arc(u, v, 2.2, 0, TAU); ctx.fill(); } } // (hazard lights: crashed in the snow)
   if (c.type === 'tank') {
     ctx.fillStyle = '#2b2b22'; ctx.fillRect(-l / 2, -w / 2, l, 6); ctx.fillRect(-l / 2, w / 2 - 6, l, 6);
     ctx.fillStyle = '#4a4a3a'; for (let x = -l / 2 + 2; x < l / 2; x += 5) { ctx.fillRect(x, -w / 2, 2, 6); ctx.fillRect(x, w / 2 - 6, 2, 6); }
@@ -9368,6 +9416,7 @@ function drawLighting(v) {
   for (const z of ZONES) if (z.fx > 0 && vis((z.x0 + z.x1) / 2, (z.y0 + z.y1) / 2, 300)) { l.globalAlpha = Math.min(1, z.fx * 2); l.drawImage(glowSpr, z.x0 - 40, z.y0 - 40, z.x1 - z.x0 + 80, z.y1 - z.y0 + 80); l.globalAlpha = 1; }
   if (flight.on) l.drawImage(glowSpr, flight.x + 30, (AIRPORT.ry0 + AIRPORT.ry1) / 2 - 30, 60, 60);
   if (heli && !heli.dead && !heli.leaveT) l.drawImage(glowSpr, heli.lx - 120, heli.ly - 120, 240, 240);
+  eggLightCut(l, vis);
   ctx.save(); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.drawImage(lightCv, 0, 0, W, H); ctx.restore();
   if (dk > 0.15) { // coloured light sources on top
     ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = dk;
@@ -9385,6 +9434,7 @@ function drawLighting(v) {
       ctx.save(); ctx.translate(S.x, S.y); ctx.rotate(S.a); ctx.fillStyle = 'rgba(255,210,130,.28)'; ctx.fillRect(-S.l / 2 + 3, -t.w / 2 + 1, S.l - 6, t.w - 2); ctx.restore();
     }
     for (const c of cars) if ((c.chase || c.job) && c.lay !== 1 && vis(c.x, c.y, 40)) { ctx.fillStyle = on ? 'rgba(255,40,40,.4)' : 'rgba(40,90,255,.4)'; ctx.beginPath(); ctx.arc(c.x, c.y, 34, 0, TAU); ctx.fill(); }
+    eggLightAdd(vis);
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
   }
 }
@@ -9424,6 +9474,7 @@ function drawWorld() {
   const v = viewRect(8);
   updateSun();
   drawGround(v);
+  drawWeatherGround(v);
   drawStreetNames(v);
   drawProps(v);
   drawZones(v);
@@ -9431,6 +9482,7 @@ function drawWorld() {
   drawDecals(v);
   drawWantedGround(v);
   drawMarkers();
+  drawCampGround();
   drawEggs(v, 0);
   for (const p of peds) if (p.dead && onScreen(p.x, p.y)) drawPed(p);
   for (const p of peds) if (!p.dead && onScreen(p.x, p.y)) drawPed(p);
@@ -9463,6 +9515,7 @@ function drawWorld() {
   if (flight.on) drawPlane(flight.x, (AIRPORT.ry0 + AIRPORT.ry1) / 2, 0, flight.alt);
   drawHeli();
   drawWantedAir();
+  drawAlly();
   drawBelief();
   for (const r of RAMPS) if (onScreen(r.pts[r.pts.length - 1][0], r.pts[r.pts.length - 1][1], 80)) { // the portal's lintel, over the cars driving in
     const P = r.pts, n = P.length, [ex, ey] = P[n - 1], [qx, qy] = P[Math.max(0, n - 6)], L = Math.hypot(ex - qx, ey - qy) || 1, ux = (ex - qx) / L, uy = (ey - qy) / L, nx = -uy, ny = ux, k = 1.06;
@@ -9471,6 +9524,7 @@ function drawWorld() {
     ctx.strokeStyle = tint('#b5b1a7', 1); ctx.lineWidth = 12; ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke();
   }
   if (player.car && player.car.lay === 1) drawTunnelView(); // in a tunnel: the city above fades, the lit tube shows
+  drawWeatherSky();
   // a health bar over the car you drive (and over your friend's)
   const carBar = c => {
     if (!c || c.dead) return;
@@ -9719,6 +9773,7 @@ function drawHUD() {
     for (const h of HOSPITALS) dot(h.x, h.y, '#e74c3c', 2);
     for (const h of POLICE_POSTS) dot(h.x, h.y, '#3498db', 2);
     for (const sp of SPRAYS) dot(sp.x, sp.y, '#c27cf0', 2);
+    for (const g of GARAGES) dot(g.x, g.y, '#4fc3f7', 2);
     for (const sp of FISH_SPOTS) dot(sp.x, sp.y, '#4fc3f7', 2);
     for (const L of [trams, tramsFar]) for (const t of L) if (!t.dead) dot(t.x, t.y, t.R.col, full ? 1.6 : 1.8); // (the trams, in their lines' colours)
     if (Q.branches) for (const g of Q.branches) dot(g.x, g.y, g.tint, 2);
@@ -9749,6 +9804,7 @@ function drawHUD() {
     for (const h of HQ.heroes || []) if (h.ph === 'go' || h.ph === 'drop') dot(h.x, h.y, HEROES[h.k].c, full ? 3.5 : 2.5); // (P.L.A.N.C.K.'s heroes)
     if (Q.decoy) dot(Q.decoy.x, Q.decoy.y, '#3cf0ff', 2.5);
     for (const e of eggDots()) dot(e.x, e.y, e.c, full ? 4 : 3);
+    const ck = campMarker(); if (ck) { const X = clamp(mx + (ck.x / T - sx) * ms, mx + 6, mx + sw - 6), Y = clamp(my + (ck.y / T - sy) * ms, my + 6, my + sh - 6); ctx.fillStyle = '#2a1a4a'; ctx.strokeStyle = '#b388ff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(X, Y, full ? 7 : 5.5, 0, TAU); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.font = `bold ${full ? 11 : 9}px serif`; ctx.textAlign = 'center'; ctx.fillText('ψ', X, Y + (full ? 4 : 3)); } // (the story's next chapter)
     const tg = missionTarget(); if (tg) dot(tg.x, tg.y, '#ffe14d', 3.5);
     const oth = otherPlayer(); if (oth && !oth.hidden) dot(oth.x, oth.y, oth.color, full ? 4 : 3);
     dot(P.x, P.y, '#fff', full ? 4 : 3);
@@ -9757,7 +9813,7 @@ function drawHUD() {
     else {
       txt(hxs(streetName(P.x, P.y) || placeName(P.x, P.y)), mx, my + sh + 16, 12, '#ddd');
       const hh = Math.floor(dayT * 24), mi = Math.floor((dayT * 24 - hh) * 60);
-      txt(`${BRNO ? WDAYS[weekday()] + ' ' : ''}${String(hh).padStart(2, '0')}:${String(mi).padStart(2, '0')}`, mx, my + sh + 32, 12, darkness() > 0.3 ? '#9fb7ff' : '#ffe08a');
+      txt(`${BRNO ? WDAYS[weekday()] + ' ' : ''}${String(hh).padStart(2, '0')}:${String(mi).padStart(2, '0')}${wxLabel()}`, mx, my + sh + 32, 12, darkness() > 0.3 ? '#9fb7ff' : '#ffe08a');
     }
   }
   const tg = missionTarget();
@@ -9780,7 +9836,7 @@ function drawHUD() {
   let my2 = H - (touchOn() ? 230 : 80);
   // keep messages clear of the quantum-note panel on the right
   const mx2 = Q.note && W > 700 ? (W - Math.min(380, W - 24) - 12) / 2 : W / 2;
-  for (let i = msgs.length - 1; i >= 0; i--) { // (one too long for the screen goes on two lines, or more)
+  if (state !== 'scene' && !(NET.role === 'guest' && NET.sc)) for (let i = msgs.length - 1; i >= 0; i--) { // (one too long for the screen goes on two lines, or more; none under a scene's talk)
     ctx.globalAlpha = clamp(msgs[i].t, 0, 1);
     const fs = small ? 13 : 17, L = wrapLines(msgs[i].text, Math.min(2 * mx2 - 24, 980), `bold ${fs}px ui-monospace, Menlo, Consolas, monospace`);
     for (let j = L.length - 1; j >= 0; j--) { txt(L[j], mx2, my2, fs, '#fff', 'center'); my2 -= small ? 18 : 22; }
@@ -9793,6 +9849,7 @@ function drawHUD() {
   drawLabCard(small);
   drawPhasorPanel(by);
   drawBB();
+  drawCampHUD();
   if (overlay) {
     // as big as fits between the minimap and its mirror on the right (on a narrow screen, across it all)
     const side = showMap === 1 ? 24 + MMV * (small ? 1.1 : 1.6) : 12, maxW = W - 2 * side >= W / 2 ? W - 2 * side : W - 24;
@@ -9839,7 +9896,7 @@ let AOD = null;
 const QC_LV = [{ n: 2, pay: 1000 }, { n: 4, pay: 2500 }, { n: 6, pay: 5000 }]; // (qubits, and the vault's cash)
 let QC = null, qcWins = 0, qcDay = -1, qcCool = 0;
 function qcOpen() {
-  if (NET.role) { msg('The quantum computer is single-player for now.', 2.5); return; }
+  if (NET.role && !campM('grover')) { msg('The quantum computer is single-player for now.', 2.5); return; }
   if (qcCool > time) { msg(`The dilution refrigerator is cooling back down to 10 mK: ${Math.ceil(qcCool - time)} s.`, 2.5); return; }
   const L = QC_LV[Math.min(qcWins, QC_LV.length - 1)], N = 1 << L.n, a0 = 1 / Math.sqrt(N);
   QC = { L, N, amp: new Array(N).fill(a0), prev: new Array(N).fill(a0), mark: randi(0, N - 1), k: 0, anim: 0, res: null, btn: [],
@@ -9860,6 +9917,7 @@ function qcMeasure() {
   const ok = i === QC.mark, paid = ok && qcDay !== dayN;
   QC.res = { i, ok, p: QC.amp[QC.mark] ** 2, paid, pay: QC.L.pay };
   if (ok) { if (paid) { earn(QC.L.pay); qcDay = dayN; } qcWins++; ach('quantumpc'); sfx.good(); }
+  if (ok && campM('grover') && mission.stage === 0) { const az = campPlaces().az; Object.assign(mission, { stage: 1, timer: 30 + Math.hypot(az.x - player.x, az.y - player.y) / 140 }); campSay('bara', 'That\'s the PIN! Now the AZ Tower, before they change it.'); }
   if (ok && mission && mission.type === 'grover' && mission.stage === 0) { const t = farTile(700, 1600); Object.assign(mission, { stage: 1, x: t.x, y: t.y, timer: 25 + Math.hypot(t.x - player.x, t.y - player.y) / 140 }); msg('Got the PIN. To the vault, before they change it!', 4); }
   else { qcCool = time + 45; sfx.bad(); }
 }
@@ -9929,7 +9987,7 @@ let CHSH = null, chshDay = -1, CHSH_AT = null;
 const CHSH_N = 800, CHSH_PASS = 2.3;
 const chshSpots = () => CHSH_AT || (CHSH_AT = [EA && EA.chsh, ATOM_LAB && (() => { const t = findTileNear(Math.floor(ATOM_LAB.con.x / T) + 3, Math.floor(ATOM_LAB.con.y / T) + 1, WALK); return t && tileCenter(t); })()].filter(Boolean));
 function chshOpen(at) {
-  if (NET.role) { msg('The Bell test is single-player for now.', 2.5); return; }
+  if (NET.role && !campM('bell')) { msg('The Bell test is single-player for now.', 2.5); return; }
   CHSH = { ang: [0, 90, 0, 90], sel: 0, res: null, run: 0, btn: [], mu: !!(at && EA && at === EA.chsh) }; // (to start with, exactly the classical limit: S = 2)
   state = 'chsh'; touchEl.style.visibility = 'hidden'; note('bell'); sfx.quantum();
 }
@@ -9937,9 +9995,11 @@ function chshClose() { CHSH = null; state = 'play'; touchEl.style.visibility = '
 const chshE = (al, be) => Math.cos(2 * (al - be) * Math.PI / 180); // (what quantum mechanics predicts for the pair)
 function chshRun() {
   const [a, a2, b, b2] = CHSH.ang, set = [[a, b], [a, b2], [a2, b], [a2, b2]], n = [0, 0, 0, 0], sum = [0, 0, 0, 0];
-  for (let k = 0; k < CHSH_N; k++) { const i = randi(0, 3), same = Math.random() < (1 + chshE(set[i][0], set[i][1])) / 2; n[i]++; sum[i] += same ? 1 : -1; }
-  const E = sum.map((v, i) => n[i] ? v / n[i] : 0), S = E[0] - E[1] + E[2] + E[3], ok = Math.abs(S) > CHSH_PASS, paid = ok && chshDay !== dayN;
-  CHSH.res = { E, S, ok, paid }; CHSH.run = 1.2; sfx.cast();
+  const cm = campM('bell') && !mission.won, dec = cm && !!campVanNear(), V = dec ? 0.35 : 1, pass = cm ? 2.5 : CHSH_PASS; // (the story's run: a higher bar, and the Bureau's detectors nearby measure the photons on the way)
+  for (let k = 0; k < CHSH_N; k++) { const i = randi(0, 3), same = Math.random() < (1 + V * chshE(set[i][0], set[i][1])) / 2; n[i]++; sum[i] += same ? 1 : -1; }
+  const E = sum.map((v, i) => n[i] ? v / n[i] : 0), S = E[0] - E[1] + E[2] + E[3], ok = Math.abs(S) > pass, paid = ok && chshDay !== dayN;
+  CHSH.res = { E, S, ok, paid, dec, pass }; CHSH.run = 1.2; sfx.cast();
+  if (cm && ok) { mission.won = true; CAMP.S = Math.abs(S); }
   if (ok) { if (paid) { earn(3000); chshDay = dayN; } ach('bell'); }
 }
 function updateCHSH(dt) {
@@ -9994,7 +10054,7 @@ function drawCHSH() {
   yy += 50;
   if (B.res && B.run <= 0) {
     const R0 = B.res;
-    txt(R0.ok ? `|S| = ${Math.abs(R0.S).toFixed(2)}: Bell's inequality is broken! ${R0.paid ? 'The lab pays you $3,000' : 'No more pay today, but well done'}` : `|S| = ${Math.abs(R0.S).toFixed(2)}: no proof yet (it has to pass ${CHSH_PASS}). Turn the polarisers.`, x0 + pw / 2, yy, 14, R0.ok ? '#7dff7a' : '#ffe14d', 'center');
+    txt(R0.ok ? `|S| = ${Math.abs(R0.S).toFixed(2)}: Bell's inequality is broken! ${R0.paid ? 'The lab pays you $3,000' : 'No more pay today, but well done'}` : R0.dec ? `|S| = ${Math.abs(R0.S).toFixed(2)}: the photons decohered. A Bureau detector nearby measured them first.` : `|S| = ${Math.abs(R0.S).toFixed(2)}: no proof yet (it has to pass ${R0.pass}). Turn the polarisers.`, x0 + pw / 2, yy, 14, R0.ok ? '#7dff7a' : '#ffe14d', 'center');
     yy += 22;
   }
   const tx = wrapLines('If each photon carried its answers with it, S = E(a,b) − E(a,b′) + E(a′,b) + E(a′,b′) could never pass 2, whatever the angles. The entangled pair gives E = cos 2(α − β): find the angles that push |S| up toward 2√2.', pw - 28, '12px system-ui, sans-serif');
@@ -10218,7 +10278,7 @@ function drawAOD() {
 const HELP = [
   ['Arrows / WASD', 'drive · walk (up = forward, left/right = turn)'],
   ['Space', 'shoot on foot · handbrake in a car'],
-  ['Enter / F / E', 'get in or out of cars (occupied ones too) · a tram, at its front · a boat, from the bank · fish at a jetty'],
+  ['Enter / F / E', 'get in or out of cars (occupied ones too) · a tram, at its front · a boat, from the bank · fish at a jetty · park a car in your garage, or take one out'],
   ['Q / Tab', 'switch weapon'],
   ['X', 'superposition: split your car into 3 branches'],
   ['V', 'slow motion + amplitude arrows (while superposed)'],
@@ -10226,6 +10286,7 @@ const HELP = [
   ['G', 'optical tweezer: pick up the empty car behind yours · G again drops it'],
   ['Wanted', '★ tail you · ★★★ roadblocks · ★★★★ SWAT + helicopter · ★★★★★ tank'],
   ['Wanted 6–10', 'the Bureau · the army · the Observer · demolition · air assault'],
+  ...(BRNO ? [['ψ', 'the story (inner Brno): eight chapters, each from its ψ on the map · in a scene Enter goes on, Esc skips']] : []),
   ['R · M', 'radio station · minimap, then the whole map'],
   ['P / Esc · H', 'pause (then Q quits to the title) · help (H again: quantum notes, then achievements)'],
   ['Title screen', '← → start location · ↑ ↓ map (the island, inner Brno) · L Physics Lab · O online co-op · H achievements'],
@@ -10293,6 +10354,17 @@ const ACH = {
   bren: ['BRno ENfield', 'Picked up the Bren gun at Zbrojovka.', 'b'],
   duck: ['Rubber Duck Debugging', 'Found the duck from U Kachničky.', 'b'],
   deadline: ['23:59', 'Got a student to Božetěchova before the deadline.', 'b'],
+  godel: ['Incomplete', 'This achievement cannot be proven to exist.', 'b'],
+  mach: ['Mach 0.15', 'Passed the sign for Ernst Mach\'s Chrlice at over Mach 0.15.', 'b'],
+  pilgram: ['The Crooked Pinnacle', 'Did a job for the Old Town Hall, and were paid short, like Anton Pilgram.', 'b'],
+  joke: ['The Joke', 'Posted Ludvík\'s postcard by Milan Kundera\'s birthplace. Nobody laughed.', 'b'],
+  hrabal: ['Closely Watched Trains', 'Hijacked a train at Brno-Židenice, a few streets from where Bohumil Hrabal was born.', '5'],
+  loos: ['Ornament and Crime', 'Took the free respray, ornament and all, by Adolf Loos\'s memorial.', 'b'],
+  mahen: ['First Light', 'Watched the Mahen Theatre light up at dusk, before the rest of the city.', 'b'],
+  edison: ['Bright Idea', 'Lit up Edison\'s bulbs on Malinovského náměstí at night.', 'b'],
+  onyx: ['Onyx at Sunset', 'Were at Villa Tugendhat as the setting sun lit its onyx wall.', 'b'],
+  ignis: ['Ignis Brunensis', 'Watched the fireworks over the Brno reservoir.', 'b'],
+  uvcat: ['Ultraviolet Catastrophe', 'Switched on Edison\'s bulb with classical physics, and dazzled the police.', 'b'],
   hantec: ['Hantec', 'Got the city speaking Hantec.'],
   // and the rest
   wasted: ['Wasted', 'Died for the first time.'],
@@ -10301,20 +10373,26 @@ const ACH = {
   mult9: ['On a Roll', 'Took your multiplier to x9.'],
   arc: ['Story Arc', 'Finished a district\'s arc of jobs.'],
   conquer: ['City Conquered', 'Reached the goal.'],
+  garage: ['Collector', 'Kept six cars in your garages.'],
+  // the story (inner Brno)
+  camp1: ['Act I: The Bureau', 'Got Bára away, stole the master copy and blacked out the old town.', 'b'],
+  camp2: ['Act II: P.L.A.N.C.K.', 'Rang noon at eleven, cracked the Bureau\'s floor and wrecked its detector vans.', 'b'],
+  camp3: ['Decoherence', 'Switched off Project Zeno: the story is done.', 'b'],
+  laude: ['With Distinction', 'Finished the story without failing a chapter.', 'b'],
   coop: ['Better Together', 'Played online co-op with a friend.'],
   tourist: ['Tourist', 'Played on both maps.'],
   day: ['Another Day', 'Saw the clock round to a new day.'],
 };
 // from the easiest to the hardest: the order of the tiles, and the next to find is the first you haven't (that can be had
 // on this map: the third field, b or 5 Brno)
-const ACH_ORDER = ['superpose', 'wasted', 'copcar', 'busted', 'swap', 'job', 'drops', 'tunnel', 'day', 'tourist', 'spilberk', 'station', 'jakub', 'jost', 'qclock', 'tram', 'army', 'tank', 'sail', 'cellars', 'formula', 'bren', 'lab', 'atoms', 'quantumpc', 'bell', 'schrodinger', 'wl6', 'kometa', 'cow', 'panda', 'sealion', 'jackal', 'justice', 'marble', 'bells', 'duck', 'hantec', 'coop', 'drone', 'wl7', 'qtunnel', 'train', 'arc', 'lucky', 'deadline', 'lowkey', 'ashore', 'wl8', 'teleport', 'mult9', 'monk', 'wl9', 'crowd', 'dragon', 'birk', 'conquer', 'wl10', 'notes', 'ground', 'carrier', 'squad'];
+const ACH_ORDER = ['superpose', 'wasted', 'copcar', 'busted', 'swap', 'job', 'drops', 'tunnel', 'day', 'tourist', 'spilberk', 'station', 'jakub', 'godel', 'jost', 'qclock', 'tram', 'army', 'tank', 'sail', 'cellars', 'formula', 'bren', 'garage', 'loos', 'joke', 'lab', 'atoms', 'quantumpc', 'bell', 'schrodinger', 'wl6', 'edison', 'kometa', 'cow', 'panda', 'sealion', 'jackal', 'justice', 'mach', 'mahen', 'onyx', 'marble', 'bells', 'duck', 'hantec', 'pilgram', 'coop', 'drone', 'wl7', 'qtunnel', 'train', 'hrabal', 'arc', 'camp1', 'ignis', 'uvcat', 'lucky', 'deadline', 'lowkey', 'ashore', 'wl8', 'camp2', 'teleport', 'mult9', 'monk', 'wl9', 'crowd', 'dragon', 'birk', 'conquer', 'camp3', 'wl10', 'notes', 'ground', 'carrier', 'squad', 'laude'];
 const achHere = k => { const w = ACH[k][2]; return !w || (w === 'b' && BRNO) || (w === '5' && B5); };
 const ACH_GOT = (() => { try { const o = JSON.parse(localStorage.getItem('qta.ach') || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
 const achToasts = [];
 function ach(id) {
   if (!ACH[id] || ACH_GOT[id] || DBG.used) return;
   if (player.isGuest) { NET.ev.push(['ach', id]); return; } // (the friend's: it goes to their browser)
-  if (state === 'play' || state === 'aod' || state === 'qc' || state === 'chsh') achGrant(id);
+  if (state === 'play' || MODAL.includes(state)) achGrant(id);
 }
 function achGrant(id) {
   if (!ACH[id] || ACH_GOT[id]) return;
@@ -10391,6 +10469,7 @@ const ACH_HOW = {
   dragon: 'Between midnight and 4:00 the dragon prowls the old town. Take the calfskin of lime from the market on Zelný trh and let the dragon snatch it from you.',
   birk: 'From 5:00 a wheel waits on the road in from Lednice: get in and roll it to the Old Town Hall before 20:00.',
   conquer: `Make ${fmt(GOAL)}.`,
+  garage: 'Drive cars into your garages (GARAGE on the map, by each place you can start from) and press Enter there: fill all six spaces.',
   wl10: 'At nine stars, stay in their sight until the tenth comes.',
   notes: 'Meet every quantum note: try every quantum trick, from superposition to teleportation, and go fishing.',
   ground: 'At ten stars, drive through two different tunnels from end to end, unseen going in and coming out (on the island, with no tunnels: stay unseen 75 s).',
@@ -10406,6 +10485,21 @@ const ACH_HOW = {
   jost: 'On Moravské náměstí, walk on foot right under the horse of Margrave Jošt.',
   justice: 'On Moravské náměstí, stand by the statue of Justice outside the Supreme Administrative Court until its jet sprays you.',
   squad: 'At ten stars the Helicarrier sends down four heroes, one after another: the Collapser, Agent Spooky, Big Bang and the Tunneler. Beat all four (rockets help, and so does running them over, except Big Bang).',
+  godel: 'Go past the house on Pekařská, below Špilberk, where Kurt Gödel was born (the corner of the lane named after him).',
+  mach: 'A brown sign at the southern edge of the map points down the road to Chrlice, where Ernst Mach was born. Pass it in a fast car (a sports coupe, a motorbike, a police cruiser) at full speed.',
+  pilgram: 'Answer the payphone nearest the Old Town Hall: the council has a job. Finish it and see what they pay.',
+  joke: 'By Milan Kundera\'s birthplace, Purkyňova 6 in Královo Pole, a postcard lies on the orange post box: on foot, press Enter to post it.',
+  hrabal: 'On inner Brno in detail, hijack a train standing at Brno-Židenice (stop by its front and press Enter).',
+  loos: 'By the Adolf Loos memorial on Janáčkovo náměstí a sign offers free resprays: stop by it in a car.',
+  mahen: 'Be near the Mahen Theatre (Malinovského náměstí) between 17:30 and 18:30, as its lights come on.',
+  edison: 'At night, walk up to the four steel bulbs on Malinovského náměstí, by the Mahen Theatre.',
+  onyx: 'Be at Villa Tugendhat on Černopolní between 17:30 and 18:30, as the sun sets.',
+  ignis: 'On a Saturday, from 22:00 to 22:45, watch the fireworks over the reservoir by the dam (Brněnská přehrada).',
+  uvcat: 'At night, at Edison\'s bulbs on Malinovského náměstí, press Enter for the filament console. Switch to classical physics (C) and switch the bulb on: best with the police close by.',
+  camp1: 'Follow the ψ on the map: the story starts at FIT BUT. Act I is its first three chapters.',
+  camp2: 'Chapters four to six of the story (the ψ on the map): the bells, the quantum computer and the exhibition grounds.',
+  camp3: 'Finish the story: the last chapter ends on Kraví hora.',
+  laude: 'Finish all eight chapters of the story without failing one: being wasted or busted in a chapter fails it.',
 };
 // what to do for one you haven't found yet, bought with the game's cash (dearer the harder it is), kept like them
 const ACH_REV = (() => { try { const o = JSON.parse(localStorage.getItem('qta.achRev') || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
@@ -10584,6 +10678,199 @@ function drawOver() {
   if (Math.sin(time * 4) > -0.3) txt('PRESS ENTER / TAP TO PLAY AGAIN', W / 2, H * 0.62, 20, '#ffd54a', 'center', true);
 }
 
+// ============================================================ weather
+// Clear, rain, fog or snow, changing every few game hours (fading out, then the next fading in, over half a minute each).
+// Rain wets the roads, and they dry slowly after it; snow settles, and melts slowly after it (rain washes it off).
+// Wet roads and snow take the tyres' grip: a car slides wide in a bend, pulls away and brakes worse (the player's car
+// more than the traffic, which drives carefully and slower), and in snow now and then a car in the traffic near you
+// skids, spinning on until it hits something: a crash, and the cars stand there a while with their hazard lights on.
+// Fog hides you: the police see less far, and lose track of you twice as fast (rain and snow a little). The quantum
+// clock at ÚPT gives the forecast. In online co-op the host's weather is the guest's
+const WX_KINDS = ['clear', 'rain', 'fog', 'snow'], UMBS = ['#c0392b', '#1f3a5f', '#2c2c2c', '#f1c40f', '#8e44ad', '#16a085', '#d35400', '#ecf0f1'];
+const WX_R = Float32Array.from({ length: 2400 }, () => Math.random()); // (where each raindrop and snowflake is)
+function wxPick() {
+  const h = dayT * 24, w = { clear: 0.46, rain: 0.22, fog: h < 9 || h > 20 ? 0.2 : 0.09, snow: BRNO ? 0.16 : 0.07 };
+  let r = Math.random() * Object.values(w).reduce((a, b) => a + b, 0);
+  for (const k of WX_KINDS) if ((r -= w[k]) <= 0) return k;
+  return 'clear';
+}
+function wxReset() { Object.assign(WX, { k: 'clear', f: 0, max: 1, to: 'clear', nextK: wxPick(), next: rand(120, 300), wet: 0, cover: 0, crashT: 8, told: {} }); }
+const wxPack = () => [WX_KINDS.indexOf(WX.k), +WX.f.toFixed(2), +WX.wet.toFixed(2), +WX.cover.toFixed(2), WX_KINDS.indexOf(WX.to), Math.round(WX.next), WX_KINDS.indexOf(WX.nextK)];
+function wxUnpack(a) { Object.assign(WX, { k: WX_KINDS[a[0]] || 'clear', f: +a[1] || 0, wet: +a[2] || 0, cover: +a[3] || 0, to: WX_KINDS[a[4]] || WX_KINDS[a[0]] || 'clear', next: a[5] ?? WX.next, nextK: WX_KINDS[a[6]] || WX.nextK }); WX.max = Math.max(WX.f, 0.6); }
+// how well a car's tyres grip (1 dry): tracks don't mind as much; the traffic drives with care
+function wxGrip(c) {
+  if (CT[c.type].boat || c.tram) return 1;
+  const tr = c.type === 'tank' || c.type === 'apc' || c.type === 'dozer' ? 0.5 : 1, loss = tr * Math.max(WX.wet * 0.45, WX.cover * 0.72);
+  return 1 - (c.driver === 'player' ? loss : loss * 0.6);
+}
+const wxSlow = () => 1 - 0.38 * WX.cover - 0.12 * WX.wet - (WX.k === 'fog' ? 0.22 * WX.f : 0); // (how much slower the traffic drives)
+const wxSight = () => 1 - (WX.k === 'fog' ? 0.55 : WX.k === 'snow' ? 0.22 : WX.k === 'rain' ? 0.12 : 0) * WX.f; // (how far the police see)
+const wxLabel = () => WX.f > 0.15 && WX.k !== 'clear' ? ({ rain: '  ☂ rain', fog: '  ≋ fog', snow: '  ❄ snow' })[WX.k] : WX.cover > 0.3 ? '  ❄ snow on the ground' : WX.wet > 0.3 ? '  wet roads' : '';
+function updateWeather(dt) {
+  if (lab) { if (WX.f || WX.wet || WX.cover) Object.assign(WX, { k: 'clear', to: 'clear', f: 0, wet: 0, cover: 0 }); return; }
+  if (state === 'title' || NET.role === 'guest') return; // (the guest has the host's, from the snapshots)
+  WX.next -= dt;
+  if (WX.next <= 0) { WX.to = WX.nextK; WX.nextK = wxPick(); WX.next = rand(150, 420); }
+  if (WX.to !== WX.k) { WX.f = Math.max(0, WX.f - dt / 25); if (!WX.f) { WX.k = WX.to; WX.max = rand(0.55, 1); if (WX.k !== 'clear') wxSay(); } }
+  else if (WX.k !== 'clear') WX.f = Math.min(WX.max, WX.f + dt / 30);
+  const rain = WX.k === 'rain' ? WX.f : 0, snow = WX.k === 'snow' ? WX.f : 0;
+  WX.wet = rain > 0 ? Math.min(1, WX.wet + dt * rain / 20) : Math.max(0, WX.wet - dt / 90);
+  WX.cover = snow > 0 ? Math.min(1, WX.cover + dt * snow / 45) : Math.max(0, WX.cover - dt * (rain ? 1 / 40 : 1 / 150));
+  // in snow, now and then a car in the traffic near you skids
+  if (WX.cover > 0.3) {
+    WX.crashT -= dt * WX.cover;
+    if (WX.crashT <= 0) {
+      WX.crashT = rand(5, 12);
+      const v = viewRect(600), ok = cars.filter(q => q.driver === 'ai' && !q.parked && !q.tram && !CT[q.type].boat && !q.lay && Math.abs(q.speed) > 60 && !(q.hazT > 0) && !(q.skid > 0) && q.x > v.x0 && q.x < v.x1 && q.y > v.y0 && q.y < v.y1);
+      const c = pick(ok.filter(q => onScreen(q.x, q.y, 80)).length ? ok.filter(q => onScreen(q.x, q.y, 80)) : ok); // (one you can see, if any)
+      if (c) { c.skid = rand(1.4, 2.4); c.spin = rand(1.1, 2.4) * (Math.random() < 0.5 ? -1 : 1); }
+    }
+  }
+}
+function wxSay() {
+  const t = { rain: 'It starts to rain: the roads get slippery.', fog: 'Fog comes down: the police can\'t see far, and lose you faster.', snow: 'It starts to snow. Once it settles the roads are like glass: drive gently.' }[WX.k];
+  if (t && state === 'play') msg(t, 5);
+}
+// a crash in the snow: the traffic's cars stop there, hazard lights on, for half a minute or so
+function wxCrash(c) {
+  if (c.driver !== 'ai' || c.hazT > 0) return;
+  c.hazT = rand(25, 45); c.skid = 0;
+  if (!WX.told.crash && onScreen(c.x, c.y) && state === 'play') { WX.told.crash = 1; msg('A crash in the snow. The traffic can\'t stop on it either.', 4); }
+}
+function drawWeatherGround(v) { // (on the ground, under everything else: the wet sheen, the snow)
+  if (WX.wet > 0.02) { ctx.fillStyle = `rgba(18,28,48,${0.18 * WX.wet})`; ctx.fillRect(v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0); }
+  if (WX.cover > 0.02) { ctx.fillStyle = `rgba(238,242,248,${0.6 * WX.cover})`; ctx.fillRect(v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0); }
+}
+function drawWeatherSky() { // (over the world, on the screen: rain, snow, fog)
+  if (WX.k === 'clear' || WX.f < 0.02) return;
+  const f = WX.f, under = player.car && player.car.lay === 1, n0 = Math.min(1.6, W * H / (1000 * 640));
+  ctx.save(); ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (WX.k === 'rain' && !under) {
+    ctx.fillStyle = `rgba(28,38,58,${0.14 * f})`; ctx.fillRect(0, 0, W, H);
+    const n = Math.round(380 * f * n0), sp = 900; ctx.strokeStyle = 'rgba(190,208,235,.42)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let i = 0; i < n; i++) { const r1 = WX_R[i * 3], r2 = WX_R[i * 3 + 1], r3 = WX_R[i * 3 + 2], y = ((r2 * (H + 60) + time * sp * (0.8 + 0.4 * r3)) % (H + 60)) - 30, x = ((r1 * (W + 80) - time * 90 - y * 0.12) % (W + 80) + W + 80) % (W + 80) - 40; ctx.moveTo(x, y); ctx.lineTo(x - 3, y + 14 + 6 * r3); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(200,215,240,.35)'; ctx.beginPath(); // (and splashes, rings on the ground)
+    for (let i = 0; i < Math.round(50 * f * n0); i++) { const r1 = WX_R[1200 + i * 3], r2 = WX_R[1201 + i * 3], ph = (time * 2.2 + WX_R[1202 + i * 3]) % 1, x = r1 * W, y = r2 * H; ctx.moveTo(x + 1 + ph * 5, y); ctx.ellipse(x, y, 1 + ph * 5, 0.6 + ph * 2.4, 0, 0, TAU); }
+    ctx.stroke();
+  } else if (WX.k === 'snow' && !under) {
+    const n = Math.round(300 * f * n0); ctx.fillStyle = 'rgba(250,252,255,.88)'; ctx.beginPath();
+    for (let i = 0; i < n; i++) { const r1 = WX_R[i * 3], r2 = WX_R[i * 3 + 1], r3 = WX_R[i * 3 + 2], y = (r2 * (H + 20) + time * (35 + 45 * r3)) % (H + 20) - 10, x = ((r1 * (W + 40) + Math.sin(time * 0.9 + i) * 14 + time * 12) % (W + 40) + W + 40) % (W + 40) - 20, r = 0.9 + 1.7 * r3; ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, TAU); }
+    ctx.fill();
+  } else if (WX.k === 'fog') { // (clear round you, thick further out; darker at night)
+    const P0 = pp(), px = W / 2 + (P0.x - cam.x) * cam.zoom, py = H / 2 + (P0.y - cam.y) * cam.zoom, k = Math.min(W, H) / 640, dk = darkness();
+    const col = [Math.round(205 - 165 * dk), Math.round(210 - 165 * dk), Math.round(216 - 160 * dk)].join(','), g = ctx.createRadialGradient(px, py, 90 * k, px, py, 430 * k);
+    g.addColorStop(0, `rgba(${col},${0.12 * f})`); g.addColorStop(1, `rgba(${col},${0.9 * f})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  ctx.restore();
+}
+
+// ============================================================ garages
+// Your garages: one by each place you can start from (G on the map). Drive in, stop, and press Enter: the car is parked
+// there (six spaces, shared by all your garages), and it comes out again repaired. On foot, Enter opens the garage:
+// pick a car and drive off in it. Not while you're wanted. Kept with your saved game; in co-op, the host's
+const GAR_N = 6;
+const GARAGES = (() => {
+  const out = [], avoid = [...SPRAYS, ...BOOTHS, ...HOSPITALS];
+  for (const s of STARTS) {
+    const tx = Math.floor(s.p.x / T), ty = Math.floor(s.p.y / T); let best = null;
+    for (let r = 3; r < 50 && !best; r++) for (let dy = -r; dy <= r && !best; dy++) for (let dx = -r; dx <= r && !best; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const i = tx + dx, j = ty + dy, t = tile(i, j); if (t !== WALK && t !== PLAZA) continue;
+      const x = (i + 0.5) * T, y = (j + 0.5) * T; if (circleSolid(x, y, 14) || avoid.some(o => d2(o.x, o.y, x, y) < 100 * 100)) continue;
+      let road = null; for (let v = -2; v <= 2 && !road; v++) for (let u = -2; u <= 2 && !road; u++) if (tile(i + u, j + v) === ROAD) road = { x: (i + u + 0.5) * T, y: (j + v + 0.5) * T };
+      if (road) best = { x, y, a: Math.atan2(road.y - y, road.x - x), road, name: s.name };
+    }
+    if (best && !out.some(g => d2(g.x, g.y, best.x, best.y) < 400 * 400)) out.push(best);
+  }
+  return out;
+})();
+const garageNear = (x, y, r = 40) => GARAGES.find(g => d2(g.x, g.y, x, y) < r * r);
+let GARU = null, garHint = null;
+function updateGarages() {
+  if (state !== 'play' || lab || player.hidden || player.isGuest || NET.role === 'guest') return;
+  const P0 = pp(), g = garageNear(P0.x, P0.y, 60);
+  if (g && g !== garHint) msg(player.car ? `Your garage (${GAR.length}/${GAR_N}): stop and press ${touchOn() ? '⇄' : 'Enter'} to park this car in it.` : `Your garage (${GAR.length}/${GAR_N}): ${touchOn() ? '⇄' : 'Enter'} to open it.`, 3.5);
+  garHint = g || null;
+}
+function garageEnter() {
+  if (state !== 'play' || lab || player.hidden || player.down) return false;
+  const P0 = pp(), g = garageNear(P0.x, P0.y, player.car ? 46 : 30); if (!g) return false;
+  if (player.isGuest || NET.role === 'guest') { msg('The garages are the host\'s.', 2.5); return true; }
+  const c = player.car;
+  if (c) {
+    if (Math.abs(c.speed) > 40) return false; // (rolling past: Enter gets out as ever)
+    if (heat >= 1) { msg('Not with the police after you: lose them first.', 3); return true; }
+    if (c.tram || CT[c.type].boat || c.type === 'wheel' || c.mission || c.egg || c.dead || c.fire > 0) { msg('That one doesn\'t go in a garage.', 2.5); return true; }
+    if (GAR.length >= GAR_N) { msg(`The garage is full (${GAR_N} cars): take one out first.`, 3); return true; }
+    if (Q.branches) collapse(); if (Q.link) Q.link = null;
+    GAR.push({ type: c.type, color: c.color, orn: !!c.orn });
+    player.car = null; c.driver = null; cars.splice(cars.indexOf(c), 1); player.x = g.x; player.y = g.y; player.angle = g.a + Math.PI;
+    sfx.pickup(); msg(`Parked in your garage (${GAR.length}/${GAR_N}). It comes out repaired.`, 3.5);
+    if (GAR.length >= GAR_N) ach('garage');
+    return true;
+  }
+  GARU = { g, sel: 0, btn: [] }; state = 'garage'; touchEl.style.visibility = 'hidden'; sfx.pickup();
+  return true;
+}
+function garageClose() { GARU = null; state = 'play'; touchEl.style.visibility = ''; }
+function garageTake(i) {
+  const G = GARU, it = GAR[i]; if (!it) return;
+  const g = G.g; let c = null;
+  for (const [x, y, a] of [[g.x, g.y, g.a], [g.road.x, g.road.y, g.a + Math.PI / 2], [g.road.x, g.road.y, g.a - Math.PI / 2]]) { const q = makeCar(it.type, x, y, a, null); if (carHitsWall(q, x, y, a) || cars.some(o => o !== q && !o.dead && d2(o.x, o.y, x, y) < 26 * 26)) { cars.splice(cars.indexOf(q), 1); continue; } c = q; break; }
+  if (!c) { msg('Something is in the way of the garage door.', 2.5); return; }
+  GAR.splice(i, 1); c.color = it.color || c.color; c.orn = it.orn; c.parked = false;
+  garageClose(); getIn(c); sfx.good(); msg(`Your ${CT[it.type].label}, repaired.`, 2.5);
+}
+function updateGarageUI() {
+  const G = GARU, n = GAR.length;
+  const tp = hit('Tap') && tapAt ? (G.btn.find(b => tapAt.x > b.x && tapAt.x < b.x + b.w && tapAt.y > b.y && tapAt.y < b.y + b.h) || { k: '' }).k : null;
+  if (hit('Escape') || tp === 'leave') garageClose();
+  else if (hit('ArrowUp', 'KeyW')) G.sel = Math.max(0, G.sel - 1);
+  else if (hit('ArrowDown', 'KeyS')) G.sel = Math.min(Math.max(0, n - 1), G.sel + 1);
+  else if (typeof tp === 'string' && tp.startsWith('slot')) { const i = +tp.slice(4); if (i === G.sel) garageTake(i); else G.sel = i; }
+  else if (hit('Enter', 'Space', 'NumpadEnter') || tp === 'take') garageTake(G.sel);
+}
+function drawGarageUI() {
+  const G = GARU; if (!G) return;
+  const pw = Math.min(W - 16, 520), rh = 46, ph = Math.min(H - 16, 120 + GAR_N * rh + 70), x0 = (W - pw) / 2, y0 = (H - ph) / 2, tch = touchOn();
+  ctx.fillStyle = 'rgba(4,6,10,.9)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#10161e'; ctx.fillRect(x0, y0, pw, ph); ctx.strokeStyle = '#4fc3f7'; ctx.lineWidth = 2; ctx.strokeRect(x0, y0, pw, ph);
+  txt('YOUR GARAGE', x0 + pw / 2, y0 + 32, 22, '#4fc3f7', 'center', true);
+  txt(`${G.g.name} · ${GAR.length} of ${GAR_N} spaces · the cars come out repaired`, x0 + pw / 2, y0 + 54, 12, '#bcd', 'center');
+  G.btn = [];
+  for (let i = 0; i < GAR_N; i++) {
+    const y = y0 + 74 + i * rh, it = GAR[i], sel = i === G.sel && it;
+    ctx.fillStyle = sel ? '#1d3346' : '#151d27'; ctx.fillRect(x0 + 16, y, pw - 32, rh - 6);
+    if (sel) { ctx.strokeStyle = '#7dffd8'; ctx.lineWidth = 2; ctx.strokeRect(x0 + 16, y, pw - 32, rh - 6); }
+    if (!it) { txt('— empty —', x0 + pw / 2, y + 25, 12, '#556', 'center'); continue; }
+    const t = CT[it.type]; // (the car, from above, in its colour)
+    ctx.save(); ctx.translate(x0 + 60, y + (rh - 6) / 2); const sc = Math.min(1.4, 54 / t.l); ctx.scale(sc, sc);
+    ctx.fillStyle = it.color || (t.colors && t.colors[0]) || '#888'; rrect(-t.l / 2, -t.w / 2, t.l, t.w, 4); if (it.orn) drawOrn(t.l, t.w);
+    ctx.fillStyle = '#1b2631'; ctx.fillRect(t.l * 0.05, -t.w / 2 + 2, t.l * 0.18, t.w - 4); ctx.restore();
+    txt(t.label + (it.orn ? ' (with ornament)' : ''), x0 + 104, y + 25, 14, '#fff', 'left', true);
+    G.btn.push({ k: 'slot' + i, x: x0 + 16, y, w: pw - 32, h: rh - 6 });
+  }
+  const by = y0 + ph - 52, bw = (pw - 48) / 2;
+  for (const [k, l, i] of [['take', tch ? 'TAKE IT OUT' : 'TAKE IT OUT · Enter', 0], ['leave', tch ? 'LEAVE' : 'LEAVE · Esc', 1]]) {
+    const b = { k, x: x0 + 16 + i * (bw + 16), y: by, w: bw, h: 36 }; G.btn.push(b);
+    ctx.fillStyle = k === 'take' && GAR.length ? '#0b4a66' : '#1b2430'; ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeStyle = '#4fc3f7'; ctx.lineWidth = 1.5; ctx.strokeRect(b.x, b.y, b.w, b.h);
+    txt(l, b.x + b.w / 2, b.y + 23, 12, GAR.length || k === 'leave' ? '#fff' : '#667', 'center', true);
+  }
+  if (!GAR.length) txt('Drive a car in here and press Enter to keep it.', x0 + pw / 2, by - 12, 12, '#9ab', 'center');
+}
+function drawGarages() { // a roller door on the pavement, by the road
+  for (const g of GARAGES) {
+    if (!onScreen(g.x, g.y, 40)) continue;
+    ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(g.a + Math.PI / 2);
+    ctx.fillStyle = 'rgba(79,195,247,.22)'; ctx.fillRect(-20, -14, 40, 28); ctx.strokeStyle = '#4fc3f7'; ctx.lineWidth = 2; ctx.strokeRect(-20, -14, 40, 28);
+    ctx.strokeStyle = 'rgba(79,195,247,.55)'; ctx.lineWidth = 1; ctx.beginPath(); for (let k = -8; k <= 8; k += 4) { ctx.moveTo(-17, k); ctx.lineTo(17, k); } ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(`GARAGE ${GAR.length}/${GAR_N}`, g.x, g.y + 3); ctx.textAlign = 'left';
+  }
+}
+
 // ============================================================ Brno's easter eggs
 // The old town: the orloj's marble at eleven and Petrov ringing noon an hour early (the Swedes, 1645), the dragon in the
 // Old Town Hall's passage and Birk's wheel, the little man on St James's, Špilberk's cells, the cellars under the old
@@ -10749,11 +11036,33 @@ const EA = BRNO ? (() => {
   // Moravské náměstí: Margrave Jošt on his long-legged horse (Odvaha, Courage) and, outside the Supreme Administrative
   // Court, a man lifting a block on a jet of water (Spravedlnost, Justice)
   if (B5) { const [jx, jy] = P(49.197636, 16.607535), [sx, sy] = P(49.197482, 16.607103); A.jost = { x: jx, y: jy, a: -Math.PI / 2 }; A.justice = { x: sx, y: sy }; }
+  // more of Brno: the plaque on the house where Kurt Gödel was born (Pekařská), the post box by Milan Kundera's birthplace
+  // (Purkyňova 6), the Adolf Loos memorial on Janáčkovo náměstí (his birthplace stood across Kounicova, where Hotel
+  // Continental is) and a sign offering resprays by the road beside it, Edison's bulbs on Malinovského náměstí and the
+  // Mahen Theatre, Villa Tugendhat, the water by the dam where Ignis Brunensis fires its fireworks, the payphone nearest
+  // the Old Town Hall, the train stops at Židenice (Bohumil Hrabal), and a sign where the road leaves the map toward
+  // Ernst Mach's Chrlice
+  A.godel = nearT(...P(49.19218, 16.60440), (t, i, j) => foot(t) && outside(i, j), 60);
+  A.kundera = nearT(...P(49.21862, 16.58757), (t, i, j) => foot(t) && byRoad(i, j) && outside(i, j), 60);
+  A.loos = nearT(...P(49.20072, 16.60350), (t, i, j) => open(t) && !byRoad(i, j) && outside(i, j), 50) || nearT(...P(49.20072, 16.60350), (t, i, j) => open(t) && outside(i, j), 80);
+  A.loosBay = A.loos && nearT(A.loos.x, A.loos.y, (t, i, j) => foot(t) && byRoad(i, j) && outside(i, j), 120);
+  A.edison = nearT(...P(49.19529, 16.61330), (t, i, j) => open(t) && outside(i, j), 40); if (A.edison) A.edison.a = 0.4;
+  A.mahen = (([x, y]) => ({ x, y }))(P(49.19616, 16.61342));
+  A.tug = mid(siteRect('Vila Tugendhat')) || (([x, y]) => ({ x, y }))(P(49.20717, 16.61608));
+  A.fw = nearT(...P(49.23380, 16.51800), t => t === WATER, 700); // (just above the dam, where Brno watches from)
+  A.hallPhone = A.hall ? BOOTHS.reduce((b, q) => !b || d2(q.x, q.y, A.hall.x, A.hall.y) < d2(b.x, b.y, A.hall.x, A.hall.y) ? q : b, null) : null;
+  A.zid = TRAM_STOPS.filter(o => o.train && o.name === 'Brno-Židenice').map(o => ({ x: o.x, y: o.y }));
+  { // (from the old town toward Chrlice, as far as the map goes; there the nearest road, and the verge beside it)
+    const [cx, cy] = geo(49.1306, 16.6492), hx = A.hall ? A.hall.x / T : MW / 2, hy = A.hall ? A.hall.y / T : MH / 2, m = Math.ceil(100 / mpt), dl = Math.hypot(cx - hx, cy - hy);
+    let ex = hx, ey = hy; for (let k = 0; k < 5000; k++) { const nx = ex + (cx - hx) / dl, ny = ey + (cy - hy) / dl; if (nx < m || ny < m || nx > MW - m || ny > MH - m) break; ex = nx; ey = ny; }
+    const rd = nearT(ex * T, ey * T, t => t === ROAD, 700);
+    if (rd) A.mach = nearT(rd.x, rd.y, (t, i, j) => open(t) && byRoad(i, j) && !solidAt((i + 0.5) * T, (j + 0.5) * T), 40) || rd;
+  }
   return A;
 })() : null;
-const EGG = { h: null, told: {}, crowdT: 0, marble: null, dragon: null, slain: -1, wheel: null, wheelSt: 'wait', wheelDay: -1, cows: [], cowT: 0, monks: [], student: null, deadDay: -1, roarT: 20, leaveT: 0, boosts: [], zoo: [], splashT: 0, atClock: false };
+const EGG = { h: null, told: {}, crowdT: 0, marble: null, dragon: null, slain: -1, wheel: null, wheelSt: 'wait', wheelDay: -1, cows: [], cowT: 0, monks: [], student: null, deadDay: -1, roarT: 20, leaveT: 0, boosts: [], zoo: [], splashT: 0, atClock: false, posted: false, postT: 0, loosDone: false, bulbs: 0, fw: [], fwT: 0, machT: 0, uvNight: -99, flash: 0 };
 function eggReset() {
-  Object.assign(EGG, { h: null, told: {}, marble: null, dragon: null, slain: -1, wheel: null, wheelSt: 'wait', wheelDay: -1, cows: [], monks: [], student: null, deadDay: -1, boosts: [], zoo: [], splashT: 0, atClock: false });
+  Object.assign(EGG, { h: null, told: {}, marble: null, dragon: null, slain: -1, wheel: null, wheelSt: 'wait', wheelDay: -1, cows: [], monks: [], student: null, deadDay: -1, boosts: [], zoo: [], splashT: 0, atClock: false, posted: false, postT: 0, loosDone: false, bulbs: 0, fw: [], fwT: 0, machT: 0, uvNight: -99, flash: 0 });
   player.marble = false; player.lime = false; player.cellar = null;
 }
 const eggOnce = (k, text, t = 4) => { if (EGG.told[k]) return false; EGG.told[k] = 1; msg(text, t); return true; };
@@ -10889,6 +11198,7 @@ function updateEggs(dt) {
   updateSights(dt, P0, you, near);
   updateMonks(dt, h, near);
   updateDeadline(dt, h, at, P0, you, near);
+  updateMore(dt, h, at, P0, you, near);
 }
 // ---- the bells of Petrov at eleven: in 1645 the Swedes were to give up if Brno held out until noon; the bells rang noon
 // an hour early, and they went. Wanted round here at eleven, up to five stars, the police take the hint too
@@ -11217,11 +11527,214 @@ function eggGetIn(c) {
   if (c.mendel && eggOnce('mendel', c.color === '#e8c62e' ? 'A yellow one: recessive.' : 'A green one: dominant.', 6)) msg('Round Mendel\'s abbey the parked cars come green and yellow, three to one, like his peas.', 6);
   if (c.type === 'formula') eggOnce('formula', 'A Formula Student car from the mechanical engineering faculty: the fastest thing in town.', 4);
 }
+// ---- more of Brno. Kurt Gödel, born on Pekařská in 1906; Ernst Mach, born down the road in Chrlice in 1838; the Old Town
+// Hall, which paid Anton Pilgram short for its gate in 1511 (he bent the middle pinnacle in revenge); Milan Kundera's
+// birthplace and The Joke's postcard; Bohumil Hrabal's Židenice and its closely watched trains; Adolf Loos, for whom
+// ornament was crime; the Mahen Theatre, lit by Edison's bulbs in 1882 (the first in Europe), and Tomáš Medek's four steel
+// bulbs in Edison's honour on Malinovského náměstí; Villa Tugendhat's onyx wall at sunset; Ignis Brunensis's fireworks
+// over the reservoir, on Saturday nights
+const MAHEN_ON = 17.6, MAHEN_OFF = 23.5; // (from 17:36 its windows light up one by one; dark after the evening's show)
+const mahenLit = () => { const h = dayT * 24; return EA && h >= MAHEN_ON && h < MAHEN_OFF ? clamp((h - MAHEN_ON) / 0.9, 0, 1) * clamp((MAHEN_OFF - h) / 0.25, 0, 1) : 0; };
+const FW_ON = 22, FW_OFF = 22.75;
+const fwOn = () => !!(EA && EA.fw) && weekday() === 6 && dayT * 24 >= FW_ON && dayT * 24 < FW_OFF;
+const onyxGlow = () => { const h = dayT * 24; return h >= 17.5 && h < 18.6 ? Math.sin((h - 17.5) / 1.1 * Math.PI) : 0; };
+const FW_COLS = ['#ff5a5a', '#ffd34d', '#7dff8a', '#5ab4ff', '#d68cff', '#ffffff', '#ff9e3d'];
+function updateMore(dt, h, at, P0, you, near) {
+  const A = EA;
+  // Gödel: true, but it can't be proven
+  if (you && A.godel && near(A.godel, 70) && eggOnce('godel', 'Kurt Gödel was born in this house in 1906. At 25 he proved that any consistent system rich enough for arithmetic has true statements it cannot prove.', 8)) {
+    msg('So somewhere in this game there must be an achievement that is true but can\'t be proven. Here it is.', 7); ach('godel');
+  }
+  // Mach: how fast you pass the sign for Chrlice, against the speed of sound (343 m/s)
+  EGG.machT -= dt;
+  if (you && A.mach && near(A.mach, player.car ? 110 : 50) && EGG.machT <= 0) {
+    EGG.machT = 12;
+    const M = player.car ? Math.abs(player.car.speed) / PXM / 343 : 0;
+    if (M >= 0.1) { bigText(`MACH ${M.toFixed(2)}`, '#d9a066', 3, 'Ernst Mach was born down this road, in Chrlice, in 1838'); if (M >= 0.15) ach('mach'); }
+    else msg(`A brown sign: Chrlice, where Ernst Mach was born in 1838. His number is speed over the speed of sound: you pass at Mach ${M.toFixed(3)}.`, 7);
+  }
+  // Kundera: the postcard on the post box (Enter posts it: eggPost); a few seconds later somebody reads it
+  if (you && !player.car && A.kundera && !EGG.posted && near(A.kundera, 50)) eggOnce('kundera', `Milan Kundera was born here, at Purkyňova 6, in 1929. On the post box lies a postcard, stamped and addressed. ${touchOn() ? '⇄' : 'Enter'}: post it.`, 7);
+  if (EGG.postT > 0 && (EGG.postT -= dt) <= 0) {
+    if (heat < 5) addHeat(1, true);
+    bigText('THE JOKE', '#e74c3c', 3.5, 'Somebody read your postcard, and nobody laughed');
+    msg('In Kundera\'s The Joke (1967) a postcard like that one costs a student his place at university.', 7); ach('joke');
+  }
+  // Loos: the memorial, and the sign by the road beside it
+  if (you && A.loos && near(A.loos, 110)) eggOnce('loos', 'The Adolf Loos memorial: the shape of his own plain gravestone. He was born across Kounicova in 1870, where Hotel Continental stands now.', 7);
+  if (you && A.loosBay && !EGG.loosDone && near(A.loosBay, 170)) eggOnce('loosSign', 'A sign by the memorial: FREE RESPRAYS, WITH ORNAMENT. Stop by it in a car.', 5);
+  const c = player.car;
+  if (you && c && A.loosBay && !EGG.loosDone && near(A.loosBay, 44) && Math.abs(c.speed) < 90 && !c.tram && !CT[c.type].boat && !CT[c.type].bike && c.type !== 'wheel') {
+    EGG.loosDone = true; c.color = '#c9a227'; c.orn = true; sfx.spray();
+    bigText('ORNAMENT AND CRIME', '#e0b84a', 4, 'Gold, with curlicues: and the police agree with Loos');
+    msg('"Ornament is crime," wrote Adolf Loos in 1908. The police take his word for it.', 6);
+    addHeat(1); ach('loos');
+  }
+  // Edison's bulbs: at night they light up as you come
+  if (A.edison) {
+    const want = you && darkness() > 0.3 && near(A.edison, 120) ? 1 : 0;
+    EGG.bulbs = clamp(EGG.bulbs + clamp(want - EGG.bulbs, -dt * 0.5, dt * 0.7), 0, 1);
+    if (want && EGG.bulbs > 0.6 && eggOnce('edison', 'Pocta T. A. Edisonovi: four bulbs of steel wire by Tomáš Medek (2010). In 1882 Edison\'s company lit the Mahen Theatre here, the first theatre in Europe lit by electric bulbs; Edison came to see it in 1911.', 9)) {
+      msg('A hot filament glows red, then yellow, then white. Explaining that glow is what made Max Planck propose, in 1900, that light comes in quanta.', 9);
+      msg('(Game liberty: the real bulbs don\'t light up.)', 5); ach('edison');
+    }
+    if (want && !player.car && near(A.edison, 40)) eggOnce('bulbHint' + dayN, `${touchOn() ? '⇄' : 'Enter'}: the filament's console, quantum or classical.`, 4);
+  }
+  // the Mahen Theatre lights up first; Villa Tugendhat's onyx glows at sunset
+  if (you && A.mahen && near(A.mahen, 800) && h >= MAHEN_ON && h < MAHEN_ON + 1 && eggOnce('mahen' + dayN, 'Dusk: the Mahen Theatre lights up first, window by window, as it has since 1882, when Edison\'s bulbs made it the first theatre in Europe lit by electricity.', 8)) ach('mahen');
+  if (you && A.tug && onyxGlow() > 0.25 && near(A.tug, 280) && eggOnce('onyx' + dayN, 'Sunset at Villa Tugendhat: the low sun comes through the glass and the onyx wall inside glows amber. Mies van der Rohe built it for the Tugendhats in 1930.', 8)) ach('onyx');
+  // Ignis Brunensis: on Saturday nights, fireworks over the reservoir. The police watch the sky: while it lasts, your
+  // stars fade three times as fast (up to five)
+  if (A.fw && weekday() === 6) {
+    if (at(FW_ON - 0.5)) msg('Tonight at 22:00: Ignis Brunensis, the fireworks over the reservoir by the dam.', 5);
+    if (at(FW_ON)) msg('The fireworks over the reservoir have begun. Half the police are looking up: while they last, they lose you three times as fast.', 6);
+  }
+  if (fwOn()) {
+    EGG.fwT -= dt;
+    if (EGG.fwT <= 0) { EGG.fwT = rand(0.3, 1.1); fwBurst(P0); }
+    if (heat > 0 && heat < 6 && time - lastCrime > 5 && !belief.seen && (belief.sig > 250 || heat < 1)) heat = Math.max(0, heat - dt * 0.24);
+    if (you && (near(A.fw, 2000) || EGG.fw.some(b => b.t > 0.2 && onScreen(b.x, b.y, -40))) && eggOnce('ignis' + dayN, 'Ignis Brunensis: Brno\'s fireworks festival, over the reservoir.', 5)) ach('ignis');
+  }
+  if (EGG.fw.length) { for (const b of EGG.fw) b.t += dt; EGG.fw = EGG.fw.filter(b => b.t < b.T); }
+  if (EGG.flash > 0) EGG.flash -= dt;
+}
+function fwBurst(P0) {
+  const F = EA.fw, big = Math.random() < 0.25, x = F.x + rand(-420, 420), y = F.y + rand(-320, 320);
+  EGG.fw.push({ x, y, t: 0, T: big ? 2.8 : 2.2, r: big ? rand(200, 280) : rand(110, 170), n: big ? 56 : 34, ring2: big, c: pick(FW_COLS), c2: Math.random() < 0.4 ? pick(FW_COLS) : null, s: rand(TAU) });
+  const d = Math.hypot(x - P0.x, y - P0.y) / PXM; // (in metres: the bang comes after the flash, at the speed of sound)
+  if (d < 4000) noise(big ? 0.9 : 0.6, big ? 160 : 220, 'lowpass', (big ? 0.5 : 0.35) * clamp(1 - d / 4000, 0.06, 1), 1, now() + d / 343);
+}
+// Pilgram: the payphone nearest the Old Town Hall is the council's
+function eggCouncil(b) {
+  if (!EA || !mission || lab || b !== EA.hallPhone) return;
+  mission.council = true;
+  msg(`The town council itself is on the line, from the Old Town Hall. For this job they promise ${fmt(Math.round(mission.reward * player.mult))}.`, 6);
+}
+function eggPilgram() {
+  msg('The council pays a third short, as it paid Anton Pilgram for the Old Town Hall\'s gate in 1511.', 7);
+  msg('He bent the middle pinnacle over the gate in revenge: on Radnická it leans to this day.', 7); ach('pilgram');
+}
+// Kundera: on foot by the post box, Enter posts the postcard
+const eggPostAt = (x, y) => !!(EA && EA.kundera && !EGG.posted && d2(EA.kundera.x, EA.kundera.y, x, y) < 22 * 22);
+function eggPost() {
+  EGG.posted = true; EGG.postT = 6; sfx.pickup();
+  msg('"Optimism is the opium of the people! A healthy atmosphere stinks of stupidity! Long live Trotsky! Ludvík"', 8);
+  msg('You post it. It was only a joke.', 5);
+}
+// Hrabal: a train hijacked at Brno-Židenice, a few streets from where he was born (Balbínova 47, 1914)
+function eggHijack(t) {
+  if (!EA || !t.train || !EA.zid.some(o => d2(o.x, o.y, t.x, t.y) < 420 * 420)) return;
+  addHeat(1);
+  bigText('CLOSELY WATCHED TRAINS', '#e0b070', 4, 'Bohumil Hrabal was born a few streets from here, in 1914');
+  msg('At Brno-Židenice the trains are closely watched: a star for this one.', 5); ach('hrabal');
+}
+// ---- the ultraviolet catastrophe, at Edison's bulbs (at night): turn the filament's current up and down and watch its
+// colour and its spectrum, Planck's, go from dull red to white. Switch to classical physics (Rayleigh and Jeans: every way
+// light can wave gets the same share of energy, kT, and there are ever more of them at short wavelengths) and the
+// spectrum climbs without end into the ultraviolet. Switch the bulb on like that, and it flashes: once a night, it
+// blinds the police round the square for a few seconds and they lose you. In 1900 Planck saved physics from this by
+// letting light come only in quanta of energy hf
+let BULB = null;
+const bulbAt = (x, y) => !!(EA && EA.edison && darkness() > 0.3 && d2(EA.edison.x, EA.edison.y, x, y) < 34 * 34);
+const bulbNight = () => (dayT * 24 < 12 ? dayN - 1 : dayN);
+function bulbOpen() {
+  if (NET.role) { msg('The filament console is single-player for now.', 2.5); return; }
+  BULB = { I: 0.55, cl: false, btn: [], t: 0 };
+  state = 'bulb'; touchEl.style.visibility = 'hidden'; sfx.quantum();
+}
+function bulbClose() { BULB = null; state = 'play'; touchEl.style.visibility = ''; }
+const bulbT = I => 300 + I * 3100; // (the filament's temperature, K: at full current 3400 K, below tungsten's 3695 K)
+const planckB = (lm, T) => 1 / (lm ** 5 * (Math.exp(0.014388 / (lm * T)) - 1)); // (spectral radiance, up to 2hc²; λ in m)
+const rjB = (lm, T) => T / (0.014388 * lm ** 4); // (Rayleigh–Jeans: the same, as hc/λkT goes to 0)
+function bbRGB(T) { // a glowing body's colour (after Tanner Helland's fit to the black-body curve)
+  const t = T / 100, c = v => clamp(Math.round(v), 0, 255);
+  const r = t <= 66 ? 255 : 329.7 * (t - 60) ** -0.1332, g = t <= 66 ? 99.47 * Math.log(t) - 161.1 : 288.1 * (t - 60) ** -0.0755, b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5 * Math.log(t - 10) - 305;
+  return [c(r), c(g), c(b)];
+}
+function bulbVisible(T) { // the share of the light that is visible (380–750 nm), out of all of it (σT⁴/π)
+  let v = 0; for (let n = 380; n < 750; n += 2) v += planckB((n + 1) * 1e-9, T) * 2e-9;
+  return v / (Math.PI ** 4 / 15 * (T / 0.014388) ** 4); // (the whole spectrum, in the same units: ∫x³/(eˣ−1) = π⁴/15)
+}
+function updateBulb(dt) {
+  const B = BULB; B.t += dt;
+  const tp = hit('Tap') && tapAt ? (B.btn.find(b => tapAt.x > b.x && tapAt.x < b.x + b.w && tapAt.y > b.y && tapAt.y < b.y + b.h) || { k: '' }).k : null;
+  if (hit('Escape') || tp === 'leave') bulbClose();
+  else if (hit('ArrowRight', 'ArrowUp', 'KeyD', 'KeyW') || tp === 'plus') B.I = Math.min(1, +(B.I + 0.05).toFixed(2));
+  else if (hit('ArrowLeft', 'ArrowDown', 'KeyA', 'KeyS') || tp === 'minus') B.I = Math.max(0, +(B.I - 0.05).toFixed(2));
+  else if (hit('KeyC', 'KeyQ', 'Tab') || tp === 'mode') { B.cl = !B.cl; sfx.quantum(); }
+  else if ((hit('Enter', 'Space', 'NumpadEnter') || tp === 'on') && B.cl) bulbCatastrophe();
+}
+function bulbCatastrophe() {
+  bulbClose();
+  if (EGG.uvNight === bulbNight()) { msg('The bulb is still cooling from the last time. Tomorrow night.', 3); return; }
+  EGG.uvNight = bulbNight(); EGG.flash = 1.6;
+  const A = EA.edison, R = 760; let n = 0;
+  for (const p of peds) if (p.cop && !p.dead && d2(p.x, p.y, A.x, A.y) < R * R) { p.dazzle = rand(5, 7); n++; }
+  for (const c of cars) if (c.driver === 'police' && !c.dead && d2(c.x, c.y, A.x, A.y) < R * R) { c.dazzle = rand(5, 7); n++; }
+  if (heat >= 1) Object.assign(belief, { seen: false, seeT: 1.5, sig: Math.max(belief.sig, 320) });
+  noise(1.6, 3000, 'highpass', 0.5); tone(220, 1.4, 'sawtooth', 0.08, 2400); shake = Math.max(shake, 0.6);
+  bigText('ULTRAVIOLET CATASTROPHE', '#d9b8ff', 4.5, n ? `Classically the bulb pours out endless energy: ${n} of the police are dazzled` : 'Classically the bulb pours out endless energy');
+  msg('By classical physics every hot thing would blaze like this, with endless energy in the ultraviolet.', 8);
+  msg('In 1900 Max Planck stopped it: light comes in quanta of energy hf, too dear for the short wavelengths.', 8);
+  ach('uvcat');
+}
+function drawBulb() {
+  const B = BULB; if (!B) return;
+  const pw = Math.min(W - 16, 800), ph = Math.min(H - 16, 520), x0 = (W - pw) / 2, y0 = (H - ph) / 2, tch = touchOn(), T0 = bulbT(B.I);
+  ctx.fillStyle = 'rgba(6,5,10,.95)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#121019'; ctx.fillRect(x0, y0, pw, ph); ctx.strokeStyle = B.cl ? '#ff7a7a' : '#ffd27a'; ctx.lineWidth = 2; ctx.strokeRect(x0, y0, pw, ph);
+  txt('EDISON\'S BULB · THE FILAMENT', x0 + pw / 2, y0 + 32, Math.min(22, pw / 26), B.cl ? '#ff9a9a' : '#ffd27a', 'center', true);
+  txt(B.cl ? 'CLASSICAL PHYSICS (Rayleigh–Jeans)' : 'QUANTUM PHYSICS (Planck, 1900)', x0 + pw / 2, y0 + 54, 13, B.cl ? '#ff9a9a' : '#cfe0ff', 'center');
+  // the bulb: its glass, and the filament's glow in its colour
+  const bw = Math.min(150, pw * 0.22), bx = x0 + 24 + bw / 2, by = y0 + 82 + bw * 0.6, rgb = bbRGB(T0), lum = clamp((T0 - 700) / 2500, 0, 1) ** 1.6;
+  if (lum > 0.01) { const g = ctx.createRadialGradient(bx, by, 2, bx, by, bw * 0.9); g.addColorStop(0, `rgba(${rgb},${0.95 * lum})`); g.addColorStop(1, `rgba(${rgb},0)`); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(bx, by, bw * 0.9, 0, TAU); ctx.fill(); }
+  ctx.strokeStyle = '#9aa3ad'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(bx, by, bw * 0.38, Math.PI * 0.72, Math.PI * 2.28); ctx.lineTo(bx + bw * 0.14, by + bw * 0.55); ctx.lineTo(bx - bw * 0.14, by + bw * 0.55); ctx.closePath(); ctx.stroke();
+  ctx.fillStyle = '#6e737a'; ctx.fillRect(bx - bw * 0.15, by + bw * 0.55, bw * 0.3, bw * 0.18);
+  ctx.strokeStyle = T0 > 750 ? `rgb(${rgb.map(v => Math.min(255, v + 40))})` : '#555'; ctx.lineWidth = 2; ctx.beginPath();
+  for (let n = 0; n <= 8; n++) { const x = bx - bw * 0.16 + n * bw * 0.04, y = by + (n & 1 ? -bw * 0.05 : bw * 0.05); if (n) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+  ctx.stroke();
+  // the readings
+  const vis = bulbVisible(T0), pk = 2.8978e-3 / T0 * 1e9, ly = by + bw * 0.95;
+  txt(`current ${Math.round(B.I * 100)} %`, bx, ly, 14, '#fff', 'center', true);
+  txt(`filament ${Math.round(T0).toLocaleString('en')} K`, bx, ly + 20, 13, '#ddd', 'center');
+  txt(B.cl ? 'peak: none, it rises for ever' : `peak at ${Math.round(pk).toLocaleString('en')} nm${pk > 750 ? ' (infrared)' : ''}`, bx, ly + 38, 12, B.cl ? '#ff9a9a' : '#aab', 'center');
+  txt(B.cl ? 'visible: 0 % of ∞' : `visible: ${(vis * 100).toFixed(vis < 0.01 ? 2 : 1)} % of the light`, bx, ly + 55, 12, B.cl ? '#ff9a9a' : '#aab', 'center');
+  // the spectrum: 100 nm to 20 µm on a logarithmic scale, the visible band in its colours
+  const cx0 = x0 + bw + 70, cx1 = x0 + pw - 24, cy0 = y0 + 82, cy1 = y0 + ph - 150, L0 = 100, L1 = 20000, X = nm => cx0 + Math.log(nm / L0) / Math.log(L1 / L0) * (cx1 - cx0);
+  ctx.fillStyle = '#0b0a10'; ctx.fillRect(cx0, cy0, cx1 - cx0, cy1 - cy0);
+  const vg = ctx.createLinearGradient(X(380), 0, X(750), 0); ['#7a00ff', '#0040ff', '#00c0ff', '#00e040', '#ffe000', '#ff7000', '#ff0000'].forEach((c, i) => vg.addColorStop(i / 6, c));
+  ctx.fillStyle = vg; ctx.globalAlpha = 0.16; ctx.fillRect(X(380), cy0, X(750) - X(380), cy1 - cy0); ctx.globalAlpha = 1; ctx.fillRect(X(380), cy1 + 2, X(750) - X(380), 8);
+  ctx.strokeStyle = '#3a3846'; ctx.lineWidth = 1; ctx.strokeRect(cx0, cy0, cx1 - cx0, cy1 - cy0);
+  txt('ultraviolet', (cx0 + X(380)) / 2, cy1 + 24, 11, '#b49cff', 'center'); txt('visible', (X(380) + X(750)) / 2, cy1 + 24, 11, '#ddd', 'center'); txt('infrared', (X(750) + cx1) / 2, cy1 + 24, 11, '#ff9a7a', 'center');
+  for (const [nm, l] of [[100, '100 nm'], [300, '300 nm'], [1000, '1 µm'], [3000, '3 µm'], [10000, '10 µm']]) txt(l, X(nm), cy1 + 38, 10, '#777', 'center');
+  let top = 0; for (let nm = L0; nm <= L1; nm *= 1.01) top = Math.max(top, planckB(nm * 1e-9, T0)); // (scaled to the quantum curve's peak)
+  const Y = b => cy1 - b / top * (cy1 - cy0) * 0.85;
+  const curve = (f, col, w) => { // (from the long waves to the short; off the top, it is clipped there)
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); let first = true, clip = false;
+    for (let nm = L1; nm >= L0; nm /= 1.01) { const y = Y(f(nm * 1e-9, T0)); if (y < cy0) { clip = X(nm); if (!first) ctx.lineTo(X(nm), cy0); break; } if (first) { ctx.moveTo(X(nm), y); first = false; } else ctx.lineTo(X(nm), y); }
+    ctx.stroke(); return clip; };
+  if (top > 0 && T0 > 400) {
+    curve(planckB, B.cl ? 'rgba(207,224,255,.35)' : '#cfe0ff', 2);
+    const cx = B.cl && curve(rjB, '#ff6b6b', 2.5);
+    if (cx) { // (off the top: and it never comes down)
+      const ax = cx - 4 + Math.sin(B.t * 6) * 2; ctx.fillStyle = '#ff6b6b'; ctx.beginPath(); ctx.moveTo(ax, cy0 + 4); ctx.lineTo(ax - 7, cy0 + 16); ctx.lineTo(ax + 7, cy0 + 16); ctx.fill();
+      txt('∞ ←', ax - 12, cy0 + 18, 15, '#ff6b6b', 'right', true);
+    }
+  } else txt('too cold to glow', (cx0 + cx1) / 2, (cy0 + cy1) / 2, 13, '#777', 'center');
+  // what it means
+  const note = B.cl ? 'Classically every way light can wave gets the same share of the energy, and there are more and more of them at shorter wavelengths: the bulb should pour out endless energy in the ultraviolet.'
+    : T0 < 800 ? 'Below about 800 K a hot body glows only in the infrared: you feel it, but can\'t see it.' : 'Planck: light is given out in quanta of energy hf. Short wavelengths cost too much to make, so the spectrum falls away before the ultraviolet. Most of a bulb\'s light is infrared heat.';
+  wrapLines(note, pw - 48, '12px system-ui, sans-serif').slice(0, 3).forEach((l, i) => txt(l, x0 + pw / 2, y0 + ph - 96 + i * 16, 12, B.cl ? '#ffc9c9' : '#d8def0', 'center'));
+  const labs = [['minus', tch ? '−' : '− · ←'], ['plus', tch ? '+' : '+ · →'], ['mode', tch ? (B.cl ? 'QUANTUM' : 'CLASSICAL') : (B.cl ? 'QUANTUM · C' : 'CLASSICAL · C')], ...(B.cl ? [['on', tch ? 'SWITCH ON' : 'SWITCH ON · Enter']] : []), ['leave', tch ? 'LEAVE' : 'LEAVE · Esc']];
+  const bwid = Math.min(150, (pw - 40) / labs.length - 8);
+  B.btn = labs.map(([k, l], i) => ({ k, l, x: x0 + pw / 2 + (i - labs.length / 2) * (bwid + 8) + 4, y: y0 + ph - 46, w: bwid, h: 34 }));
+  for (const b of B.btn) { ctx.fillStyle = b.k === 'on' ? '#7a1c1c' : '#1e1c2a'; ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeStyle = b.k === 'on' ? '#ff6b6b' : '#6d6a80'; ctx.lineWidth = 1.5; ctx.strokeRect(b.x, b.y, b.w, b.h); txt(b.l, b.x + b.w / 2, b.y + 22, 12, '#fff', 'center', true); }
+}
 // ---- drawing
 function drawEggs(v, pass) {
   if (!EA) return;
   const inV = (o, m = 60) => o && o.x > v.x0 - m && o.x < v.x1 + m && o.y > v.y0 - m && o.y < v.y1 + m;
-  if (pass === 2) { if (B5 && EA.orloj && inV(EA.orloj, 120)) drawOrloj(EA.orloj); if (EA.justice && inV(EA.justice, 120)) drawJustice(EA.justice); if (EA.jost && inV(EA.jost, 170)) drawJost(EA.jost); if (EA.qclock && inV(EA.qclock, 100)) drawQClock(EA.qclock); }
+  if (pass === 2) { if (B5 && EA.orloj && inV(EA.orloj, 120)) drawOrloj(EA.orloj); if (EA.justice && inV(EA.justice, 120)) drawJustice(EA.justice); if (EA.jost && inV(EA.jost, 170)) drawJost(EA.jost); if (EA.qclock && inV(EA.qclock, 100)) drawQClock(EA.qclock); drawMore(inV); }
   if (pass === 0) {
     for (const q of EA.hatches) if (inV(q)) { // an iron hatch in the paving
       ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(q.x - 7, q.y - 6, 15, 15);
@@ -11369,6 +11882,114 @@ function drawQClock(C) { // ÚPT's quantum clock: a dial on a post, ringed by th
   hand((hh % 12) / 12 * TAU, 4.2, 1.6, '#1d2330'); hand((hh % 1) * TAU, 6.4, 1.1, '#1d2330'); hand(((hh * 60) % 1) * TAU, 7, 0.6, '#c0392b');
   ctx.fillStyle = '#7c4dff'; ctx.beginPath(); ctx.arc(x, y, 1.2 * k, 0, TAU); ctx.fill();
 }
+function drawMore(inV) { // (lifted, with the buildings: Edison's bulbs, the Loos memorial and its sign, the post box, Mach's sign; the onyx's glow)
+  const A = EA;
+  if (A.edison && inV(A.edison, 60)) drawEdison(A.edison, EGG.bulbs);
+  if (A.loos && inV(A.loos, 60)) drawLoos(A.loos);
+  if (A.loosBay && inV(A.loosBay, 60)) drawLoosSign(A.loosBay);
+  if (A.kundera && inV(A.kundera, 40)) drawPostBox(A.kundera);
+  if (A.mach && inV(A.mach, 60)) drawMachSign(A.mach);
+  const og = onyxGlow();
+  if (og > 0 && A.tug && inV(A.tug, 80)) { // (through the living room's glass, toward the garden: south-west, downhill)
+    const x = A.tug.x - 10, y = A.tug.y + 16, g = ctx.createRadialGradient(x, y, 2, x, y, 46);
+    g.addColorStop(0, `rgba(255,176,70,${0.5 * og})`); g.addColorStop(1, 'rgba(255,140,40,0)');
+    ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.fillRect(x - 46, y - 46, 92, 92); ctx.globalCompositeOperation = 'source-over';
+  }
+}
+function drawEdison(E, lit) { // Pocta T. A. Edisonovi: four bulbs of stainless steel wire twined together, three metres tall, on a plinth
+  const z = m => m * PXM / HC, S = PXM * 1.3; // (a touch larger than life, to be seen)
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(E.x - 0.8 * S + 3, E.y - 0.8 * S + 3, 1.6 * S, 1.6 * S);
+  const [px, py] = proj(E.x, E.y, z(0.5)), k0 = 1 + z(0.5);
+  ctx.fillStyle = tint('#aaa59b'); ctx.fillRect(px - 0.8 * S * k0, py - 0.8 * S * k0, 1.6 * S * k0, 1.6 * S * k0); // (the concrete plinth)
+  for (let q = 0; q < 4; q++) {
+    const a = E.a + q * Math.PI / 2, hb = 1.9 + (q & 1) * 0.4, k = 1 + z(hb), r = 0.6 * S * k;
+    const [bx, by] = proj(E.x - Math.cos(a) * 0.15 * S, E.y - Math.sin(a) * 0.15 * S, z(0.6)), [cx, cy] = proj(E.x + Math.cos(a) * 0.62 * S, E.y + Math.sin(a) * 0.62 * S, z(hb));
+    ctx.strokeStyle = tint('#8d949c'); ctx.lineWidth = 1.4 * k; // (its cap and neck, across the middle to the next one's)
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(cx - Math.cos(a) * r * 0.85, cy - Math.sin(a) * r * 0.85); ctx.stroke();
+    if (lit > 0.02) {
+      const g = ctx.createRadialGradient(cx, cy, 0.5, cx, cy, r * 2.4); g.addColorStop(0, `rgba(255,214,120,${0.75 * lit})`); g.addColorStop(1, 'rgba(255,170,60,0)');
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r * 2.4, 0, TAU); ctx.fill(); ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.strokeStyle = tint('#d8dee5'); ctx.lineWidth = 0.9 * k; ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke(); // (the glass, in wire)
+    ctx.lineWidth = 0.45 * k; ctx.beginPath(); // (and its mesh)
+    for (const m of [-0.5, 0, 0.5]) { const hw = r * Math.sqrt(1 - m * m); ctx.moveTo(cx + Math.cos(a) * m * r - Math.sin(a) * hw, cy + Math.sin(a) * m * r + Math.cos(a) * hw); ctx.lineTo(cx + Math.cos(a) * m * r + Math.sin(a) * hw, cy + Math.sin(a) * m * r - Math.cos(a) * hw); }
+    ctx.stroke();
+    if (lit > 0.02) { // (the filament: red, then yellow, then white as it heats)
+      const f = clamp(lit, 0, 1), col = f < 0.5 ? `rgb(255,${Math.round(90 + 250 * f)},40)` : `rgb(255,${Math.round(215 + 40 * (f - 0.5) * 2)},${Math.round(40 + 200 * (f - 0.5) * 2)})`;
+      ctx.strokeStyle = col; ctx.lineWidth = 0.8 * k; ctx.beginPath();
+      for (let n = 0; n <= 4; n++) { const u = (n / 4 - 0.5) * r * 1.1, w = (n & 1 ? 0.25 : -0.25) * r; const x = cx + Math.cos(a) * w - Math.sin(a) * u, y = cy + Math.sin(a) * w + Math.cos(a) * u; if (n) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+      ctx.stroke();
+    }
+  }
+}
+function drawLoos(L) { // the Loos memorial: the plain stone cube of his own grave, hollowed out so you see through it
+  const h = 2.4 * PXM / HC, s = 1.3 * PXM;
+  ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(L.x - s + 3, L.y - s + 3, 2 * s, 2 * s);
+  const c0 = [[-s, -s], [s, -s], [s, s], [-s, s]].map(([u, v]) => [L.x + u, L.y + v]), c1 = c0.map(([x, y]) => proj(x, y, h));
+  ctx.strokeStyle = tint('#5f5b55'); ctx.lineWidth = 2.4; ctx.beginPath();
+  for (let i = 0; i < 4; i++) { ctx.moveTo(c0[i][0], c0[i][1]); ctx.lineTo(c1[i][0], c1[i][1]); }
+  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c1[0][0], c1[0][1]); for (let i = 1; i < 4; i++) ctx.lineTo(c1[i][0], c1[i][1]); ctx.closePath();
+  ctx.fillStyle = tint('#8e8a83'); ctx.globalAlpha = 0.45; ctx.fill(); ctx.globalAlpha = 1; ctx.lineWidth = 3; ctx.stroke();
+}
+function drawLoosSign(B) { // a board on the pavement: free resprays, with ornament (closed once you have had yours)
+  const z = 1.1 * PXM / HC, k = 1 + z, [x, y] = proj(B.x, B.y, z);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(B.x - 6, B.y + 1, 14, 5);
+  ctx.fillStyle = tint('#26262a'); ctx.fillRect(x - 8 * k, y - 3.6 * k, 16 * k, 7.2 * k);
+  ctx.strokeStyle = tint('#c9a227'); ctx.lineWidth = 0.7; ctx.strokeRect(x - 7.3 * k, y - 2.9 * k, 14.6 * k, 5.8 * k);
+  ctx.fillStyle = EGG.loosDone ? tint('#888888') : tint('#ffd54a'); ctx.textAlign = 'center'; ctx.font = `bold ${2.6 * k}px sans-serif`;
+  ctx.fillText(EGG.loosDone ? 'ZAVŘENO' : 'LAK ZDARMA', x, y + 0.9 * k); ctx.textAlign = 'left';
+}
+function drawPostBox(B) { // an orange Czech post box on its post, with the postcard on top until you post it
+  const z = 1.3 * PXM / HC, k = (1 + z) * 2.2, [x, y] = proj(B.x, B.y, z); // (a touch larger than life, to be seen)
+  ctx.strokeStyle = tint('#55585c'); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(B.x, B.y); ctx.lineTo(x, y); ctx.stroke();
+  ctx.fillStyle = tint('#f08c00'); ctx.fillRect(x - 2.4 * k, y - 1.7 * k, 4.8 * k, 3.4 * k);
+  ctx.fillStyle = tint('#b86400'); ctx.fillRect(x - 2.4 * k, y - 1.7 * k, 4.8 * k, 0.8 * k);
+  if (!EGG.posted) { ctx.save(); ctx.translate(x + 0.4 * k, y + 0.3 * k); ctx.rotate(0.3); ctx.fillStyle = tint('#f7f1e2'); ctx.fillRect(-1.7 * k, -1.1 * k, 3.4 * k, 2.2 * k); ctx.fillStyle = tint('#c0392b'); ctx.fillRect(0.7 * k, -0.9 * k, 0.8 * k, 0.8 * k); ctx.restore(); }
+}
+function drawMachSign(M) { // a brown sign for a sight, on two posts: Chrlice, the birthplace of Ernst Mach
+  const z = 2.2 * PXM / HC, k = 1 + z, [x, y] = proj(M.x, M.y, z);
+  ctx.strokeStyle = tint('#6b6f74'); ctx.lineWidth = 1.2; ctx.beginPath(); for (const s of [-6, 6]) { ctx.moveTo(M.x + s, M.y); ctx.lineTo(x + s * k, y); } ctx.stroke();
+  ctx.fillStyle = tint('#6e4a2a'); ctx.fillRect(x - 11 * k, y - 4.5 * k, 22 * k, 9 * k);
+  ctx.strokeStyle = tint('#f0e6d6'); ctx.lineWidth = 0.6; ctx.strokeRect(x - 10.2 * k, y - 3.7 * k, 20.4 * k, 7.4 * k);
+  ctx.fillStyle = tint('#f0e6d6'); ctx.textAlign = 'center'; ctx.font = `bold ${3 * k}px sans-serif`; ctx.fillText('CHRLICE', x, y - 0.2 * k);
+  ctx.font = `${2 * k}px sans-serif`; ctx.fillText('rodiště E. Macha', x, y + 2.6 * k); ctx.textAlign = 'left';
+}
+function drawOrn(l, w) { // ornament: a darker gold scroll down both sides and a curl on the bonnet
+  ctx.strokeStyle = '#7a5a10'; ctx.lineWidth = 0.9; ctx.beginPath();
+  for (const s of [-1, 1]) { const v = s * (w / 2 - 2.2); ctx.moveTo(-l / 2 + 3, v); for (let u = -l / 2 + 3, n = 0; u < l / 2 - 6; u += 4, n++) ctx.quadraticCurveTo(u + 2, v + s * (n & 1 ? 1.8 : -1.8), u + 4, v); }
+  ctx.stroke();
+  ctx.beginPath(); ctx.arc(l * 0.3, 0, 2.2, 0.6, TAU - 0.6); ctx.moveTo(l * 0.3 + 1, 0); ctx.arc(l * 0.3, 0, 1, 0, Math.PI * 1.5); ctx.stroke();
+}
+// (in drawLighting: the light the eggs cut out of the night, and the coloured light they add on top)
+function eggLightCut(l, vis) {
+  if (!EA) return;
+  for (const b of EGG.fw) if (vis(b.x, b.y, 200)) { const R = b.r * 1.7; l.globalAlpha = clamp((1 - b.t / b.T) * 1.4, 0, 1) * 0.85; l.drawImage(glowSpr, b.x - R, b.y - R, R * 2, R * 2); }
+  if (EA.edison && EGG.bulbs > 0.02 && vis(EA.edison.x, EA.edison.y, 60)) { l.globalAlpha = EGG.bulbs; l.drawImage(glowSpr, EA.edison.x - 50, EA.edison.y - 50, 100, 100); }
+  const ml = mahenLit(); if (ml > 0 && EA.mahen && vis(EA.mahen.x, EA.mahen.y, 160)) { l.globalAlpha = ml * 0.75; l.drawImage(glowSpr, EA.mahen.x - 140, EA.mahen.y - 120, 280, 240); }
+  l.globalAlpha = 1;
+  for (const o of campLights()) if (vis(o.x, o.y, o.r)) l.drawImage(glowSpr, o.x - o.r, o.y - o.r, o.r * 2, o.r * 2); // (the story's)
+}
+function eggLightAdd(vis) {
+  if (!EA) return;
+  for (const b of EGG.fw) if (vis(b.x, b.y, 200)) drawBurst(b);
+}
+function drawBurst(b) { // a shell bursting: a flash, then a ring of stars flying out (the big ones with a second ring inside), drooping and fading, with short trails
+  const u = b.t / b.T, e = 1 - (1 - Math.min(1, b.t / 0.6)) ** 3, fall = 16 * b.t * b.t, f = (1 - u) ** 1.4;
+  if (b.t < 0.14) { ctx.globalAlpha = 0.7 * (1 - b.t / 0.14); ctx.fillStyle = '#fffbe8'; ctx.beginPath(); ctx.arc(b.x, b.y, 40, 0, TAU); ctx.fill(); }
+  ctx.lineWidth = 1.4;
+  for (const [rk, nk, inner] of b.ring2 ? [[1, 1, false], [0.5, 0.55, true]] : [[1, 1, false]]) {
+    const R = b.r * e * rk, n = Math.round(b.n * nk), col = inner ? b.c2 || '#fff4d0' : b.c;
+    for (let i = 0; i < n; i++) {
+      const a = b.s + (i + (inner ? 0.5 : 0)) * TAU / n, ca = Math.cos(a), sa = Math.sin(a), x = b.x + ca * R, y = b.y + sa * R + fall, tw = (i * 7 + Math.floor(b.t * 18)) % 5 === 0 && u > 0.5 ? 0.35 : 1;
+      ctx.fillStyle = ctx.strokeStyle = !inner && b.c2 && i & 1 ? b.c2 : col;
+      ctx.globalAlpha = f * 0.45; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(b.x + ca * R * 0.84, b.y + sa * R * 0.84 + fall * 0.8); ctx.stroke();
+      ctx.globalAlpha = f * tw * 0.3; ctx.beginPath(); ctx.arc(x, y, 5.5, 0, TAU); ctx.fill();
+      ctx.globalAlpha = f * tw; ctx.beginPath(); ctx.arc(x, y, 2.5, 0, TAU); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
 function drawCow(w) {
   ctx.save(); ctx.translate(w.x, w.y); ctx.rotate(w.a);
   ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(2, 2, 9, 5, 0, 0, TAU); ctx.fill();
@@ -11420,12 +12041,16 @@ function drawDuck(x, y) { // a yellow rubber duck
   ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x + 4.2, y - 3.4, 0.7, 0, TAU); ctx.fill();
 }
 function drawEggsHUD() {
+  if (EGG.flash > 0) { ctx.fillStyle = `rgba(245,236,255,${Math.min(1, EGG.flash)})`; ctx.fillRect(0, 0, W, H); } // (the ultraviolet catastrophe's flash)
   if (EGG.atClock && EA && EA.qclock && state === 'play') { // ÚPT's clock: the exact time, and what is coming up in Brno
     const w = Math.min(390, W - 24), x = W - w - 12, y = 172, hh = dayT * 24, p2 = n => String(n).padStart(2, '0');
     const fmt = E => `${p2(Math.floor(E))}:${p2(Math.round((E % 1) * 60))}`;
     const ev = [[11, 'the orloj\'s marble, Petrov\'s noon'], [0, 'the dragon comes out'], [5, 'Birk\'s wheel waits']];
     if (matchDay()) ev.push([17.5, 'Kometa\'s face-off']);
     if (weekday() === 5) ev.push([12, 'students head home']);
+    ev.push([MAHEN_ON, 'the Mahen Theatre lights up']);
+    if (weekday() === 6) ev.push([FW_ON, 'Ignis Brunensis: fireworks']);
+    if (WX.nextK !== WX.to) ev.push([(hh + WX.next / 60) % 24, `the forecast: ${WX.nextK === 'clear' ? 'clearing up' : WX.nextK}`]);
     const up = ev.map(([E, t]) => ({ E, t, d: ((E - hh) % 24 + 24) % 24 })).sort((a, b) => a.d - b.d).slice(0, 3);
     const body = wrapLines('Strontium atoms held in a lattice of laser light tick 429,228,004,229,873 times a second. A clock like this would drift by less than a second over the age of the universe.', w - 24, '12px system-ui, sans-serif');
     const lib = wrapLines('Game liberty: no such clock stands at the gate. The Institute of Scientific Instruments works on lasers, electron microscopes and precise measurement.', w - 24, 'italic 11px system-ui, sans-serif');
@@ -11560,11 +12185,12 @@ function hostSnap() {
   const TR = trams.filter(inV).map(t => [t.id, t.R.i, Math.round(t.s), t.prev ? t.prev.i : -1, TRAM_MODELS.indexOf(t.m), (t.doors > 0.3 ? 1 : 0) | (t.dead ? 2 : 0), Math.round(t.v)]);
   const tg = missionTarget(), ml = missionLine(), gq = g.Q;
   const pk = pickups.map(u => u.cd > 0 ? 0 : 1).join('');
-  const snap = { t: 's', time: +time.toFixed(2), dayT: +dayT.toFixed(5), dn: dayN, heat: +heat.toFixed(2), bel: [belief.x | 0, belief.y | 0, belief.sig | 0, belief.seen ? 1 : 0],
+  const snap = { t: 's', time: +time.toFixed(2), dayT: +dayT.toFixed(5), dn: dayN, wx: wxPack(), heat: +heat.toFixed(2), bel: [belief.x | 0, belief.y | 0, belief.sig | 0, belief.seen ? 1 : 0],
     fl: flight.on ? [flight.x | 0, +flight.alt.toFixed(2)] : 0, TR, he: heli ? [heli.x | 0, heli.y | 0, +heli.angle.toFixed(2), +heli.rot.toFixed(2), heli.dead ? 1 : 0, +(heli.fall || 0).toFixed(2), heli.army ? 1 : 0] : 0, C, P, B, hq: HQ,
     me: [gp.x | 0, gp.y | 0, +gp.angle.toFixed(2), gp.hp | 0, gp.car ? nid(gp.car) : 0, gp.weapons, gp.weapon, gp.cash | 0, gp.lives, gp.mult, +gp.down.toFixed(2), gp.downKind, gp.moving ? 1 : 0, +gp.anim.toFixed(1), gq.psi, gq.ent, gq.link ? nid(gq.link) : 0, gq.branches ? gq.branches.map(b => [b.x | 0, b.y | 0, +b.angle.toFixed(2), b.tint, +(b.amp || 0).toFixed(2)]) : 0, +(gp.tunT ?? time).toFixed(1), +(gp.punchAt ?? -9).toFixed(2), gp.punchSide || 1],
     ho: [player.x | 0, player.y | 0, +player.angle.toFixed(2), player.car ? nid(player.car) : 0, player.hidden || (player.down && player.downKind === 'busted') ? 1 : 0, player.moving ? 1 : 0, +player.anim.toFixed(1), player.down && player.downKind === 'wasted' ? 1 : 0, +(player.punchAt ?? -9).toFixed(2), player.punchSide || 1],
-    mt: tg ? [tg.x | 0, tg.y | 0, mission ? 1 : 0] : 0, ml, dr: drops.map(u => [u.id, u.x | 0, u.y | 0, DROP_K.indexOf(u.k), +u.age.toFixed(1)]), rg: ringing ? BOOTHS.indexOf(ringing) : -1, ev: NET.ev };
+    mt: tg ? [tg.x | 0, tg.y | 0, mission ? 1 : 0] : 0, ml, dr: drops.map(u => [u.id, u.x | 0, u.y | 0, DROP_K.indexOf(u.k), +u.age.toFixed(1)]), rg: ringing ? BOOTHS.indexOf(ringing) : -1, ev: NET.ev,
+    cr: CAMP.radio[0] ? [CAMP.radio[0].who, CAMP.radio[0].text] : 0, sc: SCN ? [SCN.L[SCN.i][0], SCN.L[SCN.i][1].slice(0, Math.floor(SCN.t * 60)), SCN.i === 0 ? SCN.title : null] : 0 };
   if (pk !== NET.pkSent) { snap.pk = pk; NET.pkSent = pk; }
   NET.ev = [];
   const ch = NET.conn.dataChannel; if (ch && ch.bufferedAmount > 200000) { NET.shown = was; NET.ev = snap.ev; return; } // a slow link: skip this one rather than queue up lag
@@ -11601,7 +12227,7 @@ function onGuestData(d) {
   if (d.t === 's') NET.queued.push(d);
 }
 function guestApply(d) {
-  time = d.time; dayT = d.dayT; heat = d.heat; if (d.dn !== undefined) dayN = d.dn;
+  time = d.time; dayT = d.dayT; heat = d.heat; NET.cr = d.cr || null; NET.sc = d.sc || null; if (d.dn !== undefined) dayN = d.dn; if (d.wx) wxUnpack(d.wx);
   [belief.x, belief.y, belief.sig] = d.bel; belief.seen = !!d.bel[3];
   flight.on = !!d.fl; if (d.fl) { flight.x = d.fl[0]; flight.alt = d.fl[1]; }
   if (d.he) { heli = heli || { vx: 0, vy: 0, hp: 1, snd: 0 }; [heli.x, heli.y, heli.angle, heli.rot] = d.he; heli.dead = !!d.he[4]; heli.fall = d.he[5]; heli.army = !!d.he[6]; } else heli = null;
@@ -11791,6 +12417,7 @@ function newGame() {
   Object.assign(Q, { psi: 1, ent: 2, link: null, linkT: 0, decoy: null, decoyT: 0, branches: null, note: null, slow: false, bb: null });
   lab = null; labCars = []; labFlags = {}; arcProg = DISTRICTS.map(() => 0); dayT = 17 / 24; aodPaid.clear(); aodSolved.clear(); dayN = 0; qcWins = 0; qcDay = -1; qcCool = 0; chshDay = -1;
   heat = 0; belief.sig = 0; mission = null; ringing = null; ringCd = 3; won = false; curDistrict = -1; msgs = []; overlay = null;
+  wxReset(); GAR.length = 0; campReset();
   updateCamera(0, true);
   fillSpots(true);
   for (let i = 0; i < 30; i++) manageSpawns(1);
@@ -11798,6 +12425,615 @@ function newGame() {
   msg('X superposes your car. T entangles you with another car. H for help.', 6);
   if (HANTEC_ON && !HANTEC_SET && !lab) msg('Your browser speaks Czech, so Brno speaks Hantec: type "hantec" to switch it off.', 7);
   state = 'play'; helpPage = 0; DBG.used = DBG.god; achMap();
+}
+// ============================================================ the campaign: Decoherence (inner Brno only)
+// Eight chapters in three acts. Bára Kubitová, a PhD student at FIT BUT who proves quantum circuits correct, was sent
+// one by the Measurement Bureau (the ★6 quantum police) that measures every qubit in Brno, again and again, for ever:
+// Project Zeno. A watched pot never boils, and a city watched all the time can't change. She won't sign it off.
+// Each chapter waits at its ψ marker (from an hour of game time after the last one ended), opens with a scene (the game
+// paused: talk cards with drawn portraits), and runs as a job of its own (mission.type 'camp', while the payphones
+// wait). If it fails you try again from the marker. Bára talks on the radio meanwhile (a card under the minimap).
+// The progress is kept with the saved game, though not a chapter in progress. In co-op it is the host's story.
+const CAMP = { ch: 0, at: 0, fails: 0, done: false, blindTo: -1, told: -1, radio: [], ally: null, hint: '' };
+const campNow = () => dayN * 24 + dayT * 24; // (game hours since the game began)
+const campOn = () => !!(BRNO && EA && ATOM_LAB) && !lab && NET.role !== 'guest';
+const campBlind = () => campNow() < CAMP.blindTo; // (after Petrov rang noon at eleven, the Bureau's detectors have lost lock)
+const campM = k => mission && mission.type === 'camp' && (!k || CHAP[mission.ch].key === k) ? mission : null;
+function campReset() { Object.assign(CAMP, { ch: 0, at: 0, fails: 0, done: false, blindTo: -1, told: -1, radio: [], ally: null, hint: '' }); SCN = null; }
+// where the story happens (worked out once, on first use)
+let CPL = null;
+function campPlaces() {
+  if (CPL) return CPL;
+  const stand = (x, y) => tileCenter(findTileNear(Math.floor(x / T), Math.floor(y / T), WALK));
+  const open = (x, y) => { const tx = Math.floor(x / T), ty = Math.floor(y / T); for (let r = 0; r < 40; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; const p = { x: (tx + dx + 0.5) * T, y: (ty + dy + 0.5) * T }; if (!solidT(tile(tx + dx, ty + dy)) && !circleSolid(p.x, p.y, 10) && openGround(p.x, p.y)) return p; } return stand(x, y); }; // (any open ground: the hill's grass)
+  const mid = s => s && { x: (s.x0 + s.x1 + 1) / 2 * T, y: (s.y0 + s.y1 + 1) / 2 * T };
+  const z = ATOM_LAB.ent, [ax, ay] = geo(49.17586, 16.60562);
+  const gate = TRAM_STOPS.find(s => s.name === 'Výstaviště - hlavní vstup'), pa = mid(siteRect('Pavilon A')), pz = mid(siteRect('Pavilon Z'));
+  const obs = EA.kravi;
+  CPL = { base: { x: (z.x0 + z.x1) / 2, y: (z.y0 + z.y1) / 2 }, az: stand(ax * T, ay * T), petrov: stand(EA.petrov.x, EA.petrov.y + 2 * T),
+    gate: gate ? stand(gate.x, gate.y) : geoWalk(49.1889, 16.5856), pa, pz, obs, obsIn: open(obs.x, obs.y) };
+  return CPL;
+}
+// ---- who is who: name, what they are, their colour, and a portrait (drawn, bust-length, facing you)
+const CAST = {
+  bara: { name: 'Bára Kubitová', role: 'PhD student · FIT BUT', col: '#00a9e0' },
+  mer: { name: 'Director Měřička', role: 'the Measurement Bureau', col: '#c9d1da' },
+  you: { name: 'You', role: '', col: '#ffe14d' },
+  coll: { name: 'The Collapser', role: 'P.L.A.N.C.K.', col: '#7ff6ff' },
+  spooky: { name: 'Agent Spooky', role: 'P.L.A.N.C.K.', col: '#e4e8ee' },
+  bigbang: { name: 'Big Bang', role: 'P.L.A.N.C.K.', col: '#ffcc33' },
+  tunneler: { name: 'The Tunneler', role: 'P.L.A.N.C.K.', col: '#e0b84a' },
+  chair: { name: 'The committee', role: 'FIT BUT · room D105', col: '#d8c38a' },
+};
+function drawFace(k, x, y, s, radio) { // (x, y the box's top left, s its side)
+  ctx.save(); ctx.beginPath(); ctx.rect(x, y, s, s); ctx.clip();
+  const bg = ctx.createLinearGradient(x, y, x, y + s); bg.addColorStop(0, radio ? '#16202c' : '#1d2a3a'); bg.addColorStop(1, '#0b1018'); ctx.fillStyle = bg; ctx.fillRect(x, y, s, s);
+  ctx.translate(x + s / 2, y + s * 0.56); ctx.scale(s / 100, s / 100);
+  const E = (ex, ey, rx, ry, c) => { ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(ex, ey, rx, ry, 0, 0, TAU); ctx.fill(); };
+  const body = (c, w = 44) => { ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(-w, 50); ctx.quadraticCurveTo(-w, 16, -14, 12); ctx.lineTo(14, 12); ctx.quadraticCurveTo(w, 16, w, 50); ctx.closePath(); ctx.fill(); };
+  const eyes = (c = '#1b1b1b', dy = -8) => { E(-9, dy, 2.6, 2.2, c); E(9, dy, 2.6, 2.2, c); };
+  const mouth = (w, dy = 8, smile = 2) => { ctx.strokeStyle = 'rgba(70,30,30,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-w, dy); ctx.quadraticCurveTo(0, dy + smile, w, dy); ctx.stroke(); };
+  if (k === 'bara') {
+    E(0, -32, 11, 9, '#3b2414'); // (the bun)
+    body('#00a9e0'); ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('FIT', 0, 38);
+    ctx.fillStyle = '#e8b98a'; ctx.fillRect(-6, 4, 12, 10); E(0, -6, 18, 21, '#f1c27d');
+    ctx.fillStyle = '#3b2414'; ctx.beginPath(); ctx.ellipse(0, -18, 19, 12, 0, Math.PI, TAU); ctx.fill(); ctx.fillRect(-19, -18, 5, 20); ctx.fillRect(14, -18, 5, 16);
+    eyes(); ctx.strokeStyle = '#222'; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.arc(-9, -8, 6, 0, TAU); ctx.moveTo(15, -8); ctx.arc(9, -8, 6, 0, TAU); ctx.moveTo(-3, -8); ctx.lineTo(3, -8); ctx.stroke(); // (round glasses)
+    mouth(6, 7, 3);
+  } else if (k === 'mer') {
+    body('#15171c', 46); ctx.fillStyle = '#f4f4f4'; ctx.beginPath(); ctx.moveTo(-10, 12); ctx.lineTo(0, 34); ctx.lineTo(10, 12); ctx.fill(); ctx.fillStyle = '#7a1420'; ctx.fillRect(-2, 14, 4, 22);
+    ctx.fillStyle = '#d9a982'; ctx.fillRect(-7, 2, 14, 12); E(0, -8, 17, 22, '#e6b893');
+    ctx.fillStyle = '#9aa1a8'; ctx.beginPath(); ctx.ellipse(-2, -24, 18, 9, -0.2, Math.PI, TAU); ctx.fill(); ctx.fillRect(-17, -26, 4, 12); ctx.fillRect(13, -26, 4, 10);
+    eyes('#1b1b1b', -10); ctx.strokeStyle = '#555'; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(-15, -15); ctx.lineTo(-4, -13); ctx.moveTo(4, -13); ctx.lineTo(15, -15); ctx.stroke();
+    const g = 0.5 + 0.5 * Math.sin(time * 3); ctx.strokeStyle = '#c7cdd4'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(9, -10, 6.5, 0, TAU); ctx.stroke(); // (a monocle: a detector lens)
+    ctx.fillStyle = `rgba(255,70,70,${0.35 + 0.4 * g})`; ctx.beginPath(); ctx.arc(9, -10, 5, 0, TAU); ctx.fill();
+    mouth(7, 9, -1.5);
+  } else if (k === 'coll') {
+    body('#2c3e50', 48); ctx.fillStyle = '#7ff6ff'; ctx.fillRect(-26, 22, 52, 4);
+    E(0, -8, 22, 25, '#38495a'); ctx.fillStyle = '#7ff6ff'; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(time * 4); ctx.fillRect(-18, -14, 36, 9); ctx.globalAlpha = 1;
+    ctx.fillStyle = '#22303d'; ctx.fillRect(-12, 6, 24, 8);
+  } else if (k === 'spooky') {
+    body('#16181c', 40); ctx.fillStyle = '#3cf0ff'; ctx.fillRect(-3, 14, 6, 36);
+    ctx.fillStyle = '#e0b48a'; ctx.fillRect(-6, 4, 12, 10); E(0, -6, 17, 21, '#f0c8a0');
+    ctx.fillStyle = '#eef1f5'; ctx.beginPath(); ctx.ellipse(0, -14, 21, 16, 0, Math.PI * 0.95, TAU * 1.03); ctx.fill(); ctx.fillRect(-21, -14, 6, 24); ctx.fillRect(15, -14, 6, 24);
+    ctx.fillStyle = '#0a0a0a'; ctx.fillRect(-16, -12, 13, 7); ctx.fillRect(3, -12, 13, 7); ctx.fillRect(-3, -10, 6, 2); mouth(5, 8, 0);
+  } else if (k === 'bigbang') {
+    body('#e0a800', 54); ctx.fillStyle = '#b03a2e'; ctx.beginPath(); ctx.arc(0, 32, 9, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#c98e64'; ctx.fillRect(-10, 2, 20, 12); E(0, -8, 24, 24, '#d9a070');
+    eyes('#1b1b1b', -10); mouth(11, 8, 5); ctx.fillStyle = '#fff'; ctx.fillRect(-8, 8, 16, 3);
+  } else if (k === 'tunneler') {
+    body('#6d5a3e', 44); E(0, -6, 18, 21, '#d7a77c');
+    ctx.fillStyle = '#e0b84a'; ctx.beginPath(); ctx.ellipse(0, -18, 22, 13, 0, Math.PI, TAU); ctx.fill(); ctx.fillRect(-24, -19, 48, 4);
+    ctx.fillStyle = '#fff6b0'; ctx.beginPath(); ctx.arc(0, -24, 4, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(-16, -11, 32, 8); ctx.fillStyle = '#8fd3ff'; ctx.fillRect(-13, -10, 10, 6); ctx.fillRect(3, -10, 10, 6); mouth(6, 9, 1);
+  } else if (k === 'chair') {
+    body('#5a4a3a', 44); ctx.fillStyle = '#efe6d6'; ctx.beginPath(); ctx.moveTo(-9, 12); ctx.lineTo(0, 26); ctx.lineTo(9, 12); ctx.fill();
+    E(0, -6, 18, 21, '#e8bf98'); ctx.fillStyle = '#dcdcdc'; ctx.beginPath(); ctx.ellipse(0, 8, 15, 12, 0, 0, Math.PI); ctx.fill(); // (a white beard)
+    ctx.fillStyle = '#d0d0d0'; ctx.beginPath(); ctx.ellipse(-14, -14, 6, 9, 0, 0, TAU); ctx.ellipse(14, -14, 6, 9, 0, 0, TAU); ctx.fill();
+    eyes(); ctx.strokeStyle = '#333'; ctx.lineWidth = 1.6; ctx.strokeRect(-15, -12, 11, 8); ctx.strokeRect(4, -12, 11, 8);
+  } else { // you: a cap, the collar up
+    body('#3a3f47', 46); ctx.fillStyle = '#c68642'; ctx.fillRect(-6, 4, 12, 10); E(0, -6, 17, 21, '#d29a63');
+    ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.ellipse(0, -18, 19, 11, 0, Math.PI, TAU); ctx.fill(); ctx.fillRect(-2, -20, 26, 5);
+    eyes(); mouth(5, 8, 1);
+  }
+  ctx.restore();
+  if (radio) { ctx.fillStyle = 'rgba(120,200,255,.08)'; for (let i = 0; i < s; i += 3) ctx.fillRect(x, y + i, s, 1); } // (scan lines: it's a call)
+  ctx.strokeStyle = (CAST[k] || CAST.you).col; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, s - 2, s - 2);
+}
+// ---- the scenes: talk cards, the game paused (Enter for the next line, Esc skips the rest)
+let SCN = null;
+const MODAL = ['aod', 'qc', 'chsh', 'bulb', 'garage', 'scene'];
+function sceneOpen(title, lines, then) {
+  SCN = { title, L: lines.map(l => typeof l === 'function' ? l() : l).filter(Boolean), i: 0, t: 0, then };
+  if (!SCN.L.length) { const f = then; SCN = null; if (f) f(); return; }
+  state = 'scene'; touchEl.style.visibility = 'hidden'; sfx.ring();
+}
+function sceneEnd() { const f = SCN && SCN.then; SCN = null; state = 'play'; touchEl.style.visibility = ''; if (f) f(); }
+function updateScene(dt) {
+  const S = SCN; S.t += dt;
+  const k = S.skip, skip = hit('Tap') && tapAt && k && tapAt.x > k.x && tapAt.x < k.x + k.w && tapAt.y > k.y && tapAt.y < k.y + k.h;
+  if (hit('Escape') || skip) { sceneEnd(); return; }
+  if (hit('Enter', 'Space', 'NumpadEnter', 'Tap', 'KeyE', 'KeyF') && S.t > 0.15) {
+    if (S.t * 60 < S.L[S.i][1].length) S.t = 99; // (the rest of the line at once, then the next)
+    else { S.i++; S.t = 0; if (S.i >= S.L.length) sceneEnd(); else if (S.L[S.i][0] !== S.L[S.i - 1][0]) sfx.cast(); }
+  }
+}
+function drawTalk(who, text, title, n, radio) { // (one card: shared by the scenes, and by a co-op guest watching one)
+  const small = W < 600, pw = Math.min(W - 16, 820), ph = small ? 150 : 172, x0 = (W - pw) / 2, y0 = H - ph - (small ? 12 : 26);
+  const c = CAST[who] || CAST.you, fs = small ? 13 : 16, s = ph - 24, left = who !== 'bara' && who !== 'you';
+  ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, W, H);
+  if (title) { const t0 = small ? y0 - 84 : 56, t1 = small ? y0 - 48 : 98; txt(title[0], W / 2, t0, small ? 13 : 15, '#b388ff', 'center'); txt(title[1], W / 2, t1, Math.min(small ? 24 : 40, (W - 30) / title[1].length * 1.6), '#fff', 'center', true); } // (on a phone, just above the card, clear of the HUD)
+  ctx.fillStyle = '#0a0f18'; rrect(x0, y0, pw, ph, 10); ctx.strokeStyle = c.col; ctx.lineWidth = 2; ctx.strokeRect(x0 + 1, y0 + 1, pw - 2, ph - 2);
+  const fx = left ? x0 + pw - s - 12 : x0 + 12, tx = left ? x0 + 16 : x0 + s + 26, tw = pw - s - 44;
+  drawFace(who, fx, y0 + 12, s, radio || /^\(radio\)/.test(text));
+  const ns = small ? 14 : 17; txt(c.name, tx, y0 + 30, ns, c.col, 'left', true); if (c.role) { ctx.font = `${ns}px Bungee, Impact, sans-serif`; const w = ctx.measureText(c.name).width; if (w + 140 < tw) txt(c.role, tx + w + 12, y0 + 29, small ? 10 : 12, '#8aa0b8'); }
+  const L = wrapLines(text.replace(/^\(radio\) /, ''), tw, `bold ${fs}px ui-monospace, Menlo, Consolas, monospace`);
+  L.slice(0, 5).forEach((l, i) => txt(l, tx, y0 + 58 + i * (fs + 6), fs, '#f2f2f2'));
+  if (n) txt(n, left ? x0 + pw - s - 26 : x0 + pw - 14, y0 + ph - 10, 11, '#8aa0b8', 'right'); // (clear of the portrait)
+  return { x: x0, y: y0, w: pw, h: ph };
+}
+function drawScene() {
+  const S = SCN; if (!S) return;
+  const [who, text] = S.L[S.i], shown = text.slice(0, Math.floor(S.t * 60));
+  const r = drawTalk(who, shown, S.i === 0 ? S.title : null, `${S.i + 1}/${S.L.length} · ${touchOn() ? 'tap' : 'Enter'} ▸${touchOn() ? '' : ' · Esc skips'}`);
+  if (touchOn()) { S.skip = { x: r.x + r.w - 84, y: r.y - 34, w: 84, h: 28 }; ctx.fillStyle = 'rgba(10,15,24,.9)'; rrect(S.skip.x, S.skip.y, S.skip.w, S.skip.h, 6); txt('SKIP ▸▸', S.skip.x + 42, S.skip.y + 19, 12, '#d0d8e2', 'center'); }
+}
+// ---- Bára (and whoever is listening in) on the radio while you play: a card under the minimap, one line at a time
+function campSay(who, text, t) { CAMP.radio.push({ who, text, t: t || clamp(2.5 + text.length / 20, 4, 9), age: 0 }); while (CAMP.radio.length > 3) CAMP.radio.splice(1, 1); }
+function updateRadio(dt) { const r = CAMP.radio[0]; if (!r) return; if (!r.age) sfx.cast(); r.age += dt; if (r.age >= r.t) CAMP.radio.shift(); }
+function drawRadio(r) {
+  if (!r) return;
+  const small = W < 600, w = Math.min(small ? W - (touchOn() ? 130 : 24) : 360, W - 24), mm = (showMap === 1 ? 12 + MMV * (small ? 1.1 : 1.6) + 46 : 12) + (achToasts.length ? 58 : 0), x = 12, y = Math.min(mm, H - 330);
+  const L = wrapLines(r.text.replace(/^\(radio\) /, ''), w - 64, `bold ${small ? 11 : 12}px ui-monospace, Menlo, Consolas, monospace`).slice(0, 4), h = Math.max(56, 26 + L.length * 15);
+  ctx.globalAlpha = clamp(Math.min(r.age * 4, (r.t - r.age) * 2), 0, 1);
+  ctx.fillStyle = 'rgba(8,12,20,.85)'; rrect(x, y, w, h, 6); drawFace(r.who, x + 6, y + 6, 44, true);
+  const c = CAST[r.who] || CAST.you; txt(c.name, x + 58, y + 18, 12, c.col, 'left', true);
+  L.forEach((l, i) => txt(l, x + 58, y + 34 + i * 15, small ? 11 : 12, '#eaeaea'));
+  ctx.globalAlpha = 1;
+}
+// ---- the cast on the ground: Bára, the Bureau's men, its vans
+function campBara(x, y) { const p = makePed(x, y); Object.assign(p, { vip: true, camp: 'bara', shirt: '#00a9e0', pants: '#2c3e50', hair: '#3b2414', skin: '#f1c27d', hp: 60 }); return p; }
+function campAgent(x, y) { const p = makePed(x, y, { cop: true, swat: true }); Object.assign(p, { agent: true, shirt: '#15171c', pants: '#101114' }); return p; }
+function campVan(x, y, a, driver) { const c = makeCar('bureau', x, y, a, driver); Object.assign(c, { camp: true, mission: true }); if (driver === 'police') { c.chase = true; c.ai.cruise = 150; } return c; }
+function campGun(k, n) { player.weapons[k] = (player.weapons[k] || 0) + n; player.weapon = k; }
+const inRegion = (R, o) => R && R.region.has(Math.floor(o.y / T) * MW + Math.floor(o.x / T));
+// a sealed courtyard near P: the biggest within reach (Špilberk's), or the nearest one
+function campSealed(P, min, max, big) {
+  const all = findSealed(P, min, max, true) || [];
+  if (!all.length) return null;
+  return all.reduce((b, f) => big ? (f.region.size > b.region.size ? f : b) : (d2(f.x, f.y, P.x, P.y) < d2(b.x, b.y, P.x, P.y) ? f : b));
+}
+// spots inside a region: its tiles by distance from a point, with room round them
+function regionSpots(R, from, room, n, apart, minD = 0) {
+  const ks = [...R.region].map(k => ({ x: (k % MW + 0.5) * T, y: (((k / MW) | 0) + 0.5) * T })).filter(p => d2(p.x, p.y, from.x, from.y) >= minD * minD && !circleSolid(p.x, p.y, room));
+  ks.sort((a, b) => d2(a.x, a.y, from.x, from.y) - d2(b.x, b.y, from.x, from.y));
+  const out = []; for (const p of ks) { if (out.every(q => d2(q.x, q.y, p.x, p.y) > apart * apart)) out.push(p); if (out.length >= n) break; }
+  return out;
+}
+// a way over open tiles (A to B, by breadth-first search), thinned to every few tiles: for the vans leaving the fair
+function tilePath(A, B, room = 18, maxN = 60000) { // (room: how far from any wall the way keeps, so that a van gets through)
+  const s = Math.floor(A.y / T) * MW + Math.floor(A.x / T), g = Math.floor(B.y / T) * MW + Math.floor(B.x / T), prev = new Map([[s, -1]]), q = [s];
+  const gi = g % MW, gj = (g / MW) | 0, ok = n => { const i = n % MW, j = (n / MW) | 0; return !solidT(map[n]) && (Math.abs(i - gi) + Math.abs(j - gj) < 3 || !circleSolid((i + 0.5) * T, (j + 0.5) * T, room)); };
+  for (let h = 0; h < q.length && q.length < maxN; h++) {
+    const k = q[h]; if (k === g) break;
+    const i = k % MW, j = (k / MW) | 0;
+    for (let d = 0; d < 4; d++) { const n = (j + DY[d]) * MW + i + DX[d]; if (!prev.has(n) && ok(n)) { prev.set(n, k); q.push(n); } }
+  }
+  if (!prev.has(g) && room > 8) return tilePath(A, B, room - 6, maxN);
+  if (!prev.has(g)) return null;
+  const P = []; for (let k = g; k !== -1; k = prev.get(k)) P.push({ x: (k % MW + 0.5) * T, y: (((k / MW) | 0) + 0.5) * T });
+  P.reverse(); return P.filter((p, i) => i % 2 === 0 || i === P.length - 1);
+}
+// the campaign's own drivers: the vans leaving the fair, along their way and then into the traffic
+function aiCamp(c, dt) {
+  if (c.goT > 0) { c.goT -= dt; applyControls(c, 0, 0, true, dt); return; }
+  const w = c.route && c.route[c.wi];
+  if (!w) { c.driver = 'ai'; c.ln = null; c.ai.cruise = 160; c.leaving = time; return; }
+  const nx = c.route[c.wi + 1]; // (on to the next point once at this one, or past it: nearer the one after)
+  if (d2(c.x, c.y, w.x, w.y) < 40 * 40 || (nx && d2(c.x, c.y, nx.x, nx.y) < d2(w.x, w.y, nx.x, nx.y))) c.wi++;
+  driveToward(c, w.x, w.y, 120, dt);
+}
+// the dome's detectors (the finale): shot, blown up or rammed
+function campHit(b) {
+  const m = campM('zeno'); if (!m || !m.dets) return false;
+  for (const D of m.dets) if (D.hp > 0 && d2(b.x, b.y, D.x, D.y) < 15 * 15) { campDetHurt(m, D, b.rocket ? 160 : b.dmg); for (let k = 0; k < 4; k++) addPart(b.x, b.y, rand(-60, 60), rand(-60, 60), 0.25, 1.5, '#bfe9ff'); return !b.rocket; }
+  return false;
+}
+function campBlast(x, y, r) { const m = campM('zeno'); if (m && m.dets) for (const D of m.dets) { const d = Math.hypot(D.x - x, D.y - y); if (D.hp > 0 && d < r + 16) campDetHurt(m, D, (1 - d / (r + 16)) * 320 + 30); } }
+function campDetHurt(m, D, n) {
+  D.hp -= n; D.hit = 0.15;
+  if (D.hp > 0) return;
+  D.hp = 0; const left = m.dets.filter(o => o.hp > 0).length;
+  for (let k = 0; k < 26; k++) addPart(D.x, D.y, rand(-120, 120), rand(-120, 120), rand(0.3, 0.8), rand(2, 5), pick(['#bfe9ff', '#ffffff', '#7ff6ff', '#ffd34d']), 10, true);
+  qburst(D.x, D.y, '#7ff6ff', 30); sfx.collapse(); shake = Math.max(shake, 0.6);
+  if (left) { msg(`Detector down: ${3 - left} of 3.`, 2.5); campSay('bara', left === 2 ? 'One down! The field\'s flickering. Two to go.' : 'Last one! Then it\'s over.'); }
+}
+// ---- the chapters
+const BASE = 'the Atom Array Lab';
+const toBase = (m, why) => { const c = campPlaces().base; return near2(c, 60) ? (belief.seen && heat >= 1 ? ((m.warn = m.warn || (msg('They\'re watching. Lose them before you go in.', 2.5), 1)), false) : true) : (m.warn = 0, false); };
+const near2 = (o, r) => { const P = pp(); return d2(o.x, o.y, P.x, P.y) < r * r; };
+const CHAP = [
+  { key: 'measure', act: 1, name: 'The Measurement Problem', pay: 5000, at: () => EA.fitDoor,
+    call: ['bara', 'Hello? Is this thing on? I need a driver at FIT BUT on Božetěchova, now. Please. Look for the ψ.'],
+    intro: [['bara', 'You! Have you got a car? No? Then get one. Quickly.'], ['you', 'Good evening to you too.'],
+      ['bara', 'Sorry. I\'m Bára, PhD student, third floor. I check quantum circuits: I prove they do what they claim to do.'],
+      ['bara', 'The Measurement Bureau sent me one to sign off. It measures every qubit in Brno, again and again, for ever. They call it Project Zeno.'],
+      ['bara', 'A watched pot never boils. Watch a whole city all the time, and nothing in it can change: no superposition, no tunnelling, no luck.'],
+      ['bara', 'I said no. Now there\'s a black van outside with a detector dish on its roof, and they want my laptop.'],
+      ['bara', 'Get me to the Atom Array Lab. Its atoms sit in superposition all day long: the one place in Brno they can\'t measure.']],
+    start(m) {
+      const d = EA.fitDoor; m.bara = campBara(d.x, d.y);
+      if (!cars.some(c => !c.driver && !c.dead && !c.tram && !CT[c.type].boat && d2(c.x, c.y, d.x, d.y) < 260 * 260)) { const p = nearestLanePt(d.x, d.y, null, 300); if (p) { const c = makeCar('compact', p.x, p.y, p.h, null); c.parked = true; } }
+      Q.psi = Math.max(Q.psi, 2); campSay('bara', 'Pull up right next to me. I\'m the one in the FIT hoodie.');
+    },
+    tick(m, dt) {
+      const pc = player.car;
+      if (m.stage === 0) {
+        if (m.bara.dead) { failMission('Bára is dead.'); return; }
+        if (pc && !pc.tram && !CT[pc.type].bike && !CT[pc.type].boat && near2(m.bara, 46) && Math.abs(pc.speed) < 40) {
+          peds.splice(peds.indexOf(m.bara), 1); Object.assign(m, { stage: 1, car: pc, carHp: pc.hp }); sfx.pickup();
+          const v = spawnTraffic('bureau', 'police'); if (v) { Object.assign(v, { camp: true, mission: true, chase: true }); v.ai.cruise = 150; m.van = v; }
+          heat = Math.max(heat, 2.2); addHeat(0);
+          campSay('bara', 'That\'s them. The dish on its roof is a detector: within forty metres it collapses any superposition. Use X, but keep your distance.', 8);
+        }
+      } else {
+        if (player.car !== m.car) { failMission('You left Bára behind.'); return; }
+        if (m.car.dead || m.car.hp < m.carHp - CT[m.car.type].hp * 0.55) { failMission('Bára jumped out of your wreck.'); return; }
+        if (m.van && m.van.dead && !m.vd) { m.vd = 1; campSay('bara', 'You wrecked a government van. They\'ll remember that.'); }
+        if (toBase(m)) campDone();
+      }
+    },
+    line: m => m.stage ? (belief.seen && heat >= 1 ? 'Lose the Bureau, then to the Atom Array Lab' : 'To the Atom Array Lab, unseen') : 'Pick up Bára at FIT (stop beside her)',
+    goal: m => m.stage ? campPlaces().base : m.bara,
+    end(m) { if (m.bara) { m.bara.vip = false; if (m.stage && !peds.includes(m.bara)) { const s = (m.car && sideSpot(m.car)) || pp(); m.bara.x = s.x; m.bara.y = s.y; peds.push(m.bara); } m.bara.gone = !!m.won; } if (m.van) { m.van.camp = false; m.van.mission = false; } },
+    outro: [['bara', 'We\'re in. Nobody measures anything in here unless they mean to.'],
+      ['bara', 'Project Zeno runs from Director Měřička\'s office. That circuit was only the test: the master copy has the whole plan, and the keys.'],
+      ['bara', 'They keep it in a Bureau van inside Špilberk, behind the castle walls. You can\'t drive in.'], ['you', 'So how do I get in?'],
+      ['bara', 'You entangle with something that\'s already inside. Come back in an hour: I need to work out where they\'ve parked it.']] },
+
+  { key: 'spooky', act: 1, name: 'Spooky Action', pay: 6000, at: () => EA.spil,
+    call: ['bara', 'Found it: the van is in Špilberk\'s courtyard. Meet me at the castle gate (ψ).'],
+    intro: [['bara', 'Špilberk. The Bureau\'s van stands in the castle courtyard, and the master copy is in a case beside it.'],
+      ['bara', 'Entanglement doesn\'t care about walls. Get within thirty metres of the van, outside the walls, and press T: you\'re entangled with it.'],
+      ['bara', 'Press T again and you measure the pair: you and the van swap places. You\'re in, and it\'s out.'],
+      ['bara', 'Grab the case, then swap back out the same way. That takes a second ε charge, so here are two.'], ['you', 'And the guards?'],
+      ['bara', 'Measured, every one of them. Don\'t let them measure you.']],
+    start(m) {
+      const R = campSealed(EA.spil, 0, 1300, true);
+      if (!R) { m.R = null; m.case = { x: EA.spil.x, y: EA.spil.y }; m.stage = 2; campSay('bara', 'Odd: the courtyard is open today. Just grab the case.'); return; }
+      const out = { x: R.ox, y: R.oy }, vs = regionSpots(R, out, 24, 1, 0)[0] || { x: R.x, y: R.y }, cs = regionSpots(R, vs, 8, 1, 0, 50)[0] || { x: R.x, y: R.y };
+      Object.assign(m, { R, out, case: cs, van: campVan(vs.x, vs.y, Math.atan2(out.y - vs.y, out.x - vs.x), null), guards: null });
+      Object.assign(m.van, { parked: true, qfar: true }); Q.ent = Math.max(Q.ent, 2);
+      campSay('bara', 'The marker is the closest you can get to the van from outside. Then T.');
+    },
+    tick(m, dt) {
+      const P0 = pp(), R = m.R, inside = inRegion(R, P0);
+      if (R && !m.guards && near2(m.van, 900)) m.guards = regionSpots(R, m.van, 6, 3, 50, 70).map(p => campAgent(p.x, p.y)); // (the guards turn up as you come near)
+      if (R && m.van && (m.van.dead || !cars.includes(m.van)) && m.stage < 4 && !m.vanTold) { m.vanTold = 1; campSay('bara', 'The van\'s gone! You\'ll have to tunnel: walk into the wall and hope.'); }
+      if (m.stage === 0 && Q.link === m.van) { m.stage = 1; campSay('bara', 'Entangled. Now T again: measure the pair.'); }
+      if (m.stage === 1 && !Q.link && !inside) { m.stage = 0; if (Q.ent <= 0) { Q.ent = 1; campSay('bara', 'The link decohered. Here, my last ε charge. Don\'t waste it.'); } }
+      if (m.stage <= 1 && inside) { m.stage = 2; heat = Math.max(heat, 2.2); addHeat(0); campSay('bara', 'You\'re in! The case, quick, before the guards get to you.'); }
+      if (m.stage === 2 && near2(m.case, 24)) { m.stage = 3; sfx.pickup(); if (Q.ent <= 0) Q.ent = 1; campSay('bara', 'Got it! Out the same way: entangle with the van outside the wall (T), then T again.', 7); }
+      if (m.stage === 3 && !inside && openGround(P0.x, P0.y)) { m.stage = 4; campSay('bara', 'You\'re out, with the copy! Lose whoever saw you, and bring it to the lab.'); }
+      if (m.stage === 4 && toBase(m)) campDone();
+    },
+    line: m => ['Entangle with the van inside the walls (T)', 'T again: swap places with the van', 'Grab the case', 'Swap back out (T, then T)', belief.seen && heat >= 1 ? 'Lose them, then to the lab' : 'Bring the copy to the lab'][m.stage],
+    goal: m => m.stage === 4 ? campPlaces().base : m.stage === 2 ? m.case : m.stage === 3 ? m.van : m.out,
+    draw(m) { if (m.stage <= 2 && m.case && onScreen(m.case.x, m.case.y)) { const c = m.case; ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(c.x - 6, c.y - 3, 14, 10); ctx.fillStyle = '#2b2b2b'; rrect(c.x - 7, c.y - 6, 14, 10, 2); ctx.fillStyle = '#c9a227'; ctx.fillRect(c.x - 2, c.y - 7, 4, 2); } },
+    end(m) { if (m.van) { m.van.camp = false; m.van.mission = false; m.van.qfar = false; } for (const g of m.guards || []) g.agent = false; },
+    outro: [['bara', 'It\'s all here. Not just the plan: the schedule. They switch Zeno on across the city in a fortnight.'],
+      ['bara', 'Until then the network is just relays: boxes in closed courtyards all over the old town, each keeping a few streets measured.'],
+      ['bara', 'The one for the old town is in a sealed courtyard near the cellars of Zelný trh. Take it out and the old town goes dark on their screens.'],
+      ['you', 'Let me guess. The only way in is through a wall.'], ['bara', 'You\'re learning.']] },
+
+  { key: 'labyrinth', act: 1, name: 'The Labyrinth', pay: 7500, at: () => EA.orloj || EA.hatches[0],
+    call: ['bara', 'I\'m ready when you are. Náměstí Svobody, by the orloj (ψ).'],
+    intro: [['bara', 'The relay is in a courtyard near Zelný trh. Problem: the Bureau knows we have the copy.'],
+      ['mer', '(radio) Good evening. This is Director Měřička. You have something of mine.'],
+      ['mer', '(radio) There is a drone above you now. It will watch you, without blinking, until you give it back. A thing watched all the time cannot get away. That is the Zeno effect.'],
+      ['bara', 'He\'s right, annoyingly. While the drone sees you, the police never lose you. But a drone can\'t see underground.'],
+      ['bara', 'The old town\'s cellars: go down a hatch on foot, and come up at another. Then find the relay.']],
+    start(m) {
+      m.drone = true; HQ.droneCd = 0; heat = Math.max(heat, 2.2); addHeat(0);
+      const P0 = pp(), a = rand(TAU); HQ.drone = { x: P0.x + Math.cos(a) * 500, y: P0.y + Math.sin(a) * 500, vx: 0, vy: 0, a: 0, rot: 0, hp: 9999, lock: false, fall: 0 };
+    },
+    tick(m, dt) {
+      const P0 = pp();
+      if (m.stage === 0) {
+        if (player.cellar) { m.stage = 1; m.drone = false; campSay('bara', 'Down here it can\'t see you. Come up wherever you like.'); }
+        else if (HQ.drone && HQ.drone.hp < 9999) HQ.drone.hp = 9999; // (the Director's drone is armoured)
+      } else if (m.stage === 1 && !player.cellar) {
+        const R = campSealed(P0, 120, 1600, false) || campSealed(EA.hatches[0], 0, 2200, false);
+        if (!R) { campDone(); return; }
+        Object.assign(m, { stage: 2, R, relay: { x: R.x, y: R.y, t: 0 }, boost: 0 }); belief.sig = Math.max(belief.sig, 400);
+        campSay('bara', 'The relay\'s courtyard is marked. On foot, walk into the wall: I\'ve made the barrier thin there for you.');
+      } else if (m.stage >= 2) {
+        const inside = inRegion(m.R, P0);
+        if (!m.boost && near2({ x: m.R.ox, y: m.R.oy }, 170) || m.boost === 1 && m.stage >= 4 && inside) { m.boost++; player.tunT = Math.min(player.tunT ?? time, time - 110); }
+        if (m.stage === 2 && inside) { m.stage = 3; campSay('bara', 'You\'re through! The relay: stand by it and pull its plug.'); }
+        if (m.stage === 3 && !player.car && near2(m.relay, 24)) {
+          m.relay.t += dt;
+          if (m.relay.t > 1.5) {
+            m.relay.dead = true; m.stage = 4; sfx.collapse(); qburst(m.relay.x, m.relay.y, '#ff6b6b', 20);
+            const a = rand(TAU); launchHero('tunneler', { x: P0.x + Math.cos(a) * 600, y: P0.y + Math.sin(a) * 600 }, P0, true); m.hero = 'tunneler';
+            if (!player.weapons.smg) campGun('smg', 160);
+            campSay('tunneler', 'Nice little courtyard. Shame about the walls: they don\'t stop me.', 6);
+            campSay('bara', 'The Tunneler! P.L.A.N.C.K. works for the Bureau now? There was a machine gun by the relay: use it.', 7);
+          }
+        }
+        if (m.stage === 4) { const h = HQ.heroes.find(o => o.duel && o.k === 'tunneler'); if ((!h || h.ph === 'down' || h.ph === 'up') && !m.beat) { m.beat = 1; m.boost = 1; campSay('bara', 'He\'s down! Now out the way you came: through the wall.'); } }
+        if (m.stage === 4 && m.beat && !inside && openGround(P0.x, P0.y)) campDone();
+        if (m.stage === 4 && !m.beat && !HQ.heroes.some(o => o.duel) && (m.tries = (m.tries || 0) + dt) > 3) { m.tries = -20; launchHero('tunneler', { x: P0.x + 600, y: P0.y }, P0, true); } // (he came back)
+      }
+    },
+    line: m => ['Lose the drone: down a cellar hatch (on foot)', 'Under the old town…', 'Tunnel into the relay\'s courtyard (on foot)', 'Pull the relay\'s plug', m.beat ? 'Tunnel back out' : 'Beat the Tunneler'][m.stage],
+    goal: m => m.stage === 0 ? (P => EA.hatches.reduce((b, h) => d2(h.x, h.y, P.x, P.y) < d2(b.x, b.y, P.x, P.y) ? h : b))(pp()) : m.stage === 2 ? { x: m.R.ox, y: m.R.oy } : m.stage === 3 ? m.relay : null,
+    draw(m) { const r = m.relay; if (r && onScreen(r.x, r.y)) { ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(r.x - 7, r.y - 5, 16, 14); ctx.fillStyle = r.dead ? '#3a3a3a' : '#2c3440'; ctx.fillRect(r.x - 8, r.y - 8, 16, 14); ctx.strokeStyle = '#9aa4b1'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(r.x + 4, r.y - 8); ctx.lineTo(r.x + 7, r.y - 18); ctx.stroke(); if (!r.dead) { ctx.fillStyle = Math.sin(time * 8) > 0 ? '#ff3030' : '#661010'; ctx.beginPath(); ctx.arc(r.x + 7, r.y - 18, 2, 0, TAU); ctx.fill(); ctx.fillStyle = '#7ff6ff'; ctx.fillRect(r.x - 6, r.y - 4, 8 * clamp(1 - r.t / 1.5, 0, 1), 3); } } },
+    end(m) { m.drone = false; },
+    outro: [['bara', 'The old town just went dark on the Bureau\'s screens. Měřička will be livid.'],
+      ['bara', 'And that was the Tunneler. P.L.A.N.C.K. sends its heroes for the Bureau now? Wonderful.'],
+      ['bara', 'They think they\'re the good guys. They think Zeno keeps people safe.'], ['you', 'Will they listen to reason?'],
+      ['bara', 'They listen to evidence. We\'ll get to that. First, the detectors themselves.']] },
+
+  { key: 'noon', act: 2, name: 'Noon at Eleven', pay: 8500, at: () => EA.qclock,
+    call: ['bara', 'I have an idea, and it\'s 381 years old. Meet me at ÚPT\'s quantum clock on Královopolská (ψ), in the morning.'],
+    when: () => { const h = gameH(dayT * 24); return h >= 4 && h < 8.5 ? null : `Noon at Eleven starts in the morning (4:00 to 8:30), so there is time to reach Petrov before eleven. ${touchOn() ? '⇄' : 'Enter'} here: wait for the morning.`; },
+    intro: [['bara', 'The Bureau\'s detectors don\'t keep their own time. They all follow ÚPT\'s quantum clock, right here, to the nanosecond.'],
+      ['bara', 'In 1645 the Swedes besieged Brno and swore they\'d leave if the city held out until noon. At eleven, Petrov\'s bells rang noon. The Swedes went home.'],
+      ['bara', 'Let\'s ring noon at eleven again. This parcel is stamped by the clock. Get it to Petrov at 11:00 sharp, and the bells ring noon an hour early.'],
+      ['bara', 'Every detector in Brno thinks it\'s noon, its schedule slips, and it loses lock for an hour.'], ['you', 'Early is fine?'],
+      ['bara', 'Early, you wait. Late is useless. And P.L.A.N.C.K. knows we\'re coming: they\'ve sent Agent Spooky.']],
+    start(m) { m.due = dayN * 24 + 11; m.spT = 9; sfx.pickup(); },
+    tick(m, dt) {
+      const now = campNow(), P0 = pp();
+      if ((m.spT -= dt) <= 0 && !m.hero) { const a = rand(TAU); if (launchHero('spooky', { x: P0.x + Math.cos(a) * 700, y: P0.y + Math.sin(a) * 700 }, P0, true)) { m.hero = 'spooky'; campSay('spooky', 'Hello, courier. We\'re entangled now, you and I. Wherever you go, I can be right beside you.', 6); } else m.spT = 2; }
+      if (now > m.due + 3 / 60) { failMission('The bells rang eleven, not noon. Too late.'); return; }
+      if (near2(campPlaces().petrov, 70)) {
+        if (now >= m.due - 0.5 / 60) { campBells(); CAMP.blindTo = now + 1; bigText('NOON AT ELEVEN', '#ffd54a', 3.5, 'Every Bureau detector has lost lock for an hour'); campDone(); return; }
+        if (!m.told) { m.told = 1; campSay('bara', 'Early. Wait right here for eleven: not a minute after.'); }
+      }
+    },
+    line: m => `Petrov at 11:00 sharp · now ${hhmm(dayT * 24)}`, goal: () => campPlaces().petrov,
+    end(m) {},
+    outro: [['bara', 'Hear that? Twelve strokes at eleven. Every Bureau detector in the city just lost lock.'],
+      ['mer', '(radio) Charming. A trick from 1645 for a problem from 2026. You have an hour.'],
+      ['bara', 'An hour is enough to get his detector plans. They\'re on the Bureau\'s own floor in the AZ Tower, behind a PIN that changes every few minutes.'],
+      ['bara', 'Lucky for us, FIT has a quantum computer, and Grover\'s search finds a PIN in about √N tries instead of N.']] },
+
+  { key: 'grover', act: 2, name: 'Grover\'s Vault', pay: 10000, at: () => EA.qpc,
+    call: ['bara', 'The quantum computer at FIT is cold and waiting. The QPU sign by the door (ψ).'],
+    intro: [['bara', 'The PIN for the Bureau\'s floor is one of 2ⁿ. Trying them one by one takes for ever, and they change it every few minutes.'],
+      ['bara', 'Grover\'s search: the oracle flips the sign of the right one, and the diffusion step moves amplitude onto it. About π/4·√N rounds, then measure.'],
+      ['bara', 'Too few rounds and the answer is still spread out. Too many and it spills back off. Then drive to the AZ Tower before the PIN changes.'],
+      ['you', 'And inside?'], ['bara', 'Their floor. Their plans. And the whole Bureau, six stars of it, the moment you walk out.']],
+    start(m) { campSay('bara', 'The console is by the door: on foot, Enter.'); },
+    tick(m, dt) {
+      if (m.stage === 1 && near2(campPlaces().az, 60)) {
+        Object.assign(m, { stage: 2, timer: 0 }); heat = Math.max(heat, 6.3); addHeat(0, true); msg('You slip out of the Bureau\'s floor with the detector plans.', 4);
+        campSay('bara', 'You\'ve got the plans! And six stars: vans with detectors, the drone, spike strips. Lose them: below six, the Bureau stands down.', 8);
+      } else if (m.stage === 2 && heat < 6) campDone();
+    },
+    line: m => ['Grover\'s search at FIT\'s quantum computer (QPU)', 'To the AZ Tower, before the PIN changes', 'Lose the Bureau: below six stars'][m.stage],
+    goal: m => m.stage === 0 ? EA.qpc : m.stage === 1 ? campPlaces().az : null, end(m) {},
+    outro: [['bara', 'The detector plans. They\'re fitting the dishes into vans this week, in the halls at the exhibition grounds.'],
+      ['bara', 'Six vans. Once they leave the grounds, Zeno has eyes on every street.'],
+      ['mer', '(radio) You will find P.L.A.N.C.K. guarding them. I asked nicely.']] },
+
+  { key: 'bigbang', act: 2, name: 'Big Bang', pay: 11000, at: () => campPlaces().gate,
+    call: ['bara', 'The vans are ready to roll. Výstaviště, the main gate (ψ). Bring something that goes bang.'],
+    intro: [['bara', 'There they are: six black vans by the pavilions, a dish on every roof.'],
+      ['bara', 'They leave one by one. Wreck five before they get away. One I can live with.'],
+      ['bigbang', 'BIG BANG IS HERE! Nothing personal, kid. Orders are orders.'],
+      ['bara', 'He leaps, he lands hard, and he throws cars. Don\'t be where he lands. And take this. It\'s not from the faculty.']],
+    start(m) {
+      const L = campPlaces(), A = L.pa || L.gate, c0 = { x: lerp(L.gate.x, A.x, 0.4), y: lerp(L.gate.y, A.y, 0.4) }, pts = []; // (in front of the pavilions, in sight of the gate)
+      for (let r = 2; r < 60 && pts.length < 6; r++) for (let k = 0; k < 8 * r && pts.length < 6; k++) {
+        const a = k / (8 * r) * TAU, x = c0.x + Math.cos(a) * r * T, y = c0.y + Math.sin(a) * r * T, t = tileAtP(x, y);
+        if ((t === PLAZA || t === WALK || t === ROAD || t === GRASS) && !circleSolid(x, y, 26) && openGround(x, y) && pts.every(p => d2(p.x, p.y, x, y) > 70 * 70)) pts.push({ x, y });
+      }
+      const gl = nearestLanePt(L.gate.x, L.gate.y, null, 400), end = gl ? [{ x: gl.x, y: gl.y }] : [];
+      m.vans = pts.map((p, i) => { const v = campVan(p.x, p.y, Math.atan2(L.gate.y - p.y, L.gate.x - p.x), 'camp'); Object.assign(v, { goT: 10 + i * 8, route: [...(tilePath(p, L.gate) || [L.gate]), ...end], wi: 0, plough: true }); return v; });
+      m.away = 0; campGun('rocket', 8);
+      const a = rand(TAU), P0 = pp(); launchHero('bigbang', { x: P0.x + Math.cos(a) * 700, y: P0.y + Math.sin(a) * 700 }, P0, true); m.hero = 'bigbang';
+      msg('A rocket launcher with 8 rockets (Q switches weapon).', 4);
+    },
+    tick(m, dt) {
+      const P0 = pp();
+      for (const v of m.vans) {
+        if (v.away || v.dead) continue;
+        if (v.leaving && (time - v.leaving > 40 || d2(v.x, v.y, P0.x, P0.y) > 2600 * 2600)) { v.away = true; v.camp = false; v.mission = false; m.away++; campSay('bara', m.away > 1 ? 'Two got away. That\'s it: Zeno has its eyes.' : 'One got away! That\'s the one we can spare. No more.'); }
+      }
+      if (m.away > 1) { failMission('Two vans got away.'); return; }
+      const dead = m.vans.filter(v => v.dead).length;
+      if (dead !== m.dead) { m.dead = dead; if (dead < 5) msg(`Detector van wrecked: ${dead} of 5.`, 2); }
+      if (dead >= 5) campDone();
+      else if (m.vans.every(v => v.dead || v.away)) failMission('Not enough vans wrecked.');
+      if (HQ.heroes.some(o => o.duel && o.k === 'bigbang' && o.ph === 'go')) m.bbSeen = 1; else if (m.bbSeen && !m.bbGone) { m.bbGone = 1; campSay('bara', 'Big Bang\'s down! Now the vans.'); }
+    },
+    line: m => `Wreck the detector vans: ${m.vans.filter(v => v.dead).length} of 5${m.away ? ' · one got away' : ''}`,
+    goal: m => { const P0 = pp(); let b = null, bd = 1e12; for (const v of m.vans) if (!v.dead && !v.away) { const d = d2(v.x, v.y, P0.x, P0.y); if (d < bd) { bd = d; b = v; } } return b; },
+    end(m) { for (const v of m.vans || []) { v.camp = false; v.mission = false; if (v.driver === 'camp') v.driver = null; } },
+    outro: [['bara', 'Five vans in pieces. Big Bang went home to sulk.'],
+      ['bara', 'But P.L.A.N.C.K. still thinks we\'re the villains. Měřička told them the world is classical: every particle already has its answers, and measuring Brno only reads them.'],
+      ['bara', 'There\'s a test for exactly that claim: John Bell\'s. If particles carried their answers with them, a number called S could never pass 2.'],
+      ['you', 'And if it does?'], ['bara', 'Then Měřička is lying, and his heroes will see it with their own eyes. Kotlářská, the Faculty of Science.']] },
+
+  { key: 'bell', act: 3, name: 'Bell\'s Theorem', pay: 12500, at: () => EA.chsh,
+    call: ['bara', 'P.L.A.N.C.K. agreed to watch. The Bell test at the Faculty of Science on Kotlářská (ψ).'],
+    intro: [['coll', 'P.L.A.N.C.K. observes. You have one chance to convince me.'],
+      ['mer', '(radio) Hidden variables, Collapser. Every photon knows its answer before it is asked. Measuring only reads it.'],
+      ['bara', 'Then the Bell test settles it. Two photons, two polariser angles each. If Měřička is right, |S| is at most 2. Quantum mechanics says up to 2√2.'],
+      ['bara', 'Today the bar is 2.5, so nobody can call it luck. But there are Bureau vans round the faculty, and their detectors decohere the photons.'],
+      ['bara', 'Get the vans away from here first (wreck them, or lead them off), or the pairs arrive already measured and S falls flat.'],
+      ['coll', 'I will not interfere. Nor will I help.']],
+    start(m) {
+      const S = EA.chsh, P0 = pp(); m.vans = [];
+      for (let r = 260; r < 1000 && m.vans.length < 2; r += 120) for (let k = 0; k < 8 && m.vans.length < 2; k++) { // (two vans on the streets round the faculty)
+        const p = nearestLanePt(S.x + Math.cos(k * 0.8) * r, S.y + Math.sin(k * 0.8) * r, null, 160);
+        if (p && !p.L.hw && m.vans.every(v => d2(v.x, v.y, p.x, p.y) > 200 * 200) && !onScreen(p.x, p.y, 20)) m.vans.push(campVan(p.x, p.y, p.h, 'police'));
+      }
+      heat = Math.max(heat, 2.2); addHeat(0); campGun('rocket', 4); msg('Bára kept four rockets from the fair for you (Q switches weapon).', 4);
+      if (launchHero('collapser', { x: S.x + 500, y: S.y - 400 }, { x: S.x, y: S.y }, true)) { const h = HQ.heroes[HQ.heroes.length - 1]; Object.assign(h, { calm: true, hx: S.x, hy: S.y }); m.calm = 'collapser'; }
+    },
+    tick(m, dt) { if (m.won && state === 'play') campDone(); },
+    line: m => m.won ? 'Bell\'s inequality broken' : campVanNear() ? 'Get the Bureau vans away from the faculty' : 'The Bell test (BELL sign): |S| above 2.5',
+    goal: m => campVanNear() || EA.chsh,
+    end(m) { for (const v of m.vans || []) { v.camp = false; v.mission = false; } },
+    outro: [() => ['coll', `S = ${CAMP.S ? CAMP.S.toFixed(2) : '2.8'}. More than 2. No list of answers carried in advance can do that.`],
+      ['coll', 'Then the Director lied to us. P.L.A.N.C.K. stands with the evidence.'],
+      ['mer', '(radio) Very well. If they will not help me, nobody gets to watch the show. Project Zeno goes live tonight.'],
+      ['bara', 'Tonight? The schedule said a fortnight. Come to the lab. Now.']] },
+
+  { key: 'zeno', act: 3, name: 'Decoherence', pay: 15000, at: () => campPlaces().base,
+    call: ['bara', 'He\'s switching it on! Get to the lab (ψ), as fast as you can.'],
+    intro: [['bara', 'He\'s switched it on early, from the planetarium on Kraví hora. The dome is the biggest detector in the city.'],
+      ['bara', 'The whole city is under the Observer\'s sweep: no X, no T, and the police always know where you are.'],
+      ['bara', 'But the payphone by this lab and the one by FIT are an entangled pair. A Bell measurement at one and you teleport to the other, and they measure the wrong qubit.'],
+      ['coll', 'P.L.A.N.C.K.\'s Helicarrier is overhead. We will keep the police off your back as far as Kraví hora.'],
+      ['bara', 'Three detectors stand round the dome. Knock them out and the field drops. Měřička will be there himself, in his armoured van.'],
+      ['you', 'And then?'], ['bara', 'Then everything goes back to being uncertain. As it should be.']],
+    start(m) { heat = Math.max(heat, 8.3); addHeat(0, true); campSay('bara', 'The payphones are marked EPR, cyan on the map. On foot, Enter at one.'); },
+    tick(m, dt) {
+      const P0 = pp(), L = campPlaces();
+      if (m.stage === 0 && heat < 8) { m.stage = 1; campAlly(); campSay('coll', 'We see you. Drive to Kraví hora: we will deal with the cars behind you.', 6); }
+      if (m.stage === 1 && near2(L.obs, 600)) {
+        m.stage = 2; m.dets = [];
+        for (let k = 0; k < 3; k++) for (let r = 150; r < 330 && m.dets.length === k; r += 12) for (let j = 0; j < 12 && m.dets.length === k; j++) {
+          const a = k * TAU / 3 + j * 0.13 + 0.4, x = L.obs.x + Math.cos(a) * r, y = L.obs.y + Math.sin(a) * r;
+          if (!circleSolid(x, y, 14) && openGround(x, y)) m.dets.push({ x, y, hp: 300, hit: 0, a: rand(TAU) });
+        }
+        const p = nearestLanePt(L.obs.x, L.obs.y, null, 700) || pp(), v = campVan(p.x, p.y, p.h, 'police'); Object.assign(v, { hp: 2400, boss: true, color: '#0b0c10' }); m.boss = v; m.sweepT = 3;
+        campSay('mer', '(radio) Welcome to the dome. You are being measured. You will always be measured.', 6);
+      }
+      if (m.stage === 2) {
+        for (const D of m.dets) { D.hit = Math.max(0, D.hit - dt); D.a += dt * 0.8; const c = player.car; if (D.hp > 0 && c && Math.abs(c.speed) > 90 && d2(c.x, c.y, D.x, D.y) < 26 * 26) { campDetHurt(m, D, Math.abs(c.speed) * 0.9); damageCar(c, 25); c.vx *= -0.3; c.vy *= -0.3; c.speed *= -0.3; sfx.crash(); } }
+        if ((m.sweepT -= dt) <= 0 && m.dets.some(D => D.hp > 0)) { m.sweepT = 9; HQ.sweep = 1.6; revealPlayer(); belief.seen = true; belief.seeT = 0.3; if (heat < 3) heat = 3.2; sfx.collapse(); msg('The dome measures you: they know where you are.', 2); }
+        if (m.boss && m.boss.dead && !m.bossDown) { m.bossDown = 1; earn(2000); campSay('bara', 'His van\'s burning! Měřička crawled out and he\'s running. Leave him: the detectors!'); }
+        if (m.dets.every(D => D.hp <= 0)) {
+          bigText('DECOHERENCE', '#b388ff', 4, 'Project Zeno is off: Brno is uncertain again'); sfx.good();
+          if (m.boss && !m.boss.dead) { m.boss.driver = 'ai'; m.boss.chase = false; }
+          campDone();
+        }
+      }
+    },
+    line: m => m.stage === 0 ? 'Teleport out: Enter at an entangled payphone (EPR)' : m.stage === 1 ? 'To the planetarium on Kraví hora' : `Knock out the dome's detectors: ${m.dets.filter(D => D.hp <= 0).length} of 3`,
+    goal: m => { if (m.stage === 0) { const P0 = pp(), E = eprPhones(); return E.reduce((b, e) => d2(e.x, e.y, P0.x, P0.y) < d2(b.x, b.y, P0.x, P0.y) ? e : b); } if (m.stage === 1) return campPlaces().obsIn; const P0 = pp(); let b = null, bd = 1e12; for (const D of m.dets) if (D.hp > 0) { const d = d2(D.x, D.y, P0.x, P0.y); if (d < bd) { bd = d; b = D; } } return b; },
+    draw(m) { for (const D of m.dets || []) if (onScreen(D.x, D.y, 40)) drawDetector(D); },
+    end(m) { CAMP.ally = CAMP.ally && Object.assign(CAMP.ally, { leave: 1 }); if (m.boss) { m.boss.camp = false; m.boss.mission = false; m.boss.boss = false; } },
+    outro: [['mer', '(radio) Do you know what you have done? Nobody will ever know exactly where anything is again.'],
+      ['bara', 'Nobody ever did, Director. That\'s not a bug.'],
+      ['coll', 'P.L.A.N.C.K. thanks you. The Director\'s van is yours, if you want it. Consider it evidence.'],
+      ['chair', 'Two weeks later. Ms Kubitová, your thesis claims the Bureau\'s circuit was correct: that it did exactly what it was meant to do.'],
+      ['bara', 'Yes. I proved it. That was the problem.'],
+      ['chair', 'Then the committee has one question left. Did you verify your getaway driver?'],
+      ['bara', 'Formally. Twice.'], ['chair', 'Passed, with distinction.']] },
+];
+const campVanNear = () => { const m = campM('bell'); if (!m) return null; return (m.vans || []).find(v => !v.dead && cars.includes(v) && d2(v.x, v.y, EA.chsh.x, EA.chsh.y) < 600 * 600) || null; };
+// a detector on the hill: a dish on a mast, turning; hit, it flashes
+function drawDetector(D) {
+  const dead = D.hp <= 0;
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(D.x + 3, D.y + 4, 12, 8, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = dead ? '#2a2a2a' : '#4a5260'; ctx.fillRect(D.x - 6, D.y - 6, 12, 12);
+  if (dead) { ctx.strokeStyle = '#555'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(D.x - 8, D.y - 3); ctx.lineTo(D.x + 9, D.y + 5); ctx.stroke(); return; }
+  const [x, y] = proj(D.x, D.y, 0.06);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(D.a);
+  ctx.fillStyle = D.hit > 0 ? '#ffffff' : '#c9d6e3'; ctx.beginPath(); ctx.ellipse(0, 0, 13, 9, 0, -Math.PI / 2, Math.PI / 2); ctx.fill();
+  ctx.strokeStyle = '#7d8b99'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, 9); ctx.stroke();
+  ctx.strokeStyle = '#9aa4b1'; ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(12, 0); ctx.stroke();
+  ctx.fillStyle = Math.sin(time * 6 + D.x) > 0 ? '#ff3030' : '#7ff6ff'; ctx.beginPath(); ctx.arc(12, 0, 2.2, 0, TAU); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(D.x - 14, D.y + 12, 28, 4); ctx.fillStyle = '#7ff6ff'; ctx.fillRect(D.x - 13, D.y + 13, 26 * D.hp / 300, 2);
+}
+function campLights() {
+  const o = [], at = campMarker(); if (at) o.push({ x: at.x, y: at.y, r: 46 });
+  const m = campM(); if (!m) return o;
+  for (const D of m.dets || []) if (D.hp > 0) o.push({ x: D.x, y: D.y, r: 40 });
+  if (m.relay && !m.relay.dead) o.push({ x: m.relay.x, y: m.relay.y, r: 30 });
+  if (m.case && m.stage <= 2) o.push({ x: m.case.x, y: m.case.y, r: 24 });
+  return o;
+}
+// ---- P.L.A.N.C.K.'s Helicarrier, on your side for the finale: it keeps beside you and takes out the cars on your tail
+function campAlly() { const P0 = pp(), a = rand(TAU); CAMP.ally = { x: P0.x + Math.cos(a) * 1400, y: P0.y + Math.sin(a) * 1400, a: a + Math.PI, zapT: 4, beam: null, leave: 0 }; }
+function updateAlly(dt) {
+  const A = CAMP.ally, P0 = pp(), side = { x: P0.x + 85, y: P0.y - 70 };
+  if (A.beam && (A.beam.t -= dt) <= 0) A.beam = null;
+  if (A.leave) { A.x += Math.cos(A.a) * 160 * dt; A.y += Math.sin(A.a) * 160 * dt; if ((A.leave += dt) > 14) CAMP.ally = null; return; }
+  const dx = side.x - A.x, dy = side.y - A.y, d = Math.hypot(dx, dy) || 1, sp = Math.min(d * 1.6, d > 800 ? 700 : 380);
+  A.x += dx / d * sp * dt; A.y += dy / d * sp * dt; if (d > 30) A.a += wrapA(Math.atan2(dy, dx) - A.a) * Math.min(1, dt * 1.5);
+  if ((A.zapT -= dt) <= 0) {
+    let b = null, bd = 700 * 700; // (the nearest cruiser on your tail, or officer on foot: its beam stalls or stuns them a while)
+    for (const c of cars) if (c.driver === 'police' && c.chase && !c.dead && !c.boss && !(c.dazzle > 0) && !CT[c.type].boat) { const q = d2(c.x, c.y, P0.x, P0.y); if (q < bd) { bd = q; b = c; } }
+    for (const p of peds) if (p.cop && !p.dead && !(p.dazzle > 0)) { const q = d2(p.x, p.y, P0.x, P0.y); if (q < bd && q < 420 * 420) { bd = q; b = p; } }
+    A.zapT = b ? 3.5 : 0.5;
+    if (b) { A.beam = { x: b.x, y: b.y, t: 0.35 }; const car = !!CT[b.type]; b.dazzle = car ? 12 : 9; if (car) b.chase = false; for (let k = 0; k < 10; k++) addPart(b.x, b.y, rand(-70, 70), rand(-70, 70), 0.4, 2, '#7ff6ff', 0, true); if (onScreen(b.x, b.y)) sfx.quantum(); }
+  }
+}
+function drawAlly() {
+  const A = CAMP.ally; if (!A) return;
+  const k = 1 + CARRIER_Z, x = cam.x + (A.x - cam.x) * k, y = cam.y + (A.y - cam.y) * k;
+  if (A.beam) { ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = 'rgba(127,246,255,.85)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(A.beam.x, A.beam.y); ctx.stroke(); ctx.globalCompositeOperation = 'source-over'; }
+  if (!onScreen(x, y, 520)) return;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(A.a); ctx.scale(k * CARRIER_SC, k * CARRIER_SC); drawCarrier(1 + NIGHT * 1.6, Math.sin(time * 9) > 0, 0); ctx.restore();
+}
+// Petrov's bells: twelve strokes
+function campBells() { for (let i = 0; i < 12; i++) { const w = now() + 0.2 + i * 1.1; tone(196, 2.6, 'sine', 0.22, 0, w); tone(392, 1.8, 'sine', 0.1, 0, w); tone(523, 1.2, 'triangle', 0.05, 0, w); } }
+// ---- running the story: the next chapter's marker, its start, its end
+function campMarker() { return campOn() && !CAMP.done && CAMP.ch < CHAP.length && !campM() && !SCN && campNow() >= CAMP.at ? CHAP[CAMP.ch].at() : null; }
+function campTick(dt) {
+  if (!campOn()) return;
+  updateRadio(dt);
+  if (CAMP.ally) updateAlly(dt);
+  if (CAMP.pend && (CAMP.pend.t -= dt) <= 0) { const p = CAMP.pend; CAMP.pend = null; sceneOpen(null, p.lines, p.then); return; }
+  const at = campMarker(); if (!at || CAMP.pend) return;
+  if (CAMP.told !== CAMP.ch) { CAMP.told = CAMP.ch; const c = CHAP[CAMP.ch].call; campSay(c[0], c[1], 8); msg(`ψ  The story: chapter ${CAMP.ch + 1}, ${CHAP[CAMP.ch].name}. Follow the ψ.`, 5); }
+  const P0 = pp(), slow = !player.car || Math.abs(player.car.speed) < 60, here = !player.down && slow && d2(at.x, at.y, P0.x, P0.y) < (player.car ? 48 * 48 : 30 * 30);
+  if (!here) { CAMP.hint = ''; return; }
+  const no = mission ? 'Finish the job you are on first: then the story.' : heat >= 1 ? 'Not with the police after you: lose them first, then the story.' : CHAP[CAMP.ch].when && CHAP[CAMP.ch].when();
+  if (no) { if (CAMP.hint !== no) msg(no, 4); CAMP.hint = no; return; }
+  campStart(CAMP.ch);
+}
+function campStart(i) {
+  const C = CHAP[i];
+  sceneOpen([`CHAPTER ${i + 1} OF ${CHAP.length} · ACT ${['I', 'II', 'III'][C.act - 1]}`, C.name.toUpperCase()], C.intro, () => {
+    ringing = null; mission = { type: 'camp', ch: i, stage: 0, timer: 0, reward: C.pay, arc: null };
+    C.start(mission);
+  });
+}
+function campDone() {
+  const m = mission; if (!m || m.type !== 'camp') return;
+  const C = CHAP[m.ch]; m.won = true;
+  earn(C.pay); sfx.good();
+  if (!overlay || overlay.t < 1) bigText('CHAPTER COMPLETE', '#b388ff', 3, `${C.name} · +${fmt(C.pay)}`);
+  cleanupMission(m); mission = null; ringCd = 12; heat = 0; caller = null; CAMP.radio = [];
+  CAMP.ch++; CAMP.at = campNow() + 1; CAMP.told = -1; CAMP.hint = '';
+  const next = CHAP[CAMP.ch];
+  if (!next || next.act !== C.act) ach('camp' + C.act);
+  CAMP.pend = { t: 2.4, lines: C.outro, then: () => {
+    if (CAMP.ch < CHAP.length) { campSay('bara', `Chapter ${CAMP.ch + 1}, ${next.name}: an hour from now. I\'ll call.`, 5); return; }
+    CAMP.done = true; if (!CAMP.fails) ach('laude');
+    if (GAR.length < GAR_N) { GAR.push({ type: 'bureau', color: '#0b0c10', orn: false }); msg('Director Měřička\'s van is in your garage now.', 5); }
+    else msg('Your garages are full, so Director Měřička\'s van went to the scrapyard.', 5);
+    bigText('THE END', '#b388ff', 6, 'Decoherence · Brno is uncertain again. Thanks for playing!');
+  } };
+}
+function campFail() { CAMP.fails++; CAMP.at = campNow(); CAMP.told = CAMP.ch; CAMP.hint = ''; msg('Try again from the ψ marker.', 5); }
+// Enter at a chapter's marker when it isn't the hour for it: wait (the sky turns, the city sleeps)
+function campEnter() {
+  const at = campMarker(); if (!at || mission || heat >= 1 || player.car || !CHAP[CAMP.ch].when || !CHAP[CAMP.ch].when()) return false;
+  if (d2(at.x, at.y, player.x, player.y) > 34 * 34) return false;
+  const h = gameH(dayT * 24); if (h >= 5) dayN++; dayT = 5 / 24; EGG.h = null; CAMP.hint = ''; lastCrime = time;
+  bigText('THE NEXT MORNING', '#ffe08a', 2.5, '05:00 · the quantum clock ticks on'); return true;
+}
+function campLine() {
+  const m = mission, C = CHAP[m.ch];
+  return { line: C.line(m), arc: `Decoherence · chapter ${m.ch + 1}/${CHAP.length}: ${C.name}`, timer: m.timer > 0 ? +m.timer.toFixed(1) : 0 };
+}
+// on the ground: the next chapter's marker, Bára's name, and what the chapter has lying about
+function drawCampGround() {
+  if (!campOn()) return;
+  const at = campMarker();
+  if (at && onScreen(at.x, at.y, 60)) {
+    const p = 0.5 + 0.5 * Math.sin(time * 4);
+    ctx.fillStyle = `rgba(179,136,255,${0.18 + 0.2 * p})`; ctx.beginPath(); ctx.arc(at.x, at.y, 22 + p * 4, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#b388ff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(at.x, at.y, 18, 0, TAU); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 18px serif'; ctx.textAlign = 'center'; ctx.fillText('ψ', at.x, at.y + 6);
+    ctx.font = 'bold 8px sans-serif'; ctx.fillText(`CHAP ${CAMP.ch + 1}`, at.x, at.y + 30);
+  }
+  const m = campM(); if (!m) return;
+  if (CHAP[m.ch].draw) CHAP[m.ch].draw(m);
+  if (m.bara && peds.includes(m.bara) && onScreen(m.bara.x, m.bara.y)) { ctx.fillStyle = '#fff'; ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Bára', m.bara.x, m.bara.y - 10); }
+}
+// the HUD: a ψ pointing at the next chapter, and the radio card
+function drawCampHUD() {
+  if (NET.role === 'guest') { if (NET.cr) drawRadio({ who: NET.cr[0], text: NET.cr[1], age: 1, t: 2 }); if (NET.sc) drawTalk(NET.sc[0], NET.sc[1], NET.sc[2], 'the host\'s story'); return; }
+  if (!campOn()) return;
+  drawRadio(CAMP.radio[0]);
+  const at = campMarker(); if (!at || player.down || mission) return;
+  const P = pp(), a = Math.atan2(at.y - P.y, at.x - P.x), d = Math.hypot(at.x - P.x, at.y - P.y), ax = W / 2 - 78, ay = heat >= 6 ? 142 : 62;
+  ctx.fillStyle = '#1e1433'; ctx.strokeStyle = '#b388ff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ax, ay, 12, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#b388ff'; ctx.beginPath(); ctx.moveTo(ax + Math.cos(a) * 21, ay + Math.sin(a) * 21); ctx.lineTo(ax + Math.cos(a + 0.45) * 13, ay + Math.sin(a + 0.45) * 13); ctx.lineTo(ax + Math.cos(a - 0.45) * 13, ay + Math.sin(a - 0.45) * 13); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 15px serif'; ctx.textAlign = 'center'; ctx.fillText('ψ', ax, ay + 5);
+  txt(d / PXM > 950 ? `${(d / PXM / 1000).toFixed(1)} km` : `${Math.round(d / PXM / 10) * 10} m`, ax, ay + 30, 10, '#d9c8ff', 'center');
 }
 // ---- save and continue: the game in progress is kept, one per map, every 20 s of play, when you pause and when the tab
 // goes to the background; the title screen offers to continue it, and game over clears it. What is kept: you (where you
@@ -11807,14 +13043,15 @@ function newGame() {
 const SAVE_KEY = 'qta.save.' + MAP_ID;
 let saved = (() => { try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); return s && s.v === 1 ? s : null; } catch (e) { return null; } })(), saveT = 20;
 function saveGame() {
-  if (lab || NET.role === 'guest' || player.down || player.hidden || player.cellar || !['play', 'pause', 'qc', 'chsh', 'aod'].includes(state)) return;
+  if (lab || NET.role === 'guest' || player.down || player.hidden || player.cellar || !['play', 'pause', ...MODAL].includes(state)) return;
   const c = player.car, keep = c && !c.dead && !c.lay && !c.tram && !CT[c.type].boat && c.type !== 'wheel' && !c.mission && !c.egg;
   const o = keep ? c : player;
-  const s = { v: 1, t: Date.now(), x: Math.round(o.x), y: Math.round(o.y), a: +(o.angle || 0).toFixed(2), car: keep ? { type: c.type, color: c.color, hp: Math.round(c.hp) } : null,
+  const s = { v: 1, t: Date.now(), x: Math.round(o.x), y: Math.round(o.y), a: +(o.angle || 0).toFixed(2), car: keep ? { type: c.type, color: c.color, hp: Math.round(c.hp), orn: c.orn ? 1 : 0 } : null,
     hp: Math.round(player.hp), cash: player.cash, lives: player.lives, mult: player.mult, weapons: player.weapons, weapon: player.weapon, marble: !!player.marble,
     nDrops: player.nDrops || 0, tunAgo: Math.round(time - (player.tunT ?? time)), psi: Q.psi, ent: Q.ent, notes: [...Q.notes], arc: arcProg, day: dayN, dayT: +dayT.toFixed(5),
     qcWins, qcPaid: qcDay === dayN, chshPaid: chshDay === dayN, aodSolved: [...aodSolved], aodPaid: [...aodPaid], dbg: !!DBG.used, start: startSel,
-    heat: +heat.toFixed(2), calm: Math.min(60, Math.round(time - lastCrime)), bel: heat >= 1 ? [Math.round(belief.x), Math.round(belief.y), Math.round(belief.sig)] : null };
+    heat: +heat.toFixed(2), calm: Math.min(60, Math.round(time - lastCrime)), bel: heat >= 1 ? [Math.round(belief.x), Math.round(belief.y), Math.round(belief.sig)] : null,
+    wx: wxPack(), gar: GAR.map(g => [g.type, g.color, g.orn ? 1 : 0]), camp: [CAMP.ch, +Math.max(0, CAMP.at - campNow()).toFixed(3), CAMP.fails, CAMP.done ? 1 : 0, +Math.max(0, CAMP.blindTo - campNow()).toFixed(3)] };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); saved = s; } catch (e) { /* storage unavailable, or full */ }
 }
 function clearSave() { saved = null; try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ } }
@@ -11832,10 +13069,13 @@ function continueGame() {
   player.x = x; player.y = y; player.angle = s.a || 0;
   if (s.car && CT[s.car.type]) {
     const c = makeCar(s.car.type, x, y, s.a || 0, 'player');
-    if (carHitsWall(c, x, y, c.angle)) cars.pop(); else { c.color = s.car.color || c.color; c.hp = s.car.hp || c.hp; player.car = c; }
+    if (carHitsWall(c, x, y, c.angle)) cars.pop(); else { c.color = s.car.color || c.color; c.hp = s.car.hp || c.hp; c.orn = !!s.car.orn; player.car = c; }
   }
   // still wanted: the police pick up where they lost you (from six stars up the level's banner says so again)
   heat = clamp(+s.heat || 0, 0, 10.99); lastCrime = time - (s.calm || 0);
+  if (s.wx) wxUnpack(s.wx);
+  for (const g of s.gar || []) if (CT[g[0]] && GAR.length < GAR_N) GAR.push({ type: g[0], color: g[1], orn: !!g[2] });
+  if (s.camp) Object.assign(CAMP, { ch: Math.min(CHAP.length, s.camp[0] | 0), at: campNow() + (+s.camp[1] || 0), fails: s.camp[2] | 0, done: !!s.camp[3], blindTo: campNow() + (+s.camp[4] || 0) - (s.camp[4] ? 0 : 1) });
   if (heat >= 1) { const b = s.bel || [x, y, 0]; Object.assign(belief, { x: b[0], y: b[1], vx: 0, vy: 0, sig: b[2] || 0, seen: false, seeT: 0 }); }
   updateCamera(0, true); fillSpots(true); for (let i = 0; i < 30; i++) manageSpawns(1);
   msgs = []; msg(`Welcome back: ${fmt(player.cash)}, ${player.lives} ${player.lives === 1 ? 'life' : 'lives'}, day ${dayN + 1}${heat >= 1 ? `, and still wanted (${Math.floor(heat)}★)` : ''}.`, 4);
@@ -11843,7 +13083,7 @@ function continueGame() {
 const savedLine = () => saved && `${fmt(saved.cash)} · ${'♥'.repeat(Math.max(0, Math.min(9, saved.lives)))} · day ${(saved.day || 0) + 1}${saved.heat >= 1 ? ` · ${Math.floor(saved.heat)}★` : ''}`;
 function titleInit() {
   resetWorld();
-  player.hidden = true; player.car = null; dayT = 21 / 24; heat = 0; mission = null;
+  player.hidden = true; player.car = null; dayT = 21 / 24; heat = 0; mission = null; wxReset(); campReset();
   titleLook(true);
 }
 // the title screen slowly circles the chosen starting place
@@ -11927,6 +13167,9 @@ function dbgPlaces() {
     add('rondo', e.rondo.door.x, e.rondo.door.y); add('cows', e.kravi.x, e.kravi.y); if (e.cloister.length) add('cloister', e.cloister[0].x, e.cloister[0].y);
     if (e.duck) add('duck', e.duck.x, e.duck.y + 26); if (e.dorm) add('dorms', e.dorm.x, e.dorm.y); if (e.bren) add('bren', e.bren.x, e.bren.y + 26); if (e.lime) add('lime', e.lime.x, e.lime.y + 26);
     if (f) add('formula', f.x, f.y + 40); if (e.spil) add('Špilberk cells', e.spil.x, e.spil.y);
+    if (e.godel) add('godel', e.godel.x, e.godel.y + 30); if (e.kundera) add('kundera', e.kundera.x, e.kundera.y + 26); if (e.loosBay) add('loos', e.loosBay.x, e.loosBay.y + 40);
+    if (e.edison) add('edison', e.edison.x, e.edison.y + 40); add('mahen', e.mahen.x, e.mahen.y + 80); add('tugendhat', e.tug.x, e.tug.y + 60); if (e.mach) add('mach', e.mach.x, e.mach.y + 60);
+    if (e.fw) add('fireworks', e.fw.x, e.fw.y); if (e.hallPhone) add('council payphone', e.hallPhone.x, e.hallPhone.y + 30); if (e.zid.length) add('zidenice', e.zid[0].x, e.zid[0].y);
   }
   return (DBG.places = L);
 }
@@ -11957,9 +13200,10 @@ function dbgRun(line) {
       'wanted <0-10>     set the wanted level',
       'car <type>        a vehicle by you, and you in it (car list: the types)',
       'god               toggle: no damage, no arrest',
+      'weather <kind>    clear, rain, fog or snow, at once',
       'stats             toggle: frame time and what is simulated',
       'quality [auto|0-5] the detail level: 0 the sharpest, 3 plain walls and roofs, 5 the fewest pixels',
-      'cash <n> · time <hour> · day <mon..sun> · charges (refill ψ and ε) · powerups (ψ, ε, ♥ and the guns beside you) · squad (send the heroes) · wind <deg> · hantec · close'].join('\n');
+      'camp <1-8> (to a chapter of the story) · camp win · cash <n> · time <hour> · day <mon..sun> · charges (refill ψ and ε) · powerups (ψ, ε, ♥ and the guns beside you) · squad (send the heroes) · wind <deg> · hantec · close'].join('\n');
     case 'close': case 'exit': dbgShow(false); return '';
     case 'tp': case 'teleport': case 'goto': {
       if (!a.length) return 'tp <place> or tp <x> <y>';
@@ -11998,8 +13242,17 @@ function dbgRun(line) {
     case 'cash': player.cash = num[0] || 0; return `cash $${player.cash}`;
     case 'day': { const i = WDAYS.findIndex(d => d.toLowerCase() === (a[0] || '').slice(0, 3).toLowerCase()); if (i < 0) return 'day <mon|tue|wed|thu|fri|sat|sun>'; dayN += ((i - weekday()) % 7 + 7) % 7; EGG.h = null; return `it is ${WDAYS[i]}`; }
     case 'hantec': hantecToggle(); return 'Hantec ' + (HANTEC_ON ? 'on' : 'off');
+    case 'weather': { const k = (a[0] || '').toLowerCase(); if (!WX_KINDS.includes(k)) return 'weather <clear|rain|fog|snow>'; Object.assign(WX, { k, to: k, f: k === 'clear' ? 0 : 1, max: 1, next: 600, wet: k === 'rain' ? 1 : 0, cover: k === 'snow' ? 1 : 0 }); return `weather: ${k}`; }
     case 'time': dayT = ((num[0] || 0) % 24) / 24; EGG.h = null; return `time ${num[0] || 0}:00`;
     case 'charges': Q.psi = 9; Q.ent = 9; return 'ψ 9 · ε 9';
+    case 'camp': case 'chapter': {
+      if (!campOn()) return 'the story is in inner Brno only';
+      if ((a[0] || '') === 'win') { if (!campM()) return 'not in a chapter'; campDone(); return 'chapter done'; }
+      const n = clamp(num[0] | 0, 1, CHAP.length); if (!num[0]) return `camp <1-${CHAP.length}> (go to that chapter's marker) · camp win (finish this one) · now: chapter ${CAMP.ch + 1}${CAMP.done ? ', all done' : ''}`;
+      if (mission) { cleanupMission(mission); mission = null; }
+      Object.assign(CAMP, { ch: n - 1, at: 0, done: false, told: -1, pend: null }); heat = 0; const at = CHAP[n - 1].at(), s = dbgTeleport(at.x + 40, at.y);
+      return `chapter ${n}: ${CHAP[n - 1].name} (at ${(s.x / T) | 0}, ${(s.y / T) | 0})`;
+    }
     case 'squad': { if (heat < 10) heat = 10.3; const P = pp(), bl = HQ.carrier || { x: P.x + 500, y: P.y - 300 }; for (const k of SQUAD) launchHero(k, bl, P); if (HQ.carrier) HQ.carrier.sent = SQUAD.length; return 'P.L.A.N.C.K.\'s heroes are coming'; }
     case 'powerups': { const n = drops.length; for (const k of DROP_K) dropNear(pp(), k, 50, 140, 40); return `${drops.length - n} power-ups beside you`; }
     case 'wind': WIND = (num[0] || 0) * Math.PI / 180; return `the wind blows to ${num[0] || 0}° (0 east, 90 south)`;
@@ -12120,10 +13373,17 @@ function frame(nowT) {
     updateQC(dt);
   } else if (state === 'chsh') {
     updateCHSH(dt);
+  } else if (state === 'bulb') {
+    updateBulb(dt);
+  } else if (state === 'garage') {
+    updateGarageUI(dt);
+  } else if (state === 'scene') {
+    updateScene(dt);
   } else if (state === 'over') {
     time += dt;
     if (hit('Enter', 'Tap', 'NumpadEnter')) newGame();
   }
+  if (NET.guest && MODAL.includes(state)) { NET.snapT -= dt; if (NET.snapT <= 0) { NET.snapT = 0.25; hostSnap(); } } // (the host at a console or in a scene: the guest still sees it)
   updateAudio();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#111'; ctx.fillRect(0, 0, cv.width, cv.height);
@@ -12142,6 +13402,9 @@ function frame(nowT) {
     if (state === 'aod') drawAOD();
     if (state === 'qc') drawQC();
     if (state === 'chsh') drawCHSH();
+    if (state === 'bulb') drawBulb();
+    if (state === 'garage') drawGarageUI();
+    if (state === 'scene') drawScene();
   }
   dbgDraw(); DBG.ft += (performance.now() - ft0 - DBG.ft) * 0.05;
   for (const k in pressed) delete pressed[k];

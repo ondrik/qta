@@ -69,7 +69,7 @@ For testing there is a hidden **debug console**: type `debug` while playing (bes
 act in play). `tp <place>` teleports you to a start, site, district, street, tram stop, faculty and so on (`tp <x> <y>`
 to a tile, and in Brno `tp <lat> <lon>`), `find <text>` lists the places, `where` tells you where you are,
 `wanted <n>` sets the wanted level, `car <type>` puts you in any vehicle (boats on the nearest water), `god` stops
-damage and arrests, `powerups` puts one of each power-up and gun beside you, `squad` sends P.L.A.N.C.K.'s heroes at you, `stats` shows the frame time, the detail level
+damage and arrests, `powerups` puts one of each power-up and gun beside you, `squad` sends P.L.A.N.C.K.'s heroes at you, `weather <clear|rain|fog|snow>` changes the weather at once, `camp <1-8>` goes to a chapter of the story (inner Brno), `stats` shows the frame time, the detail level
 and how much is being simulated, and `quality <0-5>` fixes the detail level (`quality auto` lets the game choose
 again). `help` lists the rest, Esc closes it.
 
@@ -79,7 +79,8 @@ courtyard**, walled in on every side, that you can only reach (and leave) by tun
 is thin there: your chance is high); and in Brno, a vault's PIN found with **Grover's search** on FIT's quantum
 computer, then the vault before the PIN changes, and a parcel stamped by **ÚPT's quantum clock**, to be delivered on
 the minute (within three game minutes; a game minute is a second). Those three are also an arc of their own, **The
-Planck Files**, from the payphone in Žabovřesky.
+Planck Files**, from the payphone in Žabovřesky. Inner Brno also has a **story** in eight chapters (see below): follow
+the ψ on the map.
 
 **The Bell test** (the BELL sign: by the Atom Array Lab, and in Brno also at Masaryk University's Faculty of Science
 on Kotlářská): entangled photon pairs fly to Alice and Bob, who each measure at one of two polariser angles,
@@ -111,6 +112,19 @@ head), and a few seconds later that's a star too, unless they don't live to fini
 succession get you a star even unseen.
 The car you drive has a health bar over it (and in the corner of the screen), and it holds out longer than the
 other cars on the road.
+
+**Weather**: clear, rain, fog or snow, changing every few game hours (the clock under the minimap says which; the
+quantum clock at ÚPT in Brno gives the forecast). Rain wets the roads and they dry slowly after it; snow settles, and
+lies until it melts (rain washes it off). On wet roads and on snow the tyres grip less: the car slides wide in bends,
+pulls away slower and needs longer to stop (from 300 px/s: about 28 m dry, 41 m wet, 60 m on snow). The traffic drives
+slower and more carefully, but on snow a car near you now and then skids, spins and crashes, and the cars involved
+stand there a while with their hazard lights on. In fog the police see much less far and lose track of you twice as
+fast. In the rain most people put up umbrellas.
+
+**Garages**: one by each place you can start from (GARAGE on the map, a blue dot on the minimap). Drive in, stop, and
+press Enter: the car is parked there (six spaces, shared by all your garages), and it comes out again repaired. On
+foot, Enter opens the garage: pick a car and drive off in it. Not while you're wanted. The cars are kept with your
+saved game.
 
 ### Wanted levels
 
@@ -147,10 +161,41 @@ a tile for each, from the easiest to the hardest: gold for those you have (what 
 first), blank for the rest, but for the next one to find (the easiest you haven't that this map has), whose name
 shows as a hint. Pick a tile (arrow keys, or tap it) to read it; for one you haven't found, Enter (or a tap on its
 line) buys what to do for it, in detail, with the game's cash: the harder it is, the dearer ($500 for the easiest,
-$12,700 for the hardest). What you have bought is kept like the achievements. The title screen shows them too, in its
+$15,900 for the hardest). What you have bought is kept like the achievements. The title screen shows them too, in its
 top right corner (H, or a tap on them, opens the page there). They are kept in your browser alone (local storage),
 and none come in a game where the debug console changed something (a new game clears that, unless god mode is still
 on). In online co-op your friend's go to their own browser.
+
+## The story: Decoherence (inner Brno)
+
+Besides the jobs from the payphones, inner Brno has a story in eight chapters and three acts. **Bára Kubitová**, a
+PhD student at FIT BUT who proves quantum circuits correct, has been sent one by the Measurement Bureau (the quantum
+police of six stars) that measures every qubit in Brno, again and again, for ever: **Project Zeno**. A watched pot
+never boils, and a city watched all the time can't change: no superposition, no tunnelling, no luck. She won't sign it
+off, the Bureau comes for her laptop, and you happen to be passing.
+
+The next chapter waits at a **ψ** on the map (and on the minimap, and a small ψ pointer at the top of the screen says
+which way and how far). Walk or drive into it, not wanted and not on a job, and a scene opens: the game pauses and the
+characters talk, each with a drawn portrait (Enter or a tap for the next line, Esc or SKIP for the rest). During a
+chapter Bára talks over the radio in a card under the minimap. Each chapter unlocks an hour of game time after the last
+one ended; if one fails (being wasted or busted fails it too), go back to its ψ and try again. A chapter pays $5,000 to
+$15,000, more the further you get, and clears your wanted level. The progress is kept with your saved game (a chapter
+in progress isn't). In online co-op it is the host's story: the guest sees the radio and the scenes, and helps.
+
+| | Chapter | Where | What you do |
+| --- | --- | --- | --- |
+| **Act I · The Bureau** | 1 · The Measurement Problem | FIT BUT, Božetěchova | Pick Bára up and get her to the Atom Array Lab with a Bureau van after you. Its detector dish collapses your superposition (X) within about forty metres: keep your distance, lose them, then arrive unseen. |
+| | 2 · Spooky Action | Špilberk | The master copy is in a case in the castle's closed courtyard, by a Bureau van. From outside the wall, entangle with the van (T) and measure the pair (T again): you swap places with it. Grab the case and swap back out with the van, now outside. Two ε charges come with the chapter. |
+| | 3 · The Labyrinth | Náměstí Svobody, the cellars | Director Měřička's drone keeps you measured, so the police never lose you (the Zeno effect). Go down a cellar hatch on foot and come up at another, then tunnel into the sealed courtyard where the Bureau's relay is (the wall is thin there), pull its plug, beat the Tunneler and tunnel back out. |
+| **Act II · P.L.A.N.C.K.** | 4 · Noon at Eleven | ÚPT's quantum clock, Petrov | In 1645 Brno rang noon at eleven and the Swedes went home. Take a parcel stamped by the quantum clock to Petrov at 11:00 sharp (early, you wait; late, it fails), with Agent Spooky on your heels; the bells ring twelve and every Bureau detector loses lock for an hour. Starts between 4:00 and 8:30; out of those hours, Enter at its ψ waits for the morning. |
+| | 5 · Grover's Vault | FIT's quantum computer, the AZ Tower | Find the PIN of the Bureau's floor with Grover's search, get to the AZ Tower before it changes, and come out with the detector plans and six stars: lose the Bureau. |
+| | 6 · Big Bang | Výstaviště | Six detector vans leave the exhibition grounds one by one. Wreck five (a rocket launcher comes with the chapter) while Big Bang leaps after you and throws cars; two getting away fails it. |
+| **Act III · Decoherence** | 7 · Bell's Theorem | Kotlářská, the Faculty of Science | Měřička tells P.L.A.N.C.K. the world is classical. Break Bell's inequality at the BELL sign with \|S\| above 2.5, with the Collapser watching; while a Bureau van is near the faculty its detector decoheres the photons and S falls flat, so wreck the vans or lead them off first. |
+| | 8 · Decoherence | the Atom Array Lab, Kraví hora | Project Zeno goes live: eight stars, the Observer's sweep. Teleport out between the entangled payphones, drive to the planetarium with P.L.A.N.C.K.'s Helicarrier beside you stunning the police on your tail, and knock out the three detectors round the dome (shoot, rocket or ram them) while Měřička hunts you in his armoured van and the dome measures you every few seconds. |
+
+Four achievements come with it: one for each act, and one for finishing all eight chapters without failing one. At the
+end Director Měřička's van goes to your garage, if there is room. The debug console's `camp <1-8>` takes you to a
+chapter's ψ, and `camp win` finishes the chapter you are in.
 
 ## Fishing
 
@@ -328,5 +373,29 @@ In Brno (in online co-op, for the host). The clock now keeps weekdays too: a gam
 - **The project due at 23:59**: from 22:45 a FIT student waits outside the Pod Palackého vrchem dorms. Stop by them, and
   get them to Božetěchova before midnight.
 - **The Formula Student car** outside the mechanical engineering faculty is the fastest thing in town.
+- **Kurt Gödel** was born in a house on Pekařská, below Špilberk: walk past it for the one achievement that cannot be
+  proven to exist.
+- **Ernst Mach** was born down the road in Chrlice, just off the map: a brown sign where the road leaves it to the
+  south. Pass it flat out and it tells you your speed in Mach (a fast car manages about Mach 0.18).
+- **Pilgram's pinnacle**: the payphone nearest the Old Town Hall is the council's. Its jobs pay a third less than
+  promised, as the council once paid Anton Pilgram for the Town Hall's gate; he bent its middle pinnacle in revenge.
+- **The Joke**: by Milan Kundera's birthplace (Purkyňova 6) a postcard lies on the orange post box. Post it (Enter):
+  "Optimism is the opium of the people!..." Somebody reads it, nobody laughs, and you get a wanted star.
+- **Closely Watched Trains**: hijack a train at Brno-Židenice, a few streets from where Bohumil Hrabal was born, and it
+  costs you a star.
+- **Ornament and Crime**: by the Adolf Loos memorial on Janáčkovo náměstí (his birthplace stood across Kounicova) a
+  sign offers free resprays. Stop by it in a car: gold with curlicues, and a wanted star for the ornament.
+- **Edison's light**: at dusk the Mahen Theatre lights up first, window by window. In 1882 Edison's bulbs made it the
+  first theatre in Europe lit by electricity. At night, walk up to Tomáš Medek's four steel bulbs on Malinovského
+  náměstí and they light up (the real ones don't); what a hot filament's glow led Max Planck to in 1900.
+  **The ultraviolet catastrophe**: press Enter there for the filament's console. ← → turn the current up and down: the
+  filament glows dull red, orange, then white, and beside it Planck's spectrum shows where the light goes (most of it
+  infrared). C switches to classical physics (Rayleigh–Jeans), whose spectrum climbs without end into the
+  ultraviolet; switch the bulb on like that and it flashes blindingly. Once a night: the police round the square are
+  dazzled for a few seconds, and lose you.
+- **Villa Tugendhat**: be there as the sun sets (17:30 to 18:30) and its onyx wall glows amber.
+- **Ignis Brunensis**: on Saturday nights from 22:00 to 22:45, fireworks over the reservoir by the dam (the bangs come
+  after the flashes, at the speed of sound). While they last the police look up, and your stars (up to five) fade
+  three times as fast.
 - **The Friday train home**: on Friday afternoons students with suitcases head for the main station; on Sunday evenings
   they come back.
