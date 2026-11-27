@@ -4088,8 +4088,9 @@ function killPlayer() {
   Q.branches = null;
   if (player.car) { const c = player.car; c.driver = null; player.x = c.x; player.y = c.y; player.car = null; }
   player.hp = 0; player.down = 4; player.downKind = 'wasted';
-  if (!lab) player.lives--;
-  ach('wasted'); bigText('WASTED', '#e74c3c', 4, lab ? 'the lesson restarts' : player.lives > 0 ? `${player.lives} ${player.lives === 1 ? 'life' : 'lives'} left` : '');
+  const armed = owned().length > 0;
+  if (!lab) { player.lives--; player.weapons = {}; player.weapon = null; } // (the guns stay with the body, as when you are busted)
+  ach('wasted'); bigText('WASTED', '#e74c3c', 4, lab ? 'the lesson restarts' : [player.lives > 0 ? `${player.lives} ${player.lives === 1 ? 'life' : 'lives'} left` : '', armed ? 'weapons lost' : ''].filter(Boolean).join(' · '));
   addDecal({ k: 'blood', x: player.x, y: player.y, r: 12 });
   if (mission && !lab) failMission('You got wasted.');
   sfx.bad();

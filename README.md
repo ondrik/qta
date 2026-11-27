@@ -105,7 +105,7 @@ again from nothing. A wall too thick, or one that hides a closed courtyard or wa
 the Physics Lab, near the Bureau's detectors, or from eight stars.
 
 Spray shops ($500) clear your wanted level (up to five stars). If you are wasted or busted you come back at the nearest hospital or
-police station, facing the street. Ramming a police car gets you at least one star, and that cruiser gives chase.
+police station, facing the street, and without your weapons. Ramming a police car gets you at least one star, and that cruiser gives chase.
 So does killing someone where a cop sees it. If a passer-by sees it instead, they phone the police (☎ over their
 head), and a few seconds later that's a star too, unless they don't live to finish the call. Three killings in quick
 succession get you a star even unseen.
